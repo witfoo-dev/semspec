@@ -343,20 +343,27 @@ func (s *TaskDispatcherScenario) stageVerifyTaskDispatches(ctx context.Context, 
 
 			for _, entry := range entries {
 				if strings.Contains(string(entry.RawData), s.planSlug) {
-					// Extract task ID from workflow trigger payload
-					// The payload structure is: BaseMessage -> payload -> data -> task_id
+					// Extract task ID from workflow trigger payload.
+					// Top-level task_id field (current), with Data blob fallback (legacy).
 					var baseMsg struct {
 						Payload struct {
-							Data json.RawMessage `json:"data"`
+							TaskID string          `json:"task_id"`
+							Data   json.RawMessage `json:"data"`
 						} `json:"payload"`
 					}
-					if err := json.Unmarshal(entry.RawData, &baseMsg); err == nil && len(baseMsg.Payload.Data) > 0 {
-						var data struct {
-							TaskID string `json:"task_id"`
+					if err := json.Unmarshal(entry.RawData, &baseMsg); err == nil {
+						taskID := baseMsg.Payload.TaskID
+						if taskID == "" && len(baseMsg.Payload.Data) > 0 {
+							var data struct {
+								TaskID string `json:"task_id"`
+							}
+							if json.Unmarshal(baseMsg.Payload.Data, &data) == nil {
+								taskID = data.TaskID
+							}
 						}
-						if err := json.Unmarshal(baseMsg.Payload.Data, &data); err == nil && data.TaskID != "" {
+						if taskID != "" {
 							taskEntries = append(taskEntries, taskEntry{
-								taskID:    data.TaskID,
+								taskID:    taskID,
 								timestamp: entry.Timestamp,
 							})
 						}

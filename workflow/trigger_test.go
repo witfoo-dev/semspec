@@ -141,6 +141,32 @@ func TestWorkflowTriggerPayload_UnmarshalNestedData(t *testing.T) {
 	}
 }
 
+func TestTriggerPayload_TopLevelWinsOverNestedData(t *testing.T) {
+	// When both top-level fields and Data blob are present, top-level wins.
+	input := `{
+		"workflow_id": "task-execution-loop",
+		"slug": "top-level-slug",
+		"task_id": "top-level-task",
+		"data": {"slug": "nested-slug", "task_id": "nested-task", "trace_id": "nested-trace"}
+	}`
+
+	var payload TriggerPayload
+	if err := json.Unmarshal([]byte(input), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if payload.Slug != "top-level-slug" {
+		t.Errorf("Slug = %q, want %q (top-level should win)", payload.Slug, "top-level-slug")
+	}
+	if payload.TaskID != "top-level-task" {
+		t.Errorf("TaskID = %q, want %q (top-level should win)", payload.TaskID, "top-level-task")
+	}
+	// TraceID is empty at top level, so Data blob fills it in
+	if payload.TraceID != "nested-trace" {
+		t.Errorf("TraceID = %q, want %q (fallback from Data)", payload.TraceID, "nested-trace")
+	}
+}
+
 // sampleTrigger returns a TriggerPayload with fields populated so tests
 // can assert nothing was dropped. Includes fields used across all workflows
 // (plan-review-loop, task-review-loop, task-execution-loop).

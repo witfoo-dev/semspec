@@ -96,6 +96,7 @@ func (p *TriggerPayload) UnmarshalJSON(data []byte) error {
 			ProjectID        string   `json:"project_id,omitempty"`
 			ScopePatterns    []string `json:"scope_patterns,omitempty"`
 			TraceID          string   `json:"trace_id,omitempty"`
+			LoopID           string   `json:"loop_id,omitempty"`
 			TaskID           string   `json:"task_id,omitempty"`
 			ContextRequestID string   `json:"context_request_id,omitempty"`
 		}
@@ -120,6 +121,9 @@ func (p *TriggerPayload) UnmarshalJSON(data []byte) error {
 			}
 			if p.TraceID == "" && nested.TraceID != "" {
 				p.TraceID = nested.TraceID
+			}
+			if p.LoopID == "" && nested.LoopID != "" {
+				p.LoopID = nested.LoopID
 			}
 			if p.TaskID == "" && nested.TaskID != "" {
 				p.TaskID = nested.TaskID
