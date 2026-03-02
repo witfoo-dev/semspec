@@ -941,21 +941,10 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *reactive.TaskDisp
 		false,                               // auto
 	)
 
-	// Add task-specific fields to the Data blob
-	taskData := map[string]any{
-		"task_id":            twc.task.ID,
-		"slug":               trigger.Slug,
-		"prompt":             developerPrompt,
-		"model":              twc.model,
-		"context_request_id": twc.contextRequestID,
-		"request_id":         trigger.RequestID,
-		"trace_id":           traceID,
-	}
-	taskDataBytes, err := json.Marshal(taskData)
-	if err != nil {
-		return fmt.Errorf("marshal task data: %w", err)
-	}
-	triggerPayload.Data = taskDataBytes
+	// Set task-execution-specific fields as top-level trigger fields
+	triggerPayload.TaskID = twc.task.ID
+	triggerPayload.Model = twc.model
+	triggerPayload.ContextRequestID = twc.contextRequestID
 
 	// Wrap in BaseMessage
 	baseMsg := message.NewBaseMessage(triggerPayload.Schema(), triggerPayload, "task-dispatcher")

@@ -93,9 +93,11 @@ func TestTaskExecutionWorkflow_AcceptTrigger(t *testing.T) {
 
 	state := &TaskExecutionState{}
 	trigger := &workflow.TriggerPayload{
-		Slug:   "my-project",
-		Prompt: "Implement feature X",
-		Data:   json.RawMessage(`{"task_id":"task-001","model":"gpt-4","context_request_id":"ctx-abc"}`),
+		Slug:             "my-project",
+		Prompt:           "Implement feature X",
+		TaskID:           "task-001",
+		Model:            "gpt-4",
+		ContextRequestID: "ctx-abc",
 	}
 
 	ctx := &reactiveEngine.RuleContext{
@@ -159,8 +161,8 @@ func TestTaskExecutionWorkflow_AcceptTrigger_SecondTriggerPreservesID(t *testing
 	state.WorkflowID = "task-execution-loop"
 
 	trigger := &workflow.TriggerPayload{
-		Slug: "existing",
-		Data: json.RawMessage(`{"task_id":"task-001"}`),
+		Slug:   "existing",
+		TaskID: "task-001",
 	}
 	ctx := &reactiveEngine.RuleContext{State: state, Message: trigger}
 

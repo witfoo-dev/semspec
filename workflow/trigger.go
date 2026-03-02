@@ -37,7 +37,7 @@ type TriggerPayload struct {
 	// Request tracking
 	RequestID string `json:"request_id,omitempty"`
 
-	// Semspec-specific fields (populated from Data blob)
+	// Semspec-specific fields
 	Slug          string   `json:"slug,omitempty"`
 	Title         string   `json:"title,omitempty"`
 	Description   string   `json:"description,omitempty"`
@@ -47,7 +47,11 @@ type TriggerPayload struct {
 	TraceID       string   `json:"trace_id,omitempty"`
 	LoopID        string   `json:"loop_id,omitempty"`
 
-	// Data holds any additional custom fields as raw JSON
+	// Task-execution-specific fields
+	TaskID           string `json:"task_id,omitempty"`
+	ContextRequestID string `json:"context_request_id,omitempty"`
+
+	// Data holds any additional custom fields as raw JSON (kept for extensibility)
 	Data json.RawMessage `json:"data,omitempty"`
 }
 
@@ -82,38 +86,46 @@ func (p *TriggerPayload) UnmarshalJSON(data []byte) error {
 	}
 
 	// If semspec-specific fields are empty but Data is present,
-	// try to extract them from the Data blob (handles nested case)
-	if p.Slug == "" && len(p.Data) > 0 {
+	// try to extract them from the Data blob (backward compat with stored KV executions)
+	if len(p.Data) > 0 {
 		var nested struct {
-			Slug          string   `json:"slug,omitempty"`
-			Title         string   `json:"title,omitempty"`
-			Description   string   `json:"description,omitempty"`
-			Auto          bool     `json:"auto,omitempty"`
-			ProjectID     string   `json:"project_id,omitempty"`
-			ScopePatterns []string `json:"scope_patterns,omitempty"`
-			TraceID       string   `json:"trace_id,omitempty"`
+			Slug             string   `json:"slug,omitempty"`
+			Title            string   `json:"title,omitempty"`
+			Description      string   `json:"description,omitempty"`
+			Auto             bool     `json:"auto,omitempty"`
+			ProjectID        string   `json:"project_id,omitempty"`
+			ScopePatterns    []string `json:"scope_patterns,omitempty"`
+			TraceID          string   `json:"trace_id,omitempty"`
+			TaskID           string   `json:"task_id,omitempty"`
+			ContextRequestID string   `json:"context_request_id,omitempty"`
 		}
 		if err := json.Unmarshal(p.Data, &nested); err == nil {
-			if nested.Slug != "" {
+			if p.Slug == "" && nested.Slug != "" {
 				p.Slug = nested.Slug
 			}
-			if nested.Title != "" {
+			if p.Title == "" && nested.Title != "" {
 				p.Title = nested.Title
 			}
-			if nested.Description != "" {
+			if p.Description == "" && nested.Description != "" {
 				p.Description = nested.Description
 			}
-			if nested.Auto {
+			if !p.Auto && nested.Auto {
 				p.Auto = nested.Auto
 			}
-			if nested.ProjectID != "" {
+			if p.ProjectID == "" && nested.ProjectID != "" {
 				p.ProjectID = nested.ProjectID
 			}
-			if len(nested.ScopePatterns) > 0 {
+			if len(p.ScopePatterns) == 0 && len(nested.ScopePatterns) > 0 {
 				p.ScopePatterns = nested.ScopePatterns
 			}
-			if nested.TraceID != "" && p.TraceID == "" {
+			if p.TraceID == "" && nested.TraceID != "" {
 				p.TraceID = nested.TraceID
+			}
+			if p.TaskID == "" && nested.TaskID != "" {
+				p.TaskID = nested.TaskID
+			}
+			if p.ContextRequestID == "" && nested.ContextRequestID != "" {
+				p.ContextRequestID = nested.ContextRequestID
 			}
 		}
 	}
@@ -123,31 +135,9 @@ func (p *TriggerPayload) UnmarshalJSON(data []byte) error {
 // WorkflowTriggerPayload is an alias for TriggerPayload for backward compatibility.
 type WorkflowTriggerPayload = TriggerPayload //revive:disable-line
 
-// MarshalTriggerData creates a json.RawMessage containing semspec-specific
-// workflow fields. This is used when sending triggers via semstreams'
-// TriggerPayload.Data field.
-func MarshalTriggerData(slug, title, description, traceID, projectID string, scopePatterns []string, auto bool) json.RawMessage {
-	data := map[string]any{
-		"slug":        slug,
-		"title":       title,
-		"description": description,
-		"trace_id":    traceID,
-	}
-	if projectID != "" {
-		data["project_id"] = projectID
-	}
-	if len(scopePatterns) > 0 {
-		data["scope_patterns"] = scopePatterns
-	}
-	if auto {
-		data["auto"] = auto
-	}
-	blob, _ := json.Marshal(data)
-	return blob
-}
-
 // NewSemstreamsTrigger creates a TriggerPayload with semspec fields populated
-// both as top-level fields and in the Data blob for backward compatibility.
+// as top-level fields. The Data blob is no longer populated — the reactive
+// engine reads all fields from the top level.
 func NewSemstreamsTrigger(workflowID, role, prompt, requestID, slug, title, description, traceID, projectID string, scopePatterns []string, auto bool) *TriggerPayload {
 	return &TriggerPayload{
 		WorkflowID:    workflowID,
@@ -161,7 +151,6 @@ func NewSemstreamsTrigger(workflowID, role, prompt, requestID, slug, title, desc
 		ProjectID:     projectID,
 		ScopePatterns: scopePatterns,
 		Auto:          auto,
-		Data:          MarshalTriggerData(slug, title, description, traceID, projectID, scopePatterns, auto),
 	}
 }
 

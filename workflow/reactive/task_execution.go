@@ -267,8 +267,7 @@ func BuildTaskExecutionLoopWorkflow(stateBucket string) *reactiveEngine.Definiti
 				if !ok {
 					return ""
 				}
-				taskID := extractTaskIDFromTrigger(trigger)
-				return "task-execution." + trigger.Slug + "." + taskID
+				return "task-execution." + trigger.Slug + "." + trigger.TaskID
 			}).
 			When("always", reactiveEngine.Always()).
 			Mutate(taskExecAcceptTrigger).
@@ -438,22 +437,6 @@ func BuildTaskExecutionLoopWorkflow(stateBucket string) *reactiveEngine.Definiti
 // Helper: extract task_id from trigger Data blob
 // ---------------------------------------------------------------------------
 
-// extractTaskIDFromTrigger extracts the task_id from the trigger's Data blob.
-// The task-dispatcher encodes task_id in the Data JSON since TriggerPayload
-// does not have a dedicated TaskID field.
-func extractTaskIDFromTrigger(trigger *workflow.TriggerPayload) string {
-	if len(trigger.Data) == 0 {
-		return ""
-	}
-	var data struct {
-		TaskID string `json:"task_id"`
-	}
-	if err := json.Unmarshal(trigger.Data, &data); err != nil {
-		return ""
-	}
-	return data.TaskID
-}
-
 // ---------------------------------------------------------------------------
 // Mutators
 // ---------------------------------------------------------------------------
@@ -471,31 +454,21 @@ var taskExecAcceptTrigger reactiveEngine.StateMutatorFunc = func(ctx *reactiveEn
 		return fmt.Errorf("accept-trigger: expected *workflow.TriggerPayload, got %T", ctx.Message)
 	}
 
-	// Extract task_id from the Data blob.
-	taskID := extractTaskIDFromTrigger(trigger)
-	if taskID == "" {
-		return fmt.Errorf("accept-trigger: task_id missing from trigger data")
-	}
-
-	// Extract additional task-execution-specific fields from Data.
-	var taskData struct {
-		Model            string `json:"model"`
-		ContextRequestID string `json:"context_request_id"`
-	}
-	if len(trigger.Data) > 0 {
-		_ = json.Unmarshal(trigger.Data, &taskData)
+	// Read task-execution-specific fields from top-level trigger fields.
+	if trigger.TaskID == "" {
+		return fmt.Errorf("accept-trigger: task_id missing from trigger")
 	}
 
 	// Populate state from trigger fields.
 	state.Slug = trigger.Slug
-	state.TaskID = taskID
+	state.TaskID = trigger.TaskID
 	state.Prompt = trigger.Prompt
-	state.Model = taskData.Model
-	state.ContextRequestID = taskData.ContextRequestID
+	state.Model = trigger.Model
+	state.ContextRequestID = trigger.ContextRequestID
 
 	// Initialise execution metadata on first trigger only.
 	if state.ID == "" {
-		state.ID = "task-execution." + trigger.Slug + "." + taskID
+		state.ID = "task-execution." + trigger.Slug + "." + trigger.TaskID
 		state.WorkflowID = TaskExecutionLoopWorkflowID
 		state.Status = reactiveEngine.StatusRunning
 		now := time.Now()

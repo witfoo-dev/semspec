@@ -157,8 +157,7 @@ func sampleTrigger() TriggerPayload {
 		Description:   "Add a goodbye endpoint that returns a farewell message",
 		ProjectID:     "proj-42",
 		ScopePatterns: []string{"src/**/*.go"},
-		// Data blob includes task-execution-loop fields not on the struct.
-		Data: json.RawMessage(`{"task_id":"task.add-goodbye-endpoint.1"}`),
+		TaskID:        "task.add-goodbye-endpoint.1",
 	}
 }
 
@@ -203,36 +202,6 @@ func TestTriggerPayload_AllFieldsFlatten(t *testing.T) {
 	}
 }
 
-func TestMarshalTriggerData(t *testing.T) {
-	data := MarshalTriggerData(
-		"test-slug",
-		"Test Title",
-		"Test Description",
-		"trace-123",
-		"proj-456",
-		[]string{"src/**/*.go"},
-		true,
-	)
-
-	var parsed map[string]any
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-
-	if parsed["slug"] != "test-slug" {
-		t.Errorf("slug = %q, want %q", parsed["slug"], "test-slug")
-	}
-	if parsed["title"] != "Test Title" {
-		t.Errorf("title = %q, want %q", parsed["title"], "Test Title")
-	}
-	if parsed["trace_id"] != "trace-123" {
-		t.Errorf("trace_id = %q, want %q", parsed["trace_id"], "trace-123")
-	}
-	if parsed["auto"] != true {
-		t.Errorf("auto = %v, want true", parsed["auto"])
-	}
-}
-
 func TestNewSemstreamsTrigger(t *testing.T) {
 	trigger := NewSemstreamsTrigger(
 		"plan-review-loop",
@@ -257,17 +226,19 @@ func TestNewSemstreamsTrigger(t *testing.T) {
 	if trigger.RequestID != "req-123" {
 		t.Errorf("RequestID = %q, want %q", trigger.RequestID, "req-123")
 	}
+	if trigger.Slug != "test-slug" {
+		t.Errorf("Slug = %q, want %q", trigger.Slug, "test-slug")
+	}
+	if trigger.TraceID != "trace-456" {
+		t.Errorf("TraceID = %q, want %q", trigger.TraceID, "trace-456")
+	}
+	if trigger.ProjectID != "proj-789" {
+		t.Errorf("ProjectID = %q, want %q", trigger.ProjectID, "proj-789")
+	}
 
-	// Verify Data blob contains correct fields
-	var data map[string]any
-	if err := json.Unmarshal(trigger.Data, &data); err != nil {
-		t.Fatalf("failed to unmarshal Data: %v", err)
-	}
-	if data["slug"] != "test-slug" {
-		t.Errorf("Data.slug = %q, want %q", data["slug"], "test-slug")
-	}
-	if data["trace_id"] != "trace-456" {
-		t.Errorf("Data.trace_id = %q, want %q", data["trace_id"], "trace-456")
+	// Verify Data blob is NOT populated (migration: all fields are top-level now)
+	if trigger.Data != nil {
+		t.Errorf("Data should be nil, got %s", string(trigger.Data))
 	}
 }
 
@@ -311,6 +282,12 @@ func simulateMergedPayload(t *testing.T, trigger *TriggerPayload) map[string]any
 	}
 	if len(trigger.ScopePatterns) > 0 {
 		result["scope_patterns"] = trigger.ScopePatterns
+	}
+	if trigger.TaskID != "" {
+		result["task_id"] = trigger.TaskID
+	}
+	if trigger.ContextRequestID != "" {
+		result["context_request_id"] = trigger.ContextRequestID
 	}
 
 	// Step 2: Overlay ONLY the fields that semstreams TriggerPayload knows.
