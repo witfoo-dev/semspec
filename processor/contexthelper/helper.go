@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
@@ -30,6 +31,7 @@ type Helper struct {
 	streamName    string
 
 	// JetStream consumer for responses (replaces KV polling)
+	started   atomic.Bool
 	pendingMu sync.Mutex
 	pending   map[string]chan *contextbuilder.ContextBuildResponse
 }
@@ -39,10 +41,6 @@ type Config struct {
 	// SubjectPrefix is the base subject for context build requests.
 	// Default: "context.build"
 	SubjectPrefix string
-
-	// ResponseBucket is kept for backward-compat config parsing but unused.
-	// Deprecated: responses are received via JetStream, not KV.
-	ResponseBucket string
 
 	// Timeout is the maximum time to wait for a context response.
 	// Default: 30s
@@ -102,6 +100,8 @@ func (h *Helper) Start(ctx context.Context) error {
 		return fmt.Errorf("start context response consumer on %s: %w", h.streamName, err)
 	}
 
+	h.started.Store(true)
+
 	h.logger.Debug("Context helper started JetStream consumer",
 		"source", h.sourceName,
 		"stream", h.streamName,
@@ -138,17 +138,21 @@ func (h *Helper) handleResponse(msg jetstream.Msg) {
 	// Parse BaseMessage-wrapped response
 	resp, err := parseBaseMessageResponse(msg.Data())
 	if err != nil {
-		h.logger.Warn("Failed to parse context response",
+		h.logger.Warn("Failed to parse context response, delivering error to caller",
 			"request_id", requestID,
 			"error", err)
-		msg.Ack()
-		return
+		// Deliver an error response so the caller fast-fails instead of waiting for timeout.
+		resp = &contextbuilder.ContextBuildResponse{
+			RequestID: requestID,
+			Error:     fmt.Sprintf("parse context response: %v", err),
+		}
 	}
 
-	// Deliver response — non-blocking send to avoid deadlock if channel is already closed.
+	// Deliver response — non-blocking send; log if channel is full (duplicate response).
 	select {
 	case ch <- resp:
 	default:
+		h.logger.Debug("Duplicate context response dropped", "request_id", requestID)
 	}
 
 	msg.Ack()
@@ -174,8 +178,8 @@ func parseBaseMessageResponse(data []byte) (*contextbuilder.ContextBuildResponse
 // It publishes a request to context.build.<task_type> and waits for a response
 // on the JetStream context.built.<requestID> subject.
 func (h *Helper) BuildContext(ctx context.Context, req *contextbuilder.ContextBuildRequest) (*contextbuilder.ContextBuildResponse, error) {
-	if req.RequestID == "" {
-		req.RequestID = uuid.New().String()
+	if !h.started.Load() {
+		return nil, fmt.Errorf("contexthelper: Start() must be called before BuildContext()")
 	}
 
 	ctxTimeout, cancel := context.WithTimeout(ctx, h.timeout)
@@ -186,6 +190,8 @@ func (h *Helper) BuildContext(ctx context.Context, req *contextbuilder.ContextBu
 	// Use retry for transient failures (network issues, temporary unavailability)
 	retryConfig := retry.DefaultConfig()
 	err := retry.Do(ctxTimeout, retryConfig, func() error {
+		// Generate a fresh RequestID per attempt so the pending channel is clean.
+		req.RequestID = uuid.New().String()
 		resp, err := h.buildContextOnce(ctxTimeout, req)
 		if err != nil {
 			return err // retry.NonRetryable errors won't be retried
