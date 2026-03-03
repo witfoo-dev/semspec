@@ -146,6 +146,9 @@ const (
 
 	// CheckCategoryFormat validates code formatting.
 	CheckCategoryFormat CheckCategory = "format"
+
+	// CheckCategorySetup installs dependencies before other checks run.
+	CheckCategorySetup CheckCategory = "setup"
 )
 
 // Standards is the top-level structure written to .semspec/standards.json.

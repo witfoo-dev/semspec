@@ -1064,6 +1064,74 @@ func TestDetect_MonorepoSubdirectories(t *testing.T) {
 			t.Error("expected README.md in existing docs")
 		}
 	})
+
+	t.Run("checklist working_dir set for subdirectory languages", func(t *testing.T) {
+		for _, check := range result.ProposedChecklist {
+			switch check.Name {
+			case "go-build", "go-vet":
+				if check.WorkingDir != "api" {
+					t.Errorf("check %q working_dir = %q, want %q", check.Name, check.WorkingDir, "api")
+				}
+			case "go-test":
+				// Test-category checks run from root to discover tests wherever the LLM places them.
+				if check.WorkingDir != "" {
+					t.Errorf("check %q working_dir = %q, want %q (test checks run from root)", check.Name, check.WorkingDir, "")
+				}
+			case "svelte-check":
+				if check.WorkingDir != "ui" {
+					t.Errorf("check %q working_dir = %q, want %q", check.Name, check.WorkingDir, "ui")
+				}
+			}
+		}
+	})
+}
+
+// TestDetect_PythonSubdirectory verifies that a Python project in a subdirectory
+// gets WorkingDir set on proposed checks.
+func TestDetect_PythonSubdirectory(t *testing.T) {
+	tmp := t.TempDir()
+	writeFixtureFile(t, tmp, "api/requirements.txt", "flask==3.0.0\n")
+	writeFixtureFile(t, tmp, "api/app.py", "from flask import Flask\napp = Flask(__name__)\n")
+	writeFixtureFile(t, tmp, "README.md", "# Hello\n")
+
+	detector := NewFileSystemDetector()
+	result, err := detector.Detect(tmp)
+	if err != nil {
+		t.Fatalf("Detect() error = %v", err)
+	}
+
+	t.Run("detects Python from api/requirements.txt", func(t *testing.T) {
+		if !hasLanguage(result, "Python") {
+			t.Fatalf("expected Python detected, got: %v", languageNames(result))
+		}
+		if result.Languages[0].Marker != filepath.Join("api", "requirements.txt") {
+			t.Errorf("marker = %q, want %q", result.Languages[0].Marker, filepath.Join("api", "requirements.txt"))
+		}
+	})
+
+	t.Run("pip-install check has working_dir=api", func(t *testing.T) {
+		for _, check := range result.ProposedChecklist {
+			if check.Name == "pip-install" {
+				if check.WorkingDir != "api" {
+					t.Errorf("pip-install working_dir = %q, want %q", check.WorkingDir, "api")
+				}
+				return
+			}
+		}
+		t.Error("pip-install check not found in proposed checklist")
+	})
+
+	t.Run("pytest check runs from root (test category)", func(t *testing.T) {
+		for _, check := range result.ProposedChecklist {
+			if check.Name == "pytest" {
+				if check.WorkingDir != "" {
+					t.Errorf("pytest working_dir = %q, want %q (test checks run from root)", check.WorkingDir, "")
+				}
+				return
+			}
+		}
+		t.Error("pytest check not found in proposed checklist")
+	})
 }
 
 // TestDetect_RootTakesPriorityOverSubdir verifies that a root-level language marker

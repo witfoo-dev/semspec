@@ -20,12 +20,10 @@ Before reviewing, you MUST gather context:
    Use workflow_query_graph to find applicable standards:
    ` + "```graphql" + `
    {
-     entities(filter: { predicatePrefix: "source.doc" }) {
-       id
-       triples { predicate object }
-     }
+     entitiesByPredicate(predicate: "source.doc")
    }
    ` + "```" + `
+   Then hydrate each returned entity ID with: { entity(id: "...") { id triples { predicate object } } }
    Filter results where source.doc.applies_to matches the modified files.
    These SOPs are your review checklist.
 

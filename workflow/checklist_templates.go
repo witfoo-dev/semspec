@@ -16,9 +16,11 @@ type checkTemplate struct {
 }
 
 // toCheck converts a template to a Check, applying any override for WorkingDir.
+// Test-category checks ignore the override so they run from the repo root,
+// allowing them to discover tests wherever the LLM places them.
 func (t checkTemplate) toCheck(workingDir string) Check {
 	wd := t.WorkingDir
-	if workingDir != "" {
+	if workingDir != "" && t.Category != CheckCategoryTest {
 		wd = workingDir
 	}
 	return Check{
@@ -184,7 +186,18 @@ var nodeJestTemplate = checkTemplate{
 // --- Python templates --------------------------------------------------------
 
 // pythonBaseTemplates are the minimum checks for any Python project.
+// pip-install runs first so that project dependencies (e.g. flask) are
+// available when pytest collects and imports test modules.
 var pythonBaseTemplates = []checkTemplate{
+	{
+		Name:        "pip-install",
+		Command:     "pip install --break-system-packages -q -r requirements.txt",
+		Trigger:     []string{"requirements.txt", "*.py"},
+		Category:    CheckCategorySetup,
+		Required:    true,
+		Timeout:     "120s",
+		Description: "Install Python dependencies from requirements.txt",
+	},
 	{
 		Name:        "pytest",
 		Command:     "python -m pytest .",
