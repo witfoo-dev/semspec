@@ -30,6 +30,13 @@ paths:
             description: Check content against all constitution rules and return violations and warnings
             tags:
                 - Constitution
+            requestBody:
+                description: Content to check with optional context metadata
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/HTTPCheckRequest'
             responses:
                 "200":
                     description: Check result with pass/fail status, violations, and warnings
@@ -89,6 +96,136 @@ paths:
                                 $ref: '#/components/schemas/SectionRulesResponse'
                 "400":
                     description: Invalid section name
+    /api/project/approve:
+        post:
+            summary: Approve configuration file
+            description: Sets the approved_at timestamp on the specified configuration file
+            tags:
+                - Project
+            requestBody:
+                description: Name of the configuration file to approve
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ApproveRequest'
+            responses:
+                "200":
+                    description: Approval result with timestamp and overall approval state
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ApproveResponse'
+                "400":
+                    description: Invalid file name
+                "404":
+                    description: Configuration file not found
+    /api/project/detect:
+        post:
+            summary: Detect project stack
+            description: Runs filesystem-based stack detection and returns the detected languages, frameworks, tools, and documentation files
+            tags:
+                - Project
+            responses:
+                "200":
+                    description: Detected project stack
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DetectionResult'
+                "500":
+                    description: Detection failed
+    /api/project/generate-standards:
+        post:
+            summary: Generate project standards
+            description: Generates a set of project standards rules based on the detected stack and existing documentation
+            tags:
+                - Project
+            requestBody:
+                description: Detection result and existing documentation content
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/GenerateStandardsRequest'
+            responses:
+                "200":
+                    description: Generated standards rules with token estimate
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GenerateStandardsResponse'
+    /api/project/init:
+        post:
+            summary: Initialize project
+            description: Writes confirmed project metadata, checklist, and standards to disk under .semspec/
+            tags:
+                - Project
+            requestBody:
+                description: Confirmed project metadata, checklist, and standards
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/InitRequest'
+            responses:
+                "200":
+                    description: List of files written during initialization
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/InitResponse'
+                "400":
+                    description: Invalid request (missing required fields)
+                "500":
+                    description: Failed to write configuration files
+    /api/project/scaffold:
+        post:
+            summary: Scaffold project files
+            description: Creates marker files for the selected languages and frameworks
+            tags:
+                - Project
+            requestBody:
+                description: Selected languages and frameworks to scaffold
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ScaffoldRequest'
+            responses:
+                "200":
+                    description: List of files created during scaffolding
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ScaffoldResponse'
+                "400":
+                    description: Missing languages in request
+    /api/project/status:
+        get:
+            summary: Get project status
+            description: Returns the current project initialization status, including which config files exist and their approval state
+            tags:
+                - Project
+            responses:
+                "200":
+                    description: Current project initialization status
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/InitStatus'
+    /api/project/wizard:
+        get:
+            summary: Get wizard options
+            description: Returns the supported languages and frameworks available in the setup wizard
+            tags:
+                - Project
+            responses:
+                "200":
+                    description: Supported languages and frameworks for the wizard
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/WizardResponse'
     /config/{name}:
         get:
             summary: Get component configuration
@@ -198,6 +335,13 @@ paths:
             description: Creates a new visual flow
             tags:
                 - Flows
+            requestBody:
+                description: Flow definition to create
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/Flow'
             responses:
                 "201":
                     description: Flow created
@@ -234,6 +378,13 @@ paths:
             description: Updates an existing flow
             tags:
                 - Flows
+            requestBody:
+                description: Updated flow definition
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/Flow'
             responses:
                 "200":
                     description: Flow updated
@@ -549,6 +700,150 @@ paths:
                                 type: object
                 "400":
                     description: Invalid trace ID format
+    /trajectory-api/calls/{request_id}:
+        get:
+            summary: Get call record
+            description: Returns the full LLM call record for a specific request, including messages, token usage, and timing
+            tags:
+                - Trajectory
+            parameters:
+                - name: request_id
+                  in: path
+                  required: true
+                  description: LLM request identifier returned in the call response
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Full LLM call record
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CallRecord'
+                "404":
+                    description: Call record not found
+                "503":
+                    description: Trajectory service unavailable
+    /trajectory-api/context-stats:
+        get:
+            summary: Get context utilization stats
+            description: Returns context window utilization metrics for a trace or workflow. At least one of trace_id or workflow must be provided.
+            tags:
+                - Trajectory
+            parameters:
+                - name: trace_id
+                  in: query
+                  description: Filter stats to a specific trace
+                  schema:
+                    type: string
+                - name: workflow
+                  in: query
+                  description: Filter stats to a specific workflow slug
+                  schema:
+                    type: string
+                - name: capability
+                  in: query
+                  description: Filter stats to a specific capability (e.g. planning, coding)
+                  schema:
+                    type: string
+                - name: format
+                  in: query
+                  description: 'Response format: "summary" (default) or "json" (includes full entry details)'
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Context utilization statistics with per-capability breakdown
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ContextStats'
+                "400":
+                    description: Neither trace_id nor workflow query parameter was provided
+                "503":
+                    description: Trajectory service unavailable
+    /trajectory-api/loops/{loop_id}:
+        get:
+            summary: Get loop trajectory
+            description: Returns the LLM call trajectory for a specific agent loop, including token usage and timing per step
+            tags:
+                - Trajectory
+            parameters:
+                - name: loop_id
+                  in: path
+                  required: true
+                  description: Agent loop identifier
+                  schema:
+                    type: string
+                - name: format
+                  in: query
+                  description: 'Response format: "summary" (default) or "json" (includes full entry details)'
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Trajectory for the given loop
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Trajectory'
+                "404":
+                    description: Loop not found
+                "503":
+                    description: Trajectory service unavailable
+    /trajectory-api/traces/{trace_id}:
+        get:
+            summary: Get trace trajectory
+            description: Returns aggregated LLM call trajectory for all loops within a trace
+            tags:
+                - Trajectory
+            parameters:
+                - name: trace_id
+                  in: path
+                  required: true
+                  description: Trace correlation identifier
+                  schema:
+                    type: string
+                - name: format
+                  in: query
+                  description: 'Response format: "summary" (default) or "json" (includes full entry details)'
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Aggregated trajectory for the given trace
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Trajectory'
+                "404":
+                    description: Trace not found
+                "503":
+                    description: Trajectory service unavailable
+    /trajectory-api/workflows/{slug}:
+        get:
+            summary: Get workflow trajectory
+            description: Returns LLM call trajectory aggregated across all phases and agent loops for an entire workflow
+            tags:
+                - Trajectory
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Workflow-level trajectory with phase breakdown and aggregate metrics
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/WorkflowTrajectory'
+                "404":
+                    description: Workflow not found
+                "503":
+                    description: Trajectory service unavailable
     /types:
         get:
             summary: List available component types
@@ -618,6 +913,13 @@ paths:
             description: Creates a new development plan from a description and triggers the planner agent to generate Goal, Context, and Scope
             tags:
                 - Plans
+            requestBody:
+                description: Plan description
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreatePlanRequest'
             responses:
                 "200":
                     description: Plan already exists, returns current state
@@ -653,6 +955,53 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/PlanWithStatus'
+                "404":
+                    description: Plan not found
+        patch:
+            summary: Update plan
+            description: Partially updates a plan's title, goal, or context
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            requestBody:
+                description: Fields to update (all optional)
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdatePlanHTTPRequest'
+            responses:
+                "200":
+                    description: Plan updated
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PlanWithStatus'
+                "400":
+                    description: Invalid request body
+                "404":
+                    description: Plan not found
+        delete:
+            summary: Delete plan
+            description: Deletes a plan and all associated tasks and phases
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: Plan deleted
                 "404":
                     description: Plan not found
     /workflow-api/plans/{slug}/execute:
@@ -715,6 +1064,13 @@ paths:
                   description: URL-friendly plan identifier
                   schema:
                     type: string
+            requestBody:
+                description: Phase creation request
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreatePhaseHTTPRequest'
             responses:
                 "201":
                     description: Phase created successfully
@@ -754,9 +1110,9 @@ paths:
                                 $ref: '#/components/schemas/Phase'
                 "404":
                     description: Phase not found
-        put:
+        patch:
             summary: Update phase
-            description: Updates a phase's name, description, dependencies, or agent config
+            description: Partially updates a phase's name, description, dependencies, or agent config
             tags:
                 - Phases
             parameters:
@@ -772,6 +1128,13 @@ paths:
                   description: Phase identifier
                   schema:
                     type: string
+            requestBody:
+                description: Fields to update (all optional)
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdatePhaseHTTPRequest'
             responses:
                 "200":
                     description: Phase updated
@@ -825,6 +1188,12 @@ paths:
                   description: Phase identifier
                   schema:
                     type: string
+            requestBody:
+                description: Optional approval metadata
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ApprovePhaseHTTPRequest'
             responses:
                 "200":
                     description: Phase approved
@@ -853,6 +1222,13 @@ paths:
                   description: Phase identifier
                   schema:
                     type: string
+            requestBody:
+                description: Rejection reason
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RejectPhaseHTTPRequest'
             responses:
                 "200":
                     description: Phase rejected
@@ -955,6 +1331,13 @@ paths:
                   description: URL-friendly plan identifier
                   schema:
                     type: string
+            requestBody:
+                description: Ordered list of phase IDs
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ReorderPhasesHTTPRequest'
             responses:
                 "200":
                     description: Phases reordered, returns updated phases
@@ -1034,6 +1417,218 @@ paths:
                                 type: array
                                 items:
                                     $ref: '#/components/schemas/Task'
+        post:
+            summary: Create task
+            description: Creates a new task within the plan
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            requestBody:
+                description: Task creation request
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateTaskHTTPRequest'
+            responses:
+                "201":
+                    description: Task created
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Task'
+                "400":
+                    description: Invalid request body
+                "404":
+                    description: Plan not found
+    /workflow-api/plans/{slug}/tasks/{taskId}:
+        get:
+            summary: Get task
+            description: Returns a single task by ID
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+                - name: taskId
+                  in: path
+                  required: true
+                  description: Task identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Task details
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Task'
+                "404":
+                    description: Task not found
+        patch:
+            summary: Update task
+            description: Partially updates a task's description, type, acceptance criteria, files, or dependencies
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+                - name: taskId
+                  in: path
+                  required: true
+                  description: Task identifier
+                  schema:
+                    type: string
+            requestBody:
+                description: Fields to update (all optional)
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateTaskHTTPRequest'
+            responses:
+                "200":
+                    description: Task updated
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Task'
+                "400":
+                    description: Invalid request body
+                "404":
+                    description: Task not found
+        delete:
+            summary: Delete task
+            description: Deletes a task from the plan
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+                - name: taskId
+                  in: path
+                  required: true
+                  description: Task identifier
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: Task deleted
+                "404":
+                    description: Task not found
+    /workflow-api/plans/{slug}/tasks/{taskId}/approve:
+        post:
+            summary: Approve task
+            description: Approves a single task for execution
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+                - name: taskId
+                  in: path
+                  required: true
+                  description: Task identifier
+                  schema:
+                    type: string
+            requestBody:
+                description: Optional approval metadata
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ApproveTaskRequest'
+            responses:
+                "200":
+                    description: Task approved
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Task'
+                "404":
+                    description: Task not found
+    /workflow-api/plans/{slug}/tasks/{taskId}/reject:
+        post:
+            summary: Reject task
+            description: Rejects a task with a reason
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+                - name: taskId
+                  in: path
+                  required: true
+                  description: Task identifier
+                  schema:
+                    type: string
+            requestBody:
+                description: Rejection reason
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RejectTaskRequest'
+            responses:
+                "200":
+                    description: Task rejected
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Task'
+                "400":
+                    description: Rejection reason required
+                "404":
+                    description: Task not found
+    /workflow-api/plans/{slug}/tasks/approve:
+        post:
+            summary: Approve all tasks
+            description: Bulk-approves all pending tasks for a plan
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: All tasks approved, returns updated tasks
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/Task'
+                "404":
+                    description: Plan not found
     /workflow-api/plans/{slug}/tasks/generate:
         post:
             summary: Generate tasks
@@ -1086,7 +1681,52 @@ components:
                 - role
                 - state
             type: object
+        AggregateMetrics:
+            properties:
+                call_count:
+                    type: integer
+                duration_ms:
+                    type: integer
+                tokens_in:
+                    type: integer
+                tokens_out:
+                    type: integer
+                total_tokens:
+                    type: integer
+            required:
+                - tokens_in
+                - tokens_out
+                - total_tokens
+                - call_count
+                - duration_ms
+            type: object
         ApprovePhaseHTTPRequest:
+            properties:
+                approved_by:
+                    type: string
+            type: object
+        ApproveRequest:
+            properties:
+                file:
+                    type: string
+            required:
+                - file
+            type: object
+        ApproveResponse:
+            properties:
+                all_approved:
+                    type: boolean
+                approved_at:
+                    format: date-time
+                    type: string
+                file:
+                    type: string
+            required:
+                - file
+                - approved_at
+                - all_approved
+            type: object
+        ApproveTaskRequest:
             properties:
                 approved_by:
                     type: string
@@ -1106,6 +1746,313 @@ components:
                 - request_id
                 - trace_id
                 - message
+            type: object
+        CallContextDetail:
+            properties:
+                budget:
+                    type: integer
+                capability:
+                    type: string
+                model:
+                    type: string
+                request_id:
+                    type: string
+                timestamp:
+                    format: date-time
+                    type: string
+                trace_id:
+                    type: string
+                truncated:
+                    type: boolean
+                used:
+                    type: integer
+                utilization:
+                    type: number
+            required:
+                - request_id
+                - capability
+                - budget
+                - used
+                - utilization
+                - truncated
+                - timestamp
+            type: object
+        CallRecord:
+            properties:
+                capability:
+                    type: string
+                completed_at:
+                    format: date-time
+                    type: string
+                completion_tokens:
+                    type: integer
+                context_budget:
+                    type: integer
+                context_truncated:
+                    type: boolean
+                duration_ms:
+                    type: integer
+                error:
+                    type: string
+                fallbacks_used:
+                    items:
+                        type: string
+                    type: array
+                finish_reason:
+                    type: string
+                loop_id:
+                    type: string
+                messages:
+                    items:
+                        properties:
+                            content:
+                                type: string
+                            role:
+                                type: string
+                            tool_call_id:
+                                type: string
+                            tool_calls:
+                                items:
+                                    properties:
+                                        arguments:
+                                            additionalProperties: {}
+                                            type: object
+                                        id:
+                                            type: string
+                                        name:
+                                            type: string
+                                    required:
+                                        - id
+                                        - name
+                                        - arguments
+                                    type: object
+                                type: array
+                        required:
+                            - role
+                        type: object
+                    type: array
+                messages_count:
+                    type: integer
+                model:
+                    type: string
+                prompt_tokens:
+                    type: integer
+                provider:
+                    type: string
+                request_id:
+                    type: string
+                response:
+                    type: string
+                response_preview:
+                    type: string
+                retries:
+                    type: integer
+                started_at:
+                    format: date-time
+                    type: string
+                storage_ref:
+                    nullable: true
+                    properties:
+                        content_type:
+                            type: string
+                        key:
+                            type: string
+                        size:
+                            type: integer
+                        storage_instance:
+                            type: string
+                    required:
+                        - storage_instance
+                        - key
+                        - content_type
+                    type: object
+                total_tokens:
+                    type: integer
+                trace_id:
+                    type: string
+            required:
+                - request_id
+                - trace_id
+                - capability
+                - model
+                - provider
+                - messages
+                - response
+                - prompt_tokens
+                - completion_tokens
+                - total_tokens
+                - finish_reason
+                - started_at
+                - completed_at
+                - duration_ms
+                - retries
+            type: object
+        CapabilityContextStats:
+            properties:
+                avg_budget:
+                    type: integer
+                avg_used:
+                    type: integer
+                avg_utilization:
+                    type: number
+                call_count:
+                    type: integer
+                max_utilization:
+                    type: number
+                truncation_rate:
+                    type: number
+            required:
+                - call_count
+                - avg_utilization
+                - truncation_rate
+            type: object
+        CapabilityMetrics:
+            properties:
+                call_count:
+                    type: integer
+                tokens_in:
+                    type: integer
+                tokens_out:
+                    type: integer
+                truncated_count:
+                    type: integer
+            required:
+                - tokens_in
+                - tokens_out
+                - call_count
+            type: object
+        Check:
+            properties:
+                category:
+                    type: string
+                command:
+                    type: string
+                description:
+                    type: string
+                name:
+                    type: string
+                required:
+                    type: boolean
+                timeout:
+                    type: string
+                trigger:
+                    items:
+                        type: string
+                    type: array
+                working_dir:
+                    type: string
+            required:
+                - name
+                - command
+                - trigger
+                - category
+                - required
+                - timeout
+                - description
+            type: object
+        ContextStats:
+            properties:
+                by_capability:
+                    additionalProperties:
+                        nullable: true
+                        properties:
+                            avg_budget:
+                                type: integer
+                            avg_used:
+                                type: integer
+                            avg_utilization:
+                                type: number
+                            call_count:
+                                type: integer
+                            max_utilization:
+                                type: number
+                            truncation_rate:
+                                type: number
+                        required:
+                            - call_count
+                            - avg_utilization
+                            - truncation_rate
+                        type: object
+                    type: object
+                calls:
+                    items:
+                        properties:
+                            budget:
+                                type: integer
+                            capability:
+                                type: string
+                            model:
+                                type: string
+                            request_id:
+                                type: string
+                            timestamp:
+                                format: date-time
+                                type: string
+                            trace_id:
+                                type: string
+                            truncated:
+                                type: boolean
+                            used:
+                                type: integer
+                            utilization:
+                                type: number
+                        required:
+                            - request_id
+                            - capability
+                            - budget
+                            - used
+                            - utilization
+                            - truncated
+                            - timestamp
+                        type: object
+                    type: array
+                summary:
+                    nullable: true
+                    properties:
+                        avg_utilization:
+                            type: number
+                        calls_with_budget:
+                            type: integer
+                        total_budget:
+                            type: integer
+                        total_calls:
+                            type: integer
+                        total_used:
+                            type: integer
+                        truncation_rate:
+                            type: number
+                    required:
+                        - total_calls
+                        - calls_with_budget
+                        - avg_utilization
+                        - truncation_rate
+                        - total_budget
+                        - total_used
+                    type: object
+            required:
+                - by_capability
+            type: object
+        ContextSummary:
+            properties:
+                avg_utilization:
+                    type: number
+                calls_with_budget:
+                    type: integer
+                total_budget:
+                    type: integer
+                total_calls:
+                    type: integer
+                total_used:
+                    type: integer
+                truncation_rate:
+                    type: number
+            required:
+                - total_calls
+                - calls_with_budget
+                - avg_utilization
+                - truncation_rate
+                - total_budget
+                - total_used
             type: object
         CreatePhaseHTTPRequest:
             properties:
@@ -1158,6 +2105,211 @@ components:
                 - request_id
                 - trace_id
                 - message
+            type: object
+        CreateTaskHTTPRequest:
+            properties:
+                acceptance_criteria:
+                    items:
+                        properties:
+                            given:
+                                type: string
+                            then:
+                                type: string
+                            when:
+                                type: string
+                        required:
+                            - given
+                            - when
+                            - then
+                        type: object
+                    type: array
+                depends_on:
+                    items:
+                        type: string
+                    type: array
+                description:
+                    type: string
+                files:
+                    items:
+                        type: string
+                    type: array
+                type:
+                    type: string
+            required:
+                - description
+                - type
+            type: object
+        DetectedDoc:
+            properties:
+                path:
+                    type: string
+                size_bytes:
+                    type: integer
+                type:
+                    type: string
+            required:
+                - path
+                - type
+                - size_bytes
+            type: object
+        DetectedFramework:
+            properties:
+                confidence:
+                    type: string
+                language:
+                    type: string
+                marker:
+                    type: string
+                name:
+                    type: string
+            required:
+                - name
+                - language
+                - marker
+                - confidence
+            type: object
+        DetectedLanguage:
+            properties:
+                confidence:
+                    type: string
+                marker:
+                    type: string
+                name:
+                    type: string
+                primary:
+                    type: boolean
+                version:
+                    nullable: true
+                    type: string
+            required:
+                - name
+                - marker
+                - confidence
+            type: object
+        DetectedTool:
+            properties:
+                category:
+                    type: string
+                language:
+                    type: string
+                marker:
+                    type: string
+                name:
+                    type: string
+            required:
+                - name
+                - category
+                - marker
+            type: object
+        DetectionResult:
+            properties:
+                existing_docs:
+                    items:
+                        properties:
+                            path:
+                                type: string
+                            size_bytes:
+                                type: integer
+                            type:
+                                type: string
+                        required:
+                            - path
+                            - type
+                            - size_bytes
+                        type: object
+                    type: array
+                frameworks:
+                    items:
+                        properties:
+                            confidence:
+                                type: string
+                            language:
+                                type: string
+                            marker:
+                                type: string
+                            name:
+                                type: string
+                        required:
+                            - name
+                            - language
+                            - marker
+                            - confidence
+                        type: object
+                    type: array
+                languages:
+                    items:
+                        properties:
+                            confidence:
+                                type: string
+                            marker:
+                                type: string
+                            name:
+                                type: string
+                            primary:
+                                type: boolean
+                            version:
+                                nullable: true
+                                type: string
+                        required:
+                            - name
+                            - marker
+                            - confidence
+                        type: object
+                    type: array
+                proposed_checklist:
+                    items:
+                        properties:
+                            category:
+                                type: string
+                            command:
+                                type: string
+                            description:
+                                type: string
+                            name:
+                                type: string
+                            required:
+                                type: boolean
+                            timeout:
+                                type: string
+                            trigger:
+                                items:
+                                    type: string
+                                type: array
+                            working_dir:
+                                type: string
+                        required:
+                            - name
+                            - command
+                            - trigger
+                            - category
+                            - required
+                            - timeout
+                            - description
+                        type: object
+                    type: array
+                tooling:
+                    items:
+                        properties:
+                            category:
+                                type: string
+                            language:
+                                type: string
+                            marker:
+                                type: string
+                            name:
+                                type: string
+                        required:
+                            - name
+                            - category
+                            - marker
+                        type: object
+                    type: array
+            required:
+                - languages
+                - frameworks
+                - tooling
+                - existing_docs
+                - proposed_checklist
             type: object
         Flow:
             properties:
@@ -1274,6 +2426,159 @@ components:
                 - prev_state
                 - timestamp
             type: object
+        GenerateStandardsRequest:
+            properties:
+                detection:
+                    properties:
+                        existing_docs:
+                            items:
+                                properties:
+                                    path:
+                                        type: string
+                                    size_bytes:
+                                        type: integer
+                                    type:
+                                        type: string
+                                required:
+                                    - path
+                                    - type
+                                    - size_bytes
+                                type: object
+                            type: array
+                        frameworks:
+                            items:
+                                properties:
+                                    confidence:
+                                        type: string
+                                    language:
+                                        type: string
+                                    marker:
+                                        type: string
+                                    name:
+                                        type: string
+                                required:
+                                    - name
+                                    - language
+                                    - marker
+                                    - confidence
+                                type: object
+                            type: array
+                        languages:
+                            items:
+                                properties:
+                                    confidence:
+                                        type: string
+                                    marker:
+                                        type: string
+                                    name:
+                                        type: string
+                                    primary:
+                                        type: boolean
+                                    version:
+                                        nullable: true
+                                        type: string
+                                required:
+                                    - name
+                                    - marker
+                                    - confidence
+                                type: object
+                            type: array
+                        proposed_checklist:
+                            items:
+                                properties:
+                                    category:
+                                        type: string
+                                    command:
+                                        type: string
+                                    description:
+                                        type: string
+                                    name:
+                                        type: string
+                                    required:
+                                        type: boolean
+                                    timeout:
+                                        type: string
+                                    trigger:
+                                        items:
+                                            type: string
+                                        type: array
+                                    working_dir:
+                                        type: string
+                                required:
+                                    - name
+                                    - command
+                                    - trigger
+                                    - category
+                                    - required
+                                    - timeout
+                                    - description
+                                type: object
+                            type: array
+                        tooling:
+                            items:
+                                properties:
+                                    category:
+                                        type: string
+                                    language:
+                                        type: string
+                                    marker:
+                                        type: string
+                                    name:
+                                        type: string
+                                required:
+                                    - name
+                                    - category
+                                    - marker
+                                type: object
+                            type: array
+                    required:
+                        - languages
+                        - frameworks
+                        - tooling
+                        - existing_docs
+                        - proposed_checklist
+                    type: object
+                existing_docs_content:
+                    additionalProperties:
+                        type: string
+                    type: object
+            required:
+                - detection
+                - existing_docs_content
+            type: object
+        GenerateStandardsResponse:
+            properties:
+                rules:
+                    items:
+                        properties:
+                            applies_to:
+                                items:
+                                    type: string
+                                type: array
+                            category:
+                                type: string
+                            id:
+                                type: string
+                            origin:
+                                type: string
+                            severity:
+                                type: string
+                            text:
+                                type: string
+                        required:
+                            - id
+                            - text
+                            - severity
+                            - category
+                            - origin
+                        type: object
+                    type: array
+                token_estimate:
+                    type: integer
+            required:
+                - rules
+                - token_estimate
+            type: object
         HTTPCheckRequest:
             properties:
                 content:
@@ -1359,6 +2664,166 @@ components:
                 - passed
                 - checked_at
             type: object
+        InitRequest:
+            properties:
+                checklist:
+                    items:
+                        properties:
+                            category:
+                                type: string
+                            command:
+                                type: string
+                            description:
+                                type: string
+                            name:
+                                type: string
+                            required:
+                                type: boolean
+                            timeout:
+                                type: string
+                            trigger:
+                                items:
+                                    type: string
+                                type: array
+                            working_dir:
+                                type: string
+                        required:
+                            - name
+                            - command
+                            - trigger
+                            - category
+                            - required
+                            - timeout
+                            - description
+                        type: object
+                    type: array
+                project:
+                    properties:
+                        description:
+                            type: string
+                        frameworks:
+                            items:
+                                type: string
+                            type: array
+                        languages:
+                            items:
+                                type: string
+                            type: array
+                        name:
+                            type: string
+                        repository:
+                            type: string
+                    required:
+                        - name
+                        - languages
+                        - frameworks
+                    type: object
+                standards:
+                    properties:
+                        rules:
+                            items:
+                                properties:
+                                    applies_to:
+                                        items:
+                                            type: string
+                                        type: array
+                                    category:
+                                        type: string
+                                    id:
+                                        type: string
+                                    origin:
+                                        type: string
+                                    severity:
+                                        type: string
+                                    text:
+                                        type: string
+                                required:
+                                    - id
+                                    - text
+                                    - severity
+                                    - category
+                                    - origin
+                                type: object
+                            type: array
+                        version:
+                            type: string
+                    required:
+                        - version
+                        - rules
+                    type: object
+            required:
+                - project
+                - checklist
+                - standards
+            type: object
+        InitResponse:
+            properties:
+                files_written:
+                    items:
+                        type: string
+                    type: array
+                success:
+                    type: boolean
+            required:
+                - success
+                - files_written
+            type: object
+        InitStatus:
+            properties:
+                all_approved:
+                    type: boolean
+                checklist_approved_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                has_checklist:
+                    type: boolean
+                has_project_json:
+                    type: boolean
+                has_standards:
+                    type: boolean
+                initialized:
+                    type: boolean
+                project_approved_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                project_description:
+                    type: string
+                project_name:
+                    type: string
+                scaffolded:
+                    type: boolean
+                scaffolded_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                scaffolded_files:
+                    items:
+                        type: string
+                    type: array
+                scaffolded_languages:
+                    items:
+                        type: string
+                    type: array
+                sop_count:
+                    type: integer
+                standards_approved_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                workspace_path:
+                    type: string
+            required:
+                - initialized
+                - has_project_json
+                - has_checklist
+                - has_standards
+                - sop_count
+                - workspace_path
+                - scaffolded
+                - all_approved
+            type: object
         LogEntryPayload:
             properties:
                 fields:
@@ -1375,6 +2840,33 @@ components:
                 - source
                 - message
                 - fields
+            type: object
+        Message:
+            properties:
+                content:
+                    type: string
+                role:
+                    type: string
+                tool_call_id:
+                    type: string
+                tool_calls:
+                    items:
+                        properties:
+                            arguments:
+                                additionalProperties: {}
+                                type: object
+                            id:
+                                type: string
+                            name:
+                                type: string
+                        required:
+                            - id
+                            - name
+                            - arguments
+                        type: object
+                    type: array
+            required:
+                - role
             type: object
         MessageLogEntry:
             properties:
@@ -1527,6 +3019,40 @@ components:
                     items:
                         type: string
                     type: array
+            type: object
+        PhaseMetrics:
+            properties:
+                call_count:
+                    type: integer
+                capabilities:
+                    additionalProperties:
+                        nullable: true
+                        properties:
+                            call_count:
+                                type: integer
+                            tokens_in:
+                                type: integer
+                            tokens_out:
+                                type: integer
+                            truncated_count:
+                                type: integer
+                        required:
+                            - tokens_in
+                            - tokens_out
+                            - call_count
+                        type: object
+                    type: object
+                duration_ms:
+                    type: integer
+                tokens_in:
+                    type: integer
+                tokens_out:
+                    type: integer
+            required:
+                - tokens_in
+                - tokens_out
+                - call_count
+                - duration_ms
             type: object
         PhaseStats:
             properties:
@@ -1908,7 +3434,35 @@ components:
                 - stage
                 - active_loops
             type: object
+        ProjectInitInput:
+            properties:
+                description:
+                    type: string
+                frameworks:
+                    items:
+                        type: string
+                    type: array
+                languages:
+                    items:
+                        type: string
+                    type: array
+                name:
+                    type: string
+                repository:
+                    type: string
+            required:
+                - name
+                - languages
+                - frameworks
+            type: object
         RejectPhaseHTTPRequest:
+            properties:
+                reason:
+                    type: string
+            required:
+                - reason
+            type: object
+        RejectTaskRequest:
             properties:
                 reason:
                     type: string
@@ -2026,19 +3580,26 @@ components:
             type: object
         Rule:
             properties:
-                Enforced:
-                    type: boolean
-                ID:
+                applies_to:
+                    items:
+                        type: string
+                    type: array
+                category:
                     type: string
-                Priority:
+                id:
                     type: string
-                Text:
+                origin:
+                    type: string
+                severity:
+                    type: string
+                text:
                     type: string
             required:
-                - ID
-                - Text
-                - Priority
-                - Enforced
+                - id
+                - text
+                - severity
+                - category
+                - origin
             type: object
         RuleWithSection:
             properties:
@@ -2241,6 +3802,32 @@ components:
                 - prometheus_available
                 - components
             type: object
+        ScaffoldRequest:
+            properties:
+                frameworks:
+                    items:
+                        type: string
+                    type: array
+                languages:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - languages
+                - frameworks
+            type: object
+        ScaffoldResponse:
+            properties:
+                files_created:
+                    items:
+                        type: string
+                    type: array
+                semspec_dir:
+                    type: string
+            required:
+                - files_created
+                - semspec_dir
+            type: object
         Scope:
             properties:
                 do_not_touch:
@@ -2284,6 +3871,39 @@ components:
                 - section
                 - rules
                 - count
+            type: object
+        StandardsInput:
+            properties:
+                rules:
+                    items:
+                        properties:
+                            applies_to:
+                                items:
+                                    type: string
+                                type: array
+                            category:
+                                type: string
+                            id:
+                                type: string
+                            origin:
+                                type: string
+                            severity:
+                                type: string
+                            text:
+                                type: string
+                        required:
+                            - id
+                            - text
+                            - severity
+                            - category
+                            - origin
+                        type: object
+                    type: array
+                version:
+                    type: string
+            required:
+                - version
+                - rules
             type: object
         StatusStreamEnvelope:
             properties:
@@ -2516,6 +4136,176 @@ components:
                 - status
                 - created_at
             type: object
+        Trajectory:
+            properties:
+                duration_ms:
+                    type: integer
+                ended_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                entries:
+                    items:
+                        properties:
+                            capability:
+                                type: string
+                            duration_ms:
+                                type: integer
+                            error:
+                                type: string
+                            finish_reason:
+                                type: string
+                            messages_count:
+                                type: integer
+                            model:
+                                type: string
+                            provider:
+                                type: string
+                            request_id:
+                                type: string
+                            response_preview:
+                                type: string
+                            result_preview:
+                                type: string
+                            retries:
+                                type: integer
+                            status:
+                                type: string
+                            storage_ref:
+                                nullable: true
+                                properties:
+                                    content_type:
+                                        type: string
+                                    key:
+                                        type: string
+                                    size:
+                                        type: integer
+                                    storage_instance:
+                                        type: string
+                                required:
+                                    - storage_instance
+                                    - key
+                                    - content_type
+                                type: object
+                            timestamp:
+                                format: date-time
+                                type: string
+                            tokens_in:
+                                type: integer
+                            tokens_out:
+                                type: integer
+                            tool_name:
+                                type: string
+                            type:
+                                type: string
+                        required:
+                            - type
+                            - timestamp
+                        type: object
+                    type: array
+                loop_id:
+                    type: string
+                model_calls:
+                    type: integer
+                started_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                status:
+                    type: string
+                steps:
+                    type: integer
+                tokens_in:
+                    type: integer
+                tokens_out:
+                    type: integer
+                tool_calls:
+                    type: integer
+                trace_id:
+                    type: string
+            required:
+                - loop_id
+                - steps
+                - tool_calls
+                - model_calls
+                - tokens_in
+                - tokens_out
+                - duration_ms
+            type: object
+        TrajectoryEntry:
+            properties:
+                capability:
+                    type: string
+                duration_ms:
+                    type: integer
+                error:
+                    type: string
+                finish_reason:
+                    type: string
+                messages_count:
+                    type: integer
+                model:
+                    type: string
+                provider:
+                    type: string
+                request_id:
+                    type: string
+                response_preview:
+                    type: string
+                result_preview:
+                    type: string
+                retries:
+                    type: integer
+                status:
+                    type: string
+                storage_ref:
+                    nullable: true
+                    properties:
+                        content_type:
+                            type: string
+                        key:
+                            type: string
+                        size:
+                            type: integer
+                        storage_instance:
+                            type: string
+                    required:
+                        - storage_instance
+                        - key
+                        - content_type
+                    type: object
+                timestamp:
+                    format: date-time
+                    type: string
+                tokens_in:
+                    type: integer
+                tokens_out:
+                    type: integer
+                tool_name:
+                    type: string
+                type:
+                    type: string
+            required:
+                - type
+                - timestamp
+            type: object
+        TruncationSummary:
+            properties:
+                by_capability:
+                    additionalProperties:
+                        type: number
+                    type: object
+                total_calls:
+                    type: integer
+                truncated_calls:
+                    type: integer
+                truncation_rate:
+                    type: number
+            required:
+                - total_calls
+                - truncated_calls
+                - truncation_rate
+            type: object
         UpdatePhaseHTTPRequest:
             properties:
                 agent_config:
@@ -2545,6 +4335,53 @@ components:
                 requires_approval:
                     nullable: true
                     type: boolean
+            type: object
+        UpdatePlanHTTPRequest:
+            properties:
+                context:
+                    nullable: true
+                    type: string
+                goal:
+                    nullable: true
+                    type: string
+                title:
+                    nullable: true
+                    type: string
+            type: object
+        UpdateTaskHTTPRequest:
+            properties:
+                acceptance_criteria:
+                    items:
+                        properties:
+                            given:
+                                type: string
+                            then:
+                                type: string
+                            when:
+                                type: string
+                        required:
+                            - given
+                            - when
+                            - then
+                        type: object
+                    type: array
+                depends_on:
+                    items:
+                        type: string
+                    type: array
+                description:
+                    nullable: true
+                    type: string
+                files:
+                    items:
+                        type: string
+                    type: array
+                sequence:
+                    nullable: true
+                    type: integer
+                type:
+                    nullable: true
+                    type: string
             type: object
         Violation:
             properties:
@@ -2576,6 +4413,161 @@ components:
                 - Message
                 - Location
             type: object
+        WizardFramework:
+            properties:
+                language:
+                    type: string
+                name:
+                    type: string
+            required:
+                - name
+                - language
+            type: object
+        WizardLanguage:
+            properties:
+                has_ast:
+                    type: boolean
+                marker:
+                    type: string
+                name:
+                    type: string
+            required:
+                - name
+                - marker
+                - has_ast
+            type: object
+        WizardResponse:
+            properties:
+                frameworks:
+                    items:
+                        properties:
+                            language:
+                                type: string
+                            name:
+                                type: string
+                        required:
+                            - name
+                            - language
+                        type: object
+                    type: array
+                languages:
+                    items:
+                        properties:
+                            has_ast:
+                                type: boolean
+                            marker:
+                                type: string
+                            name:
+                                type: string
+                        required:
+                            - name
+                            - marker
+                            - has_ast
+                        type: object
+                    type: array
+            required:
+                - languages
+                - frameworks
+            type: object
+        WorkflowTrajectory:
+            properties:
+                completed_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                phases:
+                    additionalProperties:
+                        nullable: true
+                        properties:
+                            call_count:
+                                type: integer
+                            capabilities:
+                                additionalProperties:
+                                    nullable: true
+                                    properties:
+                                        call_count:
+                                            type: integer
+                                        tokens_in:
+                                            type: integer
+                                        tokens_out:
+                                            type: integer
+                                        truncated_count:
+                                            type: integer
+                                    required:
+                                        - tokens_in
+                                        - tokens_out
+                                        - call_count
+                                    type: object
+                                type: object
+                            duration_ms:
+                                type: integer
+                            tokens_in:
+                                type: integer
+                            tokens_out:
+                                type: integer
+                        required:
+                            - tokens_in
+                            - tokens_out
+                            - call_count
+                            - duration_ms
+                        type: object
+                    type: object
+                slug:
+                    type: string
+                started_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                status:
+                    type: string
+                totals:
+                    nullable: true
+                    properties:
+                        call_count:
+                            type: integer
+                        duration_ms:
+                            type: integer
+                        tokens_in:
+                            type: integer
+                        tokens_out:
+                            type: integer
+                        total_tokens:
+                            type: integer
+                    required:
+                        - tokens_in
+                        - tokens_out
+                        - total_tokens
+                        - call_count
+                        - duration_ms
+                    type: object
+                trace_ids:
+                    items:
+                        type: string
+                    type: array
+                truncation_summary:
+                    nullable: true
+                    properties:
+                        by_capability:
+                            additionalProperties:
+                                type: number
+                            type: object
+                        total_calls:
+                            type: integer
+                        truncated_calls:
+                            type: integer
+                        truncation_rate:
+                            type: number
+                    required:
+                        - total_calls
+                        - truncated_calls
+                        - truncation_rate
+                    type: object
+            required:
+                - slug
+                - status
+                - phases
+                - trace_ids
+            type: object
 tags:
     - name: Components
       description: Component management and monitoring endpoints
@@ -2593,7 +4585,11 @@ tags:
       description: Phase management - logical groupings of tasks within a plan with dependencies and approval gates
     - name: Plans
       description: Workflow plan management - create, retrieve, and advance development plans through their lifecycle
+    - name: Project
+      description: Project initialization and setup wizard endpoints
     - name: Runtime
       description: Runtime metrics and observability
     - name: Status
       description: Real-time status updates
+    - name: Trajectory
+      description: LLM call trajectory and observability queries

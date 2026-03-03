@@ -29,6 +29,14 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 		Schema:      service.Schema{Type: "string"},
 	}
 
+	taskIdParam := service.ParameterSpec{
+		Name:        "taskId",
+		In:          "path",
+		Required:    true,
+		Description: "Task identifier",
+		Schema:      service.Schema{Type: "string"},
+	}
+
 	return &service.OpenAPISpec{
 		Tags: []service.TagSpec{
 			{Name: "Plans", Description: "Workflow plan management - create, retrieve, and advance development plans through their lifecycle"},
@@ -53,6 +61,11 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					Summary:     "Create plan",
 					Description: "Creates a new development plan from a description and triggers the planner agent to generate Goal, Context, and Scope",
 					Tags:        []string{"Plans"},
+					RequestBody: &service.RequestBodySpec{
+						Description: "Plan description",
+						Required:    true,
+						SchemaRef:   "#/components/schemas/CreatePlanRequest",
+					},
 					Responses: map[string]service.ResponseSpec{
 						"201": {
 							Description: "Plan created and planning triggered",
@@ -80,6 +93,36 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 							ContentType: "application/json",
 							SchemaRef:   "#/components/schemas/PlanWithStatus",
 						},
+						"404": {Description: "Plan not found"},
+					},
+				},
+				PATCH: &service.OperationSpec{
+					Summary:     "Update plan",
+					Description: "Partially updates a plan's title, goal, or context",
+					Tags:        []string{"Plans"},
+					Parameters:  []service.ParameterSpec{slugParam},
+					RequestBody: &service.RequestBodySpec{
+						Description: "Fields to update (all optional)",
+						Required:    true,
+						SchemaRef:   "#/components/schemas/UpdatePlanHTTPRequest",
+					},
+					Responses: map[string]service.ResponseSpec{
+						"200": {
+							Description: "Plan updated",
+							ContentType: "application/json",
+							SchemaRef:   "#/components/schemas/PlanWithStatus",
+						},
+						"400": {Description: "Invalid request body"},
+						"404": {Description: "Plan not found"},
+					},
+				},
+				DELETE: &service.OperationSpec{
+					Summary:     "Delete plan",
+					Description: "Deletes a plan and all associated tasks and phases",
+					Tags:        []string{"Plans"},
+					Parameters:  []service.ParameterSpec{slugParam},
+					Responses: map[string]service.ResponseSpec{
+						"204": {Description: "Plan deleted"},
 						"404": {Description: "Plan not found"},
 					},
 				},
@@ -113,6 +156,132 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 							SchemaRef:   "#/components/schemas/Task",
 							IsArray:     true,
 						},
+					},
+				},
+				POST: &service.OperationSpec{
+					Summary:     "Create task",
+					Description: "Creates a new task within the plan",
+					Tags:        []string{"Plans"},
+					Parameters:  []service.ParameterSpec{slugParam},
+					RequestBody: &service.RequestBodySpec{
+						Description: "Task creation request",
+						Required:    true,
+						SchemaRef:   "#/components/schemas/CreateTaskHTTPRequest",
+					},
+					Responses: map[string]service.ResponseSpec{
+						"201": {
+							Description: "Task created",
+							ContentType: "application/json",
+							SchemaRef:   "#/components/schemas/Task",
+						},
+						"400": {Description: "Invalid request body"},
+						"404": {Description: "Plan not found"},
+					},
+				},
+			},
+			"/workflow-api/plans/{slug}/tasks/approve": {
+				POST: &service.OperationSpec{
+					Summary:     "Approve all tasks",
+					Description: "Bulk-approves all pending tasks for a plan",
+					Tags:        []string{"Plans"},
+					Parameters:  []service.ParameterSpec{slugParam},
+					Responses: map[string]service.ResponseSpec{
+						"200": {
+							Description: "All tasks approved, returns updated tasks",
+							ContentType: "application/json",
+							SchemaRef:   "#/components/schemas/Task",
+							IsArray:     true,
+						},
+						"404": {Description: "Plan not found"},
+					},
+				},
+			},
+			"/workflow-api/plans/{slug}/tasks/{taskId}": {
+				GET: &service.OperationSpec{
+					Summary:     "Get task",
+					Description: "Returns a single task by ID",
+					Tags:        []string{"Plans"},
+					Parameters:  []service.ParameterSpec{slugParam, taskIdParam},
+					Responses: map[string]service.ResponseSpec{
+						"200": {
+							Description: "Task details",
+							ContentType: "application/json",
+							SchemaRef:   "#/components/schemas/Task",
+						},
+						"404": {Description: "Task not found"},
+					},
+				},
+				PATCH: &service.OperationSpec{
+					Summary:     "Update task",
+					Description: "Partially updates a task's description, type, acceptance criteria, files, or dependencies",
+					Tags:        []string{"Plans"},
+					Parameters:  []service.ParameterSpec{slugParam, taskIdParam},
+					RequestBody: &service.RequestBodySpec{
+						Description: "Fields to update (all optional)",
+						Required:    true,
+						SchemaRef:   "#/components/schemas/UpdateTaskHTTPRequest",
+					},
+					Responses: map[string]service.ResponseSpec{
+						"200": {
+							Description: "Task updated",
+							ContentType: "application/json",
+							SchemaRef:   "#/components/schemas/Task",
+						},
+						"400": {Description: "Invalid request body"},
+						"404": {Description: "Task not found"},
+					},
+				},
+				DELETE: &service.OperationSpec{
+					Summary:     "Delete task",
+					Description: "Deletes a task from the plan",
+					Tags:        []string{"Plans"},
+					Parameters:  []service.ParameterSpec{slugParam, taskIdParam},
+					Responses: map[string]service.ResponseSpec{
+						"204": {Description: "Task deleted"},
+						"404": {Description: "Task not found"},
+					},
+				},
+			},
+			"/workflow-api/plans/{slug}/tasks/{taskId}/approve": {
+				POST: &service.OperationSpec{
+					Summary:     "Approve task",
+					Description: "Approves a single task for execution",
+					Tags:        []string{"Plans"},
+					Parameters:  []service.ParameterSpec{slugParam, taskIdParam},
+					RequestBody: &service.RequestBodySpec{
+						Description: "Optional approval metadata",
+						Required:    false,
+						SchemaRef:   "#/components/schemas/ApproveTaskRequest",
+					},
+					Responses: map[string]service.ResponseSpec{
+						"200": {
+							Description: "Task approved",
+							ContentType: "application/json",
+							SchemaRef:   "#/components/schemas/Task",
+						},
+						"404": {Description: "Task not found"},
+					},
+				},
+			},
+			"/workflow-api/plans/{slug}/tasks/{taskId}/reject": {
+				POST: &service.OperationSpec{
+					Summary:     "Reject task",
+					Description: "Rejects a task with a reason",
+					Tags:        []string{"Plans"},
+					Parameters:  []service.ParameterSpec{slugParam, taskIdParam},
+					RequestBody: &service.RequestBodySpec{
+						Description: "Rejection reason",
+						Required:    true,
+						SchemaRef:   "#/components/schemas/RejectTaskRequest",
+					},
+					Responses: map[string]service.ResponseSpec{
+						"200": {
+							Description: "Task rejected",
+							ContentType: "application/json",
+							SchemaRef:   "#/components/schemas/Task",
+						},
+						"400": {Description: "Rejection reason required"},
+						"404": {Description: "Task not found"},
 					},
 				},
 			},
@@ -188,6 +357,11 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					Description: "Creates a new phase within the plan",
 					Tags:        []string{"Phases"},
 					Parameters:  []service.ParameterSpec{slugParam},
+					RequestBody: &service.RequestBodySpec{
+						Description: "Phase creation request",
+						Required:    true,
+						SchemaRef:   "#/components/schemas/CreatePhaseHTTPRequest",
+					},
 					Responses: map[string]service.ResponseSpec{
 						"201": {
 							Description: "Phase created successfully",
@@ -239,6 +413,11 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					Description: "Reorders phases within the plan by specifying new sequence order",
 					Tags:        []string{"Phases"},
 					Parameters:  []service.ParameterSpec{slugParam},
+					RequestBody: &service.RequestBodySpec{
+						Description: "Ordered list of phase IDs",
+						Required:    true,
+						SchemaRef:   "#/components/schemas/ReorderPhasesHTTPRequest",
+					},
 					Responses: map[string]service.ResponseSpec{
 						"200": {
 							Description: "Phases reordered, returns updated phases",
@@ -269,13 +448,18 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 						"404": {Description: "Phase not found"},
 					},
 				},
-				PUT: &service.OperationSpec{
+				PATCH: &service.OperationSpec{
 					Summary:     "Update phase",
-					Description: "Updates a phase's name, description, dependencies, or agent config",
+					Description: "Partially updates a phase's name, description, dependencies, or agent config",
 					Tags:        []string{"Phases"},
 					Parameters: []service.ParameterSpec{
 						slugParam,
 						{Name: "phaseId", In: "path", Required: true, Description: "Phase identifier", Schema: service.Schema{Type: "string"}},
+					},
+					RequestBody: &service.RequestBodySpec{
+						Description: "Fields to update (all optional)",
+						Required:    true,
+						SchemaRef:   "#/components/schemas/UpdatePhaseHTTPRequest",
 					},
 					Responses: map[string]service.ResponseSpec{
 						"200": {
@@ -310,6 +494,11 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 						slugParam,
 						{Name: "phaseId", In: "path", Required: true, Description: "Phase identifier", Schema: service.Schema{Type: "string"}},
 					},
+					RequestBody: &service.RequestBodySpec{
+						Description: "Optional approval metadata",
+						Required:    false,
+						SchemaRef:   "#/components/schemas/ApprovePhaseHTTPRequest",
+					},
 					Responses: map[string]service.ResponseSpec{
 						"200": {
 							Description: "Phase approved",
@@ -328,6 +517,11 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					Parameters: []service.ParameterSpec{
 						slugParam,
 						{Name: "phaseId", In: "path", Required: true, Description: "Phase identifier", Schema: service.Schema{Type: "string"}},
+					},
+					RequestBody: &service.RequestBodySpec{
+						Description: "Rejection reason",
+						Required:    true,
+						SchemaRef:   "#/components/schemas/RejectPhaseHTTPRequest",
 					},
 					Responses: map[string]service.ResponseSpec{
 						"200": {
@@ -364,7 +558,6 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 		ResponseTypes: []reflect.Type{
 			reflect.TypeOf(PlanWithStatus{}),
 			reflect.TypeOf(ActiveLoopStatus{}),
-			reflect.TypeOf(CreatePlanRequest{}),
 			reflect.TypeOf(CreatePlanResponse{}),
 			reflect.TypeOf(AsyncOperationResponse{}),
 			reflect.TypeOf(workflow.Plan{}),
@@ -379,12 +572,20 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 			reflect.TypeOf(workflow.Phase{}),
 			reflect.TypeOf(workflow.PhaseStatus("")),
 			reflect.TypeOf(workflow.PhaseAgentConfig{}),
+			reflect.TypeOf(PhaseStats{}),
+		},
+		RequestBodyTypes: []reflect.Type{
+			reflect.TypeOf(CreatePlanRequest{}),
 			reflect.TypeOf(CreatePhaseHTTPRequest{}),
 			reflect.TypeOf(UpdatePhaseHTTPRequest{}),
 			reflect.TypeOf(ReorderPhasesHTTPRequest{}),
-			reflect.TypeOf(RejectPhaseHTTPRequest{}),
 			reflect.TypeOf(ApprovePhaseHTTPRequest{}),
-			reflect.TypeOf(PhaseStats{}),
+			reflect.TypeOf(RejectPhaseHTTPRequest{}),
+			reflect.TypeOf(UpdatePlanHTTPRequest{}),
+			reflect.TypeOf(CreateTaskHTTPRequest{}),
+			reflect.TypeOf(UpdateTaskHTTPRequest{}),
+			reflect.TypeOf(ApproveTaskRequest{}),
+			reflect.TypeOf(RejectTaskRequest{}),
 		},
 	}
 }

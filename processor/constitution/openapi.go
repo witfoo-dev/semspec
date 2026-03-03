@@ -79,6 +79,11 @@ func constitutionOpenAPISpec() *service.OpenAPISpec {
 					Summary:     "Check content",
 					Description: "Check content against all constitution rules and return violations and warnings",
 					Tags:        []string{"Constitution"},
+					RequestBody: &service.RequestBodySpec{
+						Description: "Content to check with optional context metadata",
+						Required:    true,
+						SchemaRef:   "#/components/schemas/HTTPCheckRequest",
+					},
 					Responses: map[string]service.ResponseSpec{
 						"200": {
 							Description: "Check result with pass/fail status, violations, and warnings",
@@ -109,12 +114,14 @@ func constitutionOpenAPISpec() *service.OpenAPISpec {
 			reflect.TypeOf(Response{}),
 			reflect.TypeOf(RulesResponse{}),
 			reflect.TypeOf(SectionRulesResponse{}),
-			reflect.TypeOf(HTTPCheckRequest{}),
 			reflect.TypeOf(HTTPCheckResponse{}),
 			reflect.TypeOf(ReloadResponse{}),
 			reflect.TypeOf(Rule{}),
 			reflect.TypeOf(Violation{}),
 			reflect.TypeOf(RuleWithSection{}),
+		},
+		RequestBodyTypes: []reflect.Type{
+			reflect.TypeOf(HTTPCheckRequest{}),
 		},
 	}
 }

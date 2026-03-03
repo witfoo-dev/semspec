@@ -382,6 +382,7 @@ type PathItem struct {
 	Get    *Operation `yaml:"get,omitempty"`
 	Post   *Operation `yaml:"post,omitempty"`
 	Put    *Operation `yaml:"put,omitempty"`
+	Patch  *Operation `yaml:"patch,omitempty"`
 	Delete *Operation `yaml:"delete,omitempty"`
 }
 
@@ -391,7 +392,15 @@ type Operation struct {
 	Description string              `yaml:"description,omitempty"`
 	Tags        []string            `yaml:"tags,omitempty"`
 	Parameters  []Parameter         `yaml:"parameters,omitempty"`
+	RequestBody *RequestBody        `yaml:"requestBody,omitempty"`
 	Responses   map[string]Response `yaml:"responses"`
+}
+
+// RequestBody describes an OpenAPI 3.0 request body.
+type RequestBody struct {
+	Description string               `yaml:"description,omitempty"`
+	Required    bool                 `yaml:"required,omitempty"`
+	Content     map[string]MediaType `yaml:"content"`
 }
 
 // Parameter describes an operation parameter.
@@ -477,6 +486,9 @@ func convertPathSpec(ps service.PathSpec) PathItem {
 	if ps.PUT != nil {
 		item.Put = convertOperation(ps.PUT)
 	}
+	if ps.PATCH != nil {
+		item.Patch = convertOperation(ps.PATCH)
+	}
 	if ps.DELETE != nil {
 		item.Delete = convertOperation(ps.DELETE)
 	}
@@ -501,6 +513,20 @@ func convertOperation(op *service.OperationSpec) *Operation {
 			Description: p.Description,
 			Schema:      SchemaRef{Type: p.Schema.Type},
 		})
+	}
+
+	if op.RequestBody != nil {
+		contentType := op.RequestBody.ContentType
+		if contentType == "" {
+			contentType = "application/json"
+		}
+		operation.RequestBody = &RequestBody{
+			Description: op.RequestBody.Description,
+			Required:    op.RequestBody.Required,
+			Content: map[string]MediaType{
+				contentType: {Schema: SchemaRef{Ref: op.RequestBody.SchemaRef}},
+			},
+		}
 	}
 
 	for code, resp := range op.Responses {
@@ -570,7 +596,7 @@ func buildTagsFromRegistry(specs map[string]*service.OpenAPISpec) []TagObject {
 	return tags
 }
 
-// buildSchemasFromRegistry generates JSON schemas for all response types.
+// buildSchemasFromRegistry generates JSON schemas for all response and request body types.
 func buildSchemasFromRegistry(specs map[string]*service.OpenAPISpec) map[string]any {
 	schemas := make(map[string]any)
 	seen := make(map[reflect.Type]bool)
@@ -584,6 +610,15 @@ func buildSchemasFromRegistry(specs map[string]*service.OpenAPISpec) map[string]
 	for _, name := range names {
 		spec := specs[name]
 		for _, t := range spec.ResponseTypes {
+			if seen[t] {
+				continue
+			}
+			seen[t] = true
+
+			typeName := typeNameFromReflect(t)
+			schemas[typeName] = schemaFromType(t)
+		}
+		for _, t := range spec.RequestBodyTypes {
 			if seen[t] {
 				continue
 			}

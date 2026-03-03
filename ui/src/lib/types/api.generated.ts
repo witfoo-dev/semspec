@@ -63,7 +63,12 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Content to check with optional context metadata */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["HTTPCheckRequest"];
+                };
+            };
             responses: {
                 /** @description Check result with pass/fail status, violations, and warnings */
                 200: {
@@ -212,6 +217,341 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve configuration file
+         * @description Sets the approved_at timestamp on the specified configuration file
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Name of the configuration file to approve */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ApproveRequest"];
+                };
+            };
+            responses: {
+                /** @description Approval result with timestamp and overall approval state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApproveResponse"];
+                    };
+                };
+                /** @description Invalid file name */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Configuration file not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/detect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Detect project stack
+         * @description Runs filesystem-based stack detection and returns the detected languages, frameworks, tools, and documentation files
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Detected project stack */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DetectionResult"];
+                    };
+                };
+                /** @description Detection failed */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/generate-standards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate project standards
+         * @description Generates a set of project standards rules based on the detected stack and existing documentation
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Detection result and existing documentation content */
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["GenerateStandardsRequest"];
+                };
+            };
+            responses: {
+                /** @description Generated standards rules with token estimate */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GenerateStandardsResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/init": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Initialize project
+         * @description Writes confirmed project metadata, checklist, and standards to disk under .semspec/
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Confirmed project metadata, checklist, and standards */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["InitRequest"];
+                };
+            };
+            responses: {
+                /** @description List of files written during initialization */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["InitResponse"];
+                    };
+                };
+                /** @description Invalid request (missing required fields) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Failed to write configuration files */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/scaffold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scaffold project files
+         * @description Creates marker files for the selected languages and frameworks
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Selected languages and frameworks to scaffold */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ScaffoldRequest"];
+                };
+            };
+            responses: {
+                /** @description List of files created during scaffolding */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScaffoldResponse"];
+                    };
+                };
+                /** @description Missing languages in request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get project status
+         * @description Returns the current project initialization status, including which config files exist and their approval state
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current project initialization status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["InitStatus"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/wizard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get wizard options
+         * @description Returns the supported languages and frameworks available in the setup wizard
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Supported languages and frameworks for the wizard */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WizardResponse"];
+                    };
                 };
             };
         };
@@ -516,7 +856,12 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Flow definition to create */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["Flow"];
+                };
+            };
             responses: {
                 /** @description Flow created */
                 201: {
@@ -594,7 +939,12 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Updated flow definition */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["Flow"];
+                };
+            };
             responses: {
                 /** @description Flow updated */
                 200: {
@@ -1329,6 +1679,298 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/trajectory-api/calls/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get call record
+         * @description Returns the full LLM call record for a specific request, including messages, token usage, and timing
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description LLM request identifier returned in the call response */
+                    request_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Full LLM call record */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CallRecord"];
+                    };
+                };
+                /** @description Call record not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Trajectory service unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/trajectory-api/context-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get context utilization stats
+         * @description Returns context window utilization metrics for a trace or workflow. At least one of trace_id or workflow must be provided.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Filter stats to a specific trace */
+                    trace_id?: string;
+                    /** @description Filter stats to a specific workflow slug */
+                    workflow?: string;
+                    /** @description Filter stats to a specific capability (e.g. planning, coding) */
+                    capability?: string;
+                    /** @description Response format: "summary" (default) or "json" (includes full entry details) */
+                    format?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Context utilization statistics with per-capability breakdown */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ContextStats"];
+                    };
+                };
+                /** @description Neither trace_id nor workflow query parameter was provided */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Trajectory service unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/trajectory-api/loops/{loop_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get loop trajectory
+         * @description Returns the LLM call trajectory for a specific agent loop, including token usage and timing per step
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Response format: "summary" (default) or "json" (includes full entry details) */
+                    format?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Agent loop identifier */
+                    loop_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Trajectory for the given loop */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Trajectory"];
+                    };
+                };
+                /** @description Loop not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Trajectory service unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/trajectory-api/traces/{trace_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get trace trajectory
+         * @description Returns aggregated LLM call trajectory for all loops within a trace
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Response format: "summary" (default) or "json" (includes full entry details) */
+                    format?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Trace correlation identifier */
+                    trace_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Aggregated trajectory for the given trace */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Trajectory"];
+                    };
+                };
+                /** @description Trace not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Trajectory service unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/trajectory-api/workflows/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get workflow trajectory
+         * @description Returns LLM call trajectory aggregated across all phases and agent loops for an entire workflow
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Workflow-level trajectory with phase breakdown and aggregate metrics */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WorkflowTrajectory"];
+                    };
+                };
+                /** @description Workflow not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Trajectory service unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/types": {
         parameters: {
             query?: never;
@@ -1499,7 +2141,12 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Plan description */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreatePlanRequest"];
+                };
+            };
             responses: {
                 /** @description Plan already exists, returns current state */
                 200: {
@@ -1577,10 +2224,86 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete plan
+         * @description Deletes a plan and all associated tasks and phases
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Plan deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update plan
+         * @description Partially updates a plan's title, goal, or context
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            /** @description Fields to update (all optional) */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdatePlanHTTPRequest"];
+                };
+            };
+            responses: {
+                /** @description Plan updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanWithStatus"];
+                    };
+                };
+                /** @description Invalid request body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         trace?: never;
     };
     "/workflow-api/plans/{slug}/execute": {
@@ -1695,7 +2418,12 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Phase creation request */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreatePhaseHTTPRequest"];
+                };
+            };
             responses: {
                 /** @description Phase created successfully */
                 201: {
@@ -1771,49 +2499,7 @@ export interface paths {
                 };
             };
         };
-        /**
-         * Update phase
-         * @description Updates a phase's name, description, dependencies, or agent config
-         */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                    /** @description Phase identifier */
-                    phaseId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Phase updated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Phase"];
-                    };
-                };
-                /** @description Invalid request body */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Phase not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        put?: never;
         post?: never;
         /**
          * Delete phase
@@ -1851,7 +2537,54 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update phase
+         * @description Partially updates a phase's name, description, dependencies, or agent config
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                    /** @description Phase identifier */
+                    phaseId: string;
+                };
+                cookie?: never;
+            };
+            /** @description Fields to update (all optional) */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdatePhaseHTTPRequest"];
+                };
+            };
+            responses: {
+                /** @description Phase updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Phase"];
+                    };
+                };
+                /** @description Invalid request body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Phase not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         trace?: never;
     };
     "/workflow-api/plans/{slug}/phases/{phaseId}/approve": {
@@ -1879,7 +2612,12 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Optional approval metadata */
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ApprovePhaseHTTPRequest"];
+                };
+            };
             responses: {
                 /** @description Phase approved */
                 200: {
@@ -1930,7 +2668,12 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Rejection reason */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RejectPhaseHTTPRequest"];
+                };
+            };
             responses: {
                 /** @description Phase rejected */
                 200: {
@@ -2141,7 +2884,12 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Ordered list of phase IDs */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ReorderPhasesHTTPRequest"];
+                };
+            };
             responses: {
                 /** @description Phases reordered, returns updated phases */
                 200: {
@@ -2308,7 +3056,351 @@ export interface paths {
             };
         };
         put?: never;
+        /**
+         * Create task
+         * @description Creates a new task within the plan
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            /** @description Task creation request */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateTaskHTTPRequest"];
+                };
+            };
+            responses: {
+                /** @description Task created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Task"];
+                    };
+                };
+                /** @description Invalid request body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/tasks/{taskId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get task
+         * @description Returns a single task by ID
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                    /** @description Task identifier */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Task details */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Task"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
         post?: never;
+        /**
+         * Delete task
+         * @description Deletes a task from the plan
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                    /** @description Task identifier */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Task deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Update task
+         * @description Partially updates a task's description, type, acceptance criteria, files, or dependencies
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                    /** @description Task identifier */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            /** @description Fields to update (all optional) */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateTaskHTTPRequest"];
+                };
+            };
+            responses: {
+                /** @description Task updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Task"];
+                    };
+                };
+                /** @description Invalid request body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/tasks/{taskId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve task
+         * @description Approves a single task for execution
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                    /** @description Task identifier */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            /** @description Optional approval metadata */
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ApproveTaskRequest"];
+                };
+            };
+            responses: {
+                /** @description Task approved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Task"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/tasks/{taskId}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject task
+         * @description Rejects a task with a reason
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                    /** @description Task identifier */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            /** @description Rejection reason */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RejectTaskRequest"];
+                };
+            };
+            responses: {
+                /** @description Task rejected */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Task"];
+                    };
+                };
+                /** @description Rejection reason required */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/tasks/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve all tasks
+         * @description Bulk-approves all pending tasks for a plan
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description All tasks approved, returns updated tasks */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Task"][];
+                    };
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -2385,7 +3477,26 @@ export interface components {
             role: string;
             state: string;
         };
+        AggregateMetrics: {
+            call_count: number;
+            duration_ms: number;
+            tokens_in: number;
+            tokens_out: number;
+            total_tokens: number;
+        };
         ApprovePhaseHTTPRequest: {
+            approved_by?: string;
+        };
+        ApproveRequest: {
+            file: string;
+        };
+        ApproveResponse: {
+            all_approved: boolean;
+            /** Format: date-time */
+            approved_at: string;
+            file: string;
+        };
+        ApproveTaskRequest: {
             approved_by?: string;
         };
         AsyncOperationResponse: {
@@ -2393,6 +3504,125 @@ export interface components {
             request_id: string;
             slug: string;
             trace_id: string;
+        };
+        CallContextDetail: {
+            budget: number;
+            capability: string;
+            model?: string;
+            request_id: string;
+            /** Format: date-time */
+            timestamp: string;
+            trace_id?: string;
+            truncated: boolean;
+            used: number;
+            utilization: number;
+        };
+        CallRecord: {
+            capability: string;
+            /** Format: date-time */
+            completed_at: string;
+            completion_tokens: number;
+            context_budget?: number;
+            context_truncated?: boolean;
+            duration_ms: number;
+            error?: string;
+            fallbacks_used?: string[];
+            finish_reason: string;
+            loop_id?: string;
+            messages: {
+                content?: string;
+                role: string;
+                tool_call_id?: string;
+                tool_calls?: {
+                    arguments: {
+                        [key: string]: unknown;
+                    };
+                    id: string;
+                    name: string;
+                }[];
+            }[];
+            messages_count?: number;
+            model: string;
+            prompt_tokens: number;
+            provider: string;
+            request_id: string;
+            response: string;
+            response_preview?: string;
+            retries: number;
+            /** Format: date-time */
+            started_at: string;
+            storage_ref?: {
+                content_type: string;
+                key: string;
+                size?: number;
+                storage_instance: string;
+            } | null;
+            total_tokens: number;
+            trace_id: string;
+        };
+        CapabilityContextStats: {
+            avg_budget?: number;
+            avg_used?: number;
+            avg_utilization: number;
+            call_count: number;
+            max_utilization?: number;
+            truncation_rate: number;
+        };
+        CapabilityMetrics: {
+            call_count: number;
+            tokens_in: number;
+            tokens_out: number;
+            truncated_count?: number;
+        };
+        Check: {
+            category: string;
+            command: string;
+            description: string;
+            name: string;
+            required: boolean;
+            timeout: string;
+            trigger: string[];
+            working_dir?: string;
+        };
+        ContextStats: {
+            by_capability: {
+                [key: string]: {
+                    avg_budget?: number;
+                    avg_used?: number;
+                    avg_utilization: number;
+                    call_count: number;
+                    max_utilization?: number;
+                    truncation_rate: number;
+                } | null;
+            };
+            calls?: {
+                budget: number;
+                capability: string;
+                model?: string;
+                request_id: string;
+                /** Format: date-time */
+                timestamp: string;
+                trace_id?: string;
+                truncated: boolean;
+                used: number;
+                utilization: number;
+            }[];
+            summary?: {
+                avg_utilization: number;
+                calls_with_budget: number;
+                total_budget: number;
+                total_calls: number;
+                total_used: number;
+                truncation_rate: number;
+            } | null;
+        };
+        ContextSummary: {
+            avg_utilization: number;
+            calls_with_budget: number;
+            total_budget: number;
+            total_calls: number;
+            total_used: number;
+            truncation_rate: number;
         };
         CreatePhaseHTTPRequest: {
             agent_config?: {
@@ -2414,6 +3644,77 @@ export interface components {
             request_id: string;
             slug: string;
             trace_id: string;
+        };
+        CreateTaskHTTPRequest: {
+            acceptance_criteria?: {
+                given: string;
+                then: string;
+                when: string;
+            }[];
+            depends_on?: string[];
+            description: string;
+            files?: string[];
+            type: string;
+        };
+        DetectedDoc: {
+            path: string;
+            size_bytes: number;
+            type: string;
+        };
+        DetectedFramework: {
+            confidence: string;
+            language: string;
+            marker: string;
+            name: string;
+        };
+        DetectedLanguage: {
+            confidence: string;
+            marker: string;
+            name: string;
+            primary?: boolean;
+            version?: string | null;
+        };
+        DetectedTool: {
+            category: string;
+            language?: string;
+            marker: string;
+            name: string;
+        };
+        DetectionResult: {
+            existing_docs: {
+                path: string;
+                size_bytes: number;
+                type: string;
+            }[];
+            frameworks: {
+                confidence: string;
+                language: string;
+                marker: string;
+                name: string;
+            }[];
+            languages: {
+                confidence: string;
+                marker: string;
+                name: string;
+                primary?: boolean;
+                version?: string | null;
+            }[];
+            proposed_checklist: {
+                category: string;
+                command: string;
+                description: string;
+                name: string;
+                required: boolean;
+                timeout: string;
+                trigger: string[];
+                working_dir?: string;
+            }[];
+            tooling: {
+                category: string;
+                language?: string;
+                marker: string;
+                name: string;
+            }[];
         };
         Flow: {
             connections: {
@@ -2461,6 +3762,58 @@ export interface components {
             state: string;
             timestamp: number;
         };
+        GenerateStandardsRequest: {
+            detection: {
+                existing_docs: {
+                    path: string;
+                    size_bytes: number;
+                    type: string;
+                }[];
+                frameworks: {
+                    confidence: string;
+                    language: string;
+                    marker: string;
+                    name: string;
+                }[];
+                languages: {
+                    confidence: string;
+                    marker: string;
+                    name: string;
+                    primary?: boolean;
+                    version?: string | null;
+                }[];
+                proposed_checklist: {
+                    category: string;
+                    command: string;
+                    description: string;
+                    name: string;
+                    required: boolean;
+                    timeout: string;
+                    trigger: string[];
+                    working_dir?: string;
+                }[];
+                tooling: {
+                    category: string;
+                    language?: string;
+                    marker: string;
+                    name: string;
+                }[];
+            };
+            existing_docs_content: {
+                [key: string]: string;
+            };
+        };
+        GenerateStandardsResponse: {
+            rules: {
+                applies_to?: string[];
+                category: string;
+                id: string;
+                origin: string;
+                severity: string;
+                text: string;
+            }[];
+            token_estimate: number;
+        };
         HTTPCheckRequest: {
             content: string;
             context?: {
@@ -2493,6 +3846,62 @@ export interface components {
                 Section: string;
             }[];
         };
+        InitRequest: {
+            checklist: {
+                category: string;
+                command: string;
+                description: string;
+                name: string;
+                required: boolean;
+                timeout: string;
+                trigger: string[];
+                working_dir?: string;
+            }[];
+            project: {
+                description?: string;
+                frameworks: string[];
+                languages: string[];
+                name: string;
+                repository?: string;
+            };
+            standards: {
+                rules: {
+                    applies_to?: string[];
+                    category: string;
+                    id: string;
+                    origin: string;
+                    severity: string;
+                    text: string;
+                }[];
+                version: string;
+            };
+        };
+        InitResponse: {
+            files_written: string[];
+            success: boolean;
+        };
+        InitStatus: {
+            all_approved: boolean;
+            /** Format: date-time */
+            checklist_approved_at?: string | null;
+            has_checklist: boolean;
+            has_project_json: boolean;
+            has_standards: boolean;
+            initialized: boolean;
+            /** Format: date-time */
+            project_approved_at?: string | null;
+            project_description?: string;
+            project_name?: string;
+            scaffolded: boolean;
+            /** Format: date-time */
+            scaffolded_at?: string | null;
+            scaffolded_files?: string[];
+            scaffolded_languages?: string[];
+            sop_count: number;
+            /** Format: date-time */
+            standards_approved_at?: string | null;
+            workspace_path: string;
+        };
         LogEntryPayload: {
             fields: {
                 [key: string]: unknown;
@@ -2500,6 +3909,18 @@ export interface components {
             level: string;
             message: string;
             source: string;
+        };
+        Message: {
+            content?: string;
+            role: string;
+            tool_call_id?: string;
+            tool_calls?: {
+                arguments: {
+                    [key: string]: unknown;
+                };
+                id: string;
+                name: string;
+            }[];
         };
         MessageLogEntry: {
             message_id?: string;
@@ -2567,6 +3988,20 @@ export interface components {
             model?: string;
             review_strategy?: string;
             roles?: string[];
+        };
+        PhaseMetrics: {
+            call_count: number;
+            capabilities?: {
+                [key: string]: {
+                    call_count: number;
+                    tokens_in: number;
+                    tokens_out: number;
+                    truncated_count?: number;
+                } | null;
+            };
+            duration_ms: number;
+            tokens_in: number;
+            tokens_out: number;
         };
         PhaseStats: {
             active: number;
@@ -2724,7 +4159,17 @@ export interface components {
             tasks_approved_at?: string | null;
             title: string;
         };
+        ProjectInitInput: {
+            description?: string;
+            frameworks: string[];
+            languages: string[];
+            name: string;
+            repository?: string;
+        };
         RejectPhaseHTTPRequest: {
+            reason: string;
+        };
+        RejectTaskRequest: {
             reason: string;
         };
         ReloadResponse: {
@@ -2770,10 +4215,12 @@ export interface components {
             summary: string;
         };
         Rule: {
-            Enforced: boolean;
-            ID: string;
-            Priority: string;
-            Text: string;
+            applies_to?: string[];
+            category: string;
+            id: string;
+            origin: string;
+            severity: string;
+            text: string;
         };
         RuleWithSection: {
             enforced: boolean;
@@ -2851,6 +4298,14 @@ export interface components {
             /** Format: date-time */
             timestamp: string;
         };
+        ScaffoldRequest: {
+            frameworks: string[];
+            languages: string[];
+        };
+        ScaffoldResponse: {
+            files_created: string[];
+            semspec_dir: string;
+        };
         Scope: {
             do_not_touch?: string[];
             exclude?: string[];
@@ -2865,6 +4320,17 @@ export interface components {
                 Text: string;
             }[];
             section: string;
+        };
+        StandardsInput: {
+            rules: {
+                applies_to?: string[];
+                category: string;
+                id: string;
+                origin: string;
+                severity: string;
+                text: string;
+            }[];
+            version: string;
         };
         StatusStreamEnvelope: {
             flow_id: string;
@@ -2959,6 +4425,81 @@ export interface components {
             status: string;
             type?: string;
         };
+        Trajectory: {
+            duration_ms: number;
+            /** Format: date-time */
+            ended_at?: string | null;
+            entries?: {
+                capability?: string;
+                duration_ms?: number;
+                error?: string;
+                finish_reason?: string;
+                messages_count?: number;
+                model?: string;
+                provider?: string;
+                request_id?: string;
+                response_preview?: string;
+                result_preview?: string;
+                retries?: number;
+                status?: string;
+                storage_ref?: {
+                    content_type: string;
+                    key: string;
+                    size?: number;
+                    storage_instance: string;
+                } | null;
+                /** Format: date-time */
+                timestamp: string;
+                tokens_in?: number;
+                tokens_out?: number;
+                tool_name?: string;
+                type: string;
+            }[];
+            loop_id: string;
+            model_calls: number;
+            /** Format: date-time */
+            started_at?: string | null;
+            status?: string;
+            steps: number;
+            tokens_in: number;
+            tokens_out: number;
+            tool_calls: number;
+            trace_id?: string;
+        };
+        TrajectoryEntry: {
+            capability?: string;
+            duration_ms?: number;
+            error?: string;
+            finish_reason?: string;
+            messages_count?: number;
+            model?: string;
+            provider?: string;
+            request_id?: string;
+            response_preview?: string;
+            result_preview?: string;
+            retries?: number;
+            status?: string;
+            storage_ref?: {
+                content_type: string;
+                key: string;
+                size?: number;
+                storage_instance: string;
+            } | null;
+            /** Format: date-time */
+            timestamp: string;
+            tokens_in?: number;
+            tokens_out?: number;
+            tool_name?: string;
+            type: string;
+        };
+        TruncationSummary: {
+            by_capability?: {
+                [key: string]: number;
+            };
+            total_calls: number;
+            truncated_calls: number;
+            truncation_rate: number;
+        };
         UpdatePhaseHTTPRequest: {
             agent_config?: {
                 max_concurrent?: number;
@@ -2971,6 +4512,23 @@ export interface components {
             name?: string | null;
             requires_approval?: boolean | null;
         };
+        UpdatePlanHTTPRequest: {
+            context?: string | null;
+            goal?: string | null;
+            title?: string | null;
+        };
+        UpdateTaskHTTPRequest: {
+            acceptance_criteria?: {
+                given: string;
+                then: string;
+                when: string;
+            }[];
+            depends_on?: string[];
+            description?: string | null;
+            files?: string[];
+            sequence?: number | null;
+            type?: string | null;
+        };
         Violation: {
             Location: string;
             Message: string;
@@ -2981,6 +4539,66 @@ export interface components {
                 Text: string;
             };
             Section: string;
+        };
+        WizardFramework: {
+            language: string;
+            name: string;
+        };
+        WizardLanguage: {
+            has_ast: boolean;
+            marker: string;
+            name: string;
+        };
+        WizardResponse: {
+            frameworks: {
+                language: string;
+                name: string;
+            }[];
+            languages: {
+                has_ast: boolean;
+                marker: string;
+                name: string;
+            }[];
+        };
+        WorkflowTrajectory: {
+            /** Format: date-time */
+            completed_at?: string | null;
+            phases: {
+                [key: string]: {
+                    call_count: number;
+                    capabilities?: {
+                        [key: string]: {
+                            call_count: number;
+                            tokens_in: number;
+                            tokens_out: number;
+                            truncated_count?: number;
+                        } | null;
+                    };
+                    duration_ms: number;
+                    tokens_in: number;
+                    tokens_out: number;
+                } | null;
+            };
+            slug: string;
+            /** Format: date-time */
+            started_at?: string | null;
+            status: string;
+            totals?: {
+                call_count: number;
+                duration_ms: number;
+                tokens_in: number;
+                tokens_out: number;
+                total_tokens: number;
+            } | null;
+            trace_ids: string[];
+            truncation_summary?: {
+                by_capability?: {
+                    [key: string]: number;
+                };
+                total_calls: number;
+                truncated_calls: number;
+                truncation_rate: number;
+            } | null;
         };
     };
     responses: never;

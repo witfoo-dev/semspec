@@ -10,6 +10,12 @@
       "description": "NATS subject for LLM artifact ObjectStore API",
       "category": "basic"
     },
+    "entity_prefix": {
+      "type": "string",
+      "description": "Entity ID prefix for LLM call queries",
+      "default": "local.semspec.llm.call.semspec",
+      "category": "basic"
+    },
     "graph_gateway_url": {
       "type": "string",
       "description": "Graph gateway URL for LLM call queries",

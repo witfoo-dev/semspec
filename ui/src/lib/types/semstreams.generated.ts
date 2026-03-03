@@ -412,7 +412,12 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Flow definition to create */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["Flow"];
+                };
+            };
             responses: {
                 /** @description Flow created */
                 201: {
@@ -490,7 +495,12 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Updated flow definition */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["Flow"];
+                };
+            };
             responses: {
                 /** @description Flow updated */
                 200: {
@@ -761,7 +771,12 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description GraphQL query with optional variables */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["GraphQLRequest"];
+                };
+            };
             responses: {
                 /** @description GraphQL response with data or errors */
                 200: {
@@ -919,7 +934,12 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Review decision with optional notes and overrides */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ReviewRequest"];
+                };
+            };
             responses: {
                 /** @description Updated anomaly after review */
                 200: {
@@ -1319,7 +1339,7 @@ export interface paths {
         put?: never;
         /**
          * Send control signal to loop
-         * @description Sends a control signal (pause, resume, cancel) to an active loop. Request body: {type: 'pause'|'resume'|'cancel', reason?: string}
+         * @description Sends a control signal (pause, resume, cancel) to an active loop.
          */
         post: {
             parameters: {
@@ -1331,7 +1351,12 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Control signal to send */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SignalRequest"];
+                };
+            };
             responses: {
                 /** @description Signal accepted */
                 200: {
@@ -1414,7 +1439,7 @@ export interface paths {
         put?: never;
         /**
          * Process a user message
-         * @description Processes a user message synchronously. Commands (starting with /) are executed immediately. Regular messages are submitted as tasks. Request body: {content: string (required), user_id?: string, channel_type?: string, channel_id?: string, reply_to?: string}
+         * @description Processes a user message synchronously. Commands (starting with /) are executed immediately. Regular messages are submitted as tasks.
          */
         post: {
             parameters: {
@@ -1423,7 +1448,12 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description User message to process */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["HTTPMessageRequest"];
+                };
+            };
             responses: {
                 /** @description Message processed successfully */
                 200: {
@@ -1890,7 +1920,7 @@ export interface components {
             /** @description Technical protocol (udp, tcp, etc.) */
             protocol?: string;
             /** @description Component configuration schema */
-            schema?: components["schemas"]["a2a-adapter.v1"] | components["schemas"]["agentic-dispatch.v1"] | components["schemas"]["agentic-governance.v1"] | components["schemas"]["agentic-loop.v1"] | components["schemas"]["agentic-model.v1"] | components["schemas"]["agentic-tools.v1"] | components["schemas"]["directory-bridge.v1"] | components["schemas"]["document_processor.v1"] | components["schemas"]["file.v1"] | components["schemas"]["file_input.v1"] | components["schemas"]["graph-clustering.v1"] | components["schemas"]["graph-embedding.v1"] | components["schemas"]["graph-gateway.v1"] | components["schemas"]["graph-index-spatial.v1"] | components["schemas"]["graph-index-temporal.v1"] | components["schemas"]["graph-index.v1"] | components["schemas"]["graph-ingest.v1"] | components["schemas"]["graph-query.v1"] | components["schemas"]["http.v1"] | components["schemas"]["httppost.v1"] | components["schemas"]["iot_sensor.v1"] | components["schemas"]["json_filter.v1"] | components["schemas"]["json_generic.v1"] | components["schemas"]["json_map.v1"] | components["schemas"]["oasf-generator.v1"] | components["schemas"]["objectstore.v1"] | components["schemas"]["otel-exporter.v1"] | components["schemas"]["rule-processor.v1"] | components["schemas"]["slim-bridge.v1"] | components["schemas"]["trustgraph_input.v1"] | components["schemas"]["trustgraph_output.v1"] | components["schemas"]["udp.v1"] | components["schemas"]["websocket.v1"] | components["schemas"]["websocket_input.v1"] | components["schemas"]["workflow-processor.v1"];
+            schema?: components["schemas"]["a2a-adapter.v1"] | components["schemas"]["agentic-dispatch.v1"] | components["schemas"]["agentic-governance.v1"] | components["schemas"]["agentic-loop.v1"] | components["schemas"]["agentic-model.v1"] | components["schemas"]["agentic-tools.v1"] | components["schemas"]["directory-bridge.v1"] | components["schemas"]["document_processor.v1"] | components["schemas"]["file.v1"] | components["schemas"]["file_input.v1"] | components["schemas"]["github_webhook.v1"] | components["schemas"]["graph-clustering.v1"] | components["schemas"]["graph-embedding.v1"] | components["schemas"]["graph-gateway.v1"] | components["schemas"]["graph-index-spatial.v1"] | components["schemas"]["graph-index-temporal.v1"] | components["schemas"]["graph-index.v1"] | components["schemas"]["graph-ingest.v1"] | components["schemas"]["graph-query.v1"] | components["schemas"]["http.v1"] | components["schemas"]["httppost.v1"] | components["schemas"]["iot_sensor.v1"] | components["schemas"]["json_filter.v1"] | components["schemas"]["json_generic.v1"] | components["schemas"]["json_map.v1"] | components["schemas"]["oasf-generator.v1"] | components["schemas"]["objectstore.v1"] | components["schemas"]["otel-exporter.v1"] | components["schemas"]["reactive-workflow.v1"] | components["schemas"]["rule-processor.v1"] | components["schemas"]["slim-bridge.v1"] | components["schemas"]["trustgraph_input.v1"] | components["schemas"]["trustgraph_output.v1"] | components["schemas"]["udp.v1"] | components["schemas"]["websocket.v1"] | components["schemas"]["websocket_input.v1"];
             /** @description Component type (input/processor/output/storage) */
             type: string;
             /** @description Component version */
@@ -1938,6 +1968,22 @@ export interface components {
             prev_state: string;
             state: string;
             timestamp: number;
+        };
+        GraphQLRequest: {
+            query: string;
+            variables?: {
+                [key: string]: unknown;
+            };
+        };
+        HTTPMessageRequest: {
+            channel_id?: string;
+            channel_type?: string;
+            content: string;
+            metadata?: {
+                [key: string]: string;
+            };
+            reply_to?: string;
+            user_id?: string;
         };
         HTTPMessageResponse: {
             content: string;
@@ -2010,6 +2056,13 @@ export interface components {
                 value: number;
             }[];
         };
+        ReviewRequest: {
+            decision: string;
+            notes?: string;
+            override_predicate?: string;
+            reviewed_by?: string;
+            target_entity?: string;
+        };
         RuntimeHealthResponse: {
             components: {
                 component: string;
@@ -2066,6 +2119,10 @@ export interface components {
             prometheus_available: boolean;
             /** Format: date-time */
             timestamp: string;
+        };
+        SignalRequest: {
+            reason: string;
+            type: string;
         };
         SignalResponse: {
             accepted: boolean;
@@ -2198,11 +2255,6 @@ export interface components {
             auto_continue: boolean;
             /** @description Suffix appended to consumer names for uniqueness */
             consumer_name_suffix?: string;
-            /**
-             * @description Default model for new tasks
-             * @default qwen2.5-coder:32b
-             */
-            default_model: string;
             /**
              * @description Default role for new tasks
              * @default general
@@ -2455,9 +2507,19 @@ export interface components {
          * @description Orchestrates agentic loops with tool calls, state management, and trajectory tracking
          */
         "agentic-loop.v1": {
+            /**
+             * @description Enable Boid-style agent coordination (position tracking and steering signals)
+             * @default false
+             */
+            boid_enabled: boolean;
+            /**
+             * @description TTL for Boid steering signals before expiration (e.g. 30s or 1m)
+             * @default 30s
+             */
+            boid_signal_ttl: string;
             /** @description Suffix for consumer names */
             consumer_name_suffix?: string;
-            /** @description Context window management. model_limits maps model names to context window sizes in tokens */
+            /** @description Context window management. Model limits are resolved from the model registry */
             context?: {
                 /** @description Utilization threshold (0.01-1.0) that triggers context compaction */
                 compact_threshold?: number;
@@ -2469,8 +2531,6 @@ export interface components {
                 headroom_tokens?: number;
                 /** @description Hard token limit for context budget (overrides model limits when set) */
                 max_budget_tokens?: number;
-                /** @description Map of model name to context window size in tokens. Must include 'default' key for fallback. */
-                model_limits?: Record<string, never>;
                 /** @description Entity IDs to always keep in context during slicing */
                 preserve_entities?: string[];
                 /** @description Enable context slicing when budget is exceeded */
@@ -2497,6 +2557,11 @@ export interface components {
             max_iterations: number;
             /** @description Port configuration for inputs and outputs */
             ports?: string;
+            /**
+             * @description NATS KV bucket name for boid agent positions
+             * @default AGENT_POSITIONS
+             */
+            positions_bucket: string;
             /**
              * @description JetStream stream name
              * @default AGENT
@@ -2525,10 +2590,6 @@ export interface components {
              * @default false
              */
             delete_consumer_on_stop: boolean;
-            /** @description Model endpoints */
-            endpoints?: Record<string, never>;
-            /** @description Semantic model aliases mapping to endpoint names */
-            model_aliases?: Record<string, never>;
             /** @description Port configuration */
             ports?: string;
             /** @description Retry configuration */
@@ -2676,6 +2737,28 @@ export interface components {
             interval: string;
             /** @description Port configuration */
             ports?: string;
+        };
+        /**
+         * github_webhook Configuration
+         * @description GitHub webhook receiver for issue and PR events
+         */
+        "github_webhook.v1": {
+            /** @description GitHub event types to accept (issues;pull_request;pull_request_review;issue_comment) */
+            event_filter?: string[];
+            /**
+             * @description HTTP port for webhook receiver
+             * @default 8090
+             */
+            http_port: number;
+            /**
+             * @description Webhook endpoint path
+             * @default /github/webhook
+             */
+            path: string;
+            /** @description Port configuration */
+            ports?: string;
+            /** @description Repositories to process (owner/repo format) */
+            repo_allowlist?: string[];
         };
         /**
          * graph-clustering Configuration
@@ -3183,6 +3266,61 @@ export interface components {
             service_version: string;
         };
         /**
+         * reactive-workflow Configuration
+         * @description Reactive workflow engine using KV watch and subject triggers with typed Go conditions and actions
+         */
+        "reactive-workflow.v1": {
+            /**
+             * @description JetStream stream name for callback messages
+             * @default WORKFLOW_CALLBACKS
+             */
+            callback_stream_name: string;
+            /**
+             * @description How often to run cleanup of completed executions
+             * @default 1h
+             */
+            cleanup_interval: string;
+            /**
+             * @description How long to retain completed executions before cleanup
+             * @default 24h
+             */
+            cleanup_retention: string;
+            /** @description Prefix for NATS consumer names */
+            consumer_name_prefix?: string;
+            /**
+             * @description Default max iterations for loop workflows
+             * @default 10
+             */
+            default_max_iterations: number;
+            /**
+             * @description Default timeout for workflows (e.g. 10m)
+             * @default 10m
+             */
+            default_timeout: string;
+            /**
+             * @description Enable Prometheus metrics
+             * @default true
+             */
+            enable_metrics: boolean;
+            /**
+             * @description JetStream stream name for workflow events
+             * @default WORKFLOW_EVENTS
+             */
+            event_stream_name: string;
+            /** @description Port configuration for workflow inputs and outputs */
+            ports?: string;
+            /**
+             * @description NATS KV bucket for workflow execution state
+             * @default REACTIVE_WORKFLOW_STATE
+             */
+            state_bucket: string;
+            /**
+             * @description Default timeout for async tasks
+             * @default 5m
+             */
+            task_timeout_default: string;
+        };
+        /**
          * rule-processor Configuration
          * @description Rule execution processor
          */
@@ -3247,6 +3385,12 @@ export interface components {
                 name?: string;
                 /** @description on_enter */
                 on_enter?: {
+                    /** @description boid_signal_type */
+                    boid_signal_type?: string;
+                    /** @description boid_strength */
+                    boid_strength?: number;
+                    /** @description context_data */
+                    context_data?: Record<string, never>;
                     /** @description model */
                     model?: string;
                     /** @description object */
@@ -3265,9 +3409,17 @@ export interface components {
                     ttl?: string;
                     /** @description type */
                     type?: string;
+                    /** @description workflow_id */
+                    workflow_id?: string;
                 }[];
                 /** @description on_exit */
                 on_exit?: {
+                    /** @description boid_signal_type */
+                    boid_signal_type?: string;
+                    /** @description boid_strength */
+                    boid_strength?: number;
+                    /** @description context_data */
+                    context_data?: Record<string, never>;
                     /** @description model */
                     model?: string;
                     /** @description object */
@@ -3286,6 +3438,8 @@ export interface components {
                     ttl?: string;
                     /** @description type */
                     type?: string;
+                    /** @description workflow_id */
+                    workflow_id?: string;
                 }[];
                 /** @description related_patterns */
                 related_patterns?: string[];
@@ -3293,6 +3447,12 @@ export interface components {
                 type?: string;
                 /** @description while_true */
                 while_true?: {
+                    /** @description boid_signal_type */
+                    boid_signal_type?: string;
+                    /** @description boid_strength */
+                    boid_strength?: number;
+                    /** @description context_data */
+                    context_data?: Record<string, never>;
                     /** @description model */
                     model?: string;
                     /** @description object */
@@ -3311,6 +3471,8 @@ export interface components {
                     ttl?: string;
                     /** @description type */
                     type?: string;
+                    /** @description workflow_id */
+                    workflow_id?: string;
                 }[];
             }[];
             /** @description Port configuration for inputs (KV watch: ENTITY_STATES PREDICATE_INDEX) and outputs (NATS: control commands) */
@@ -3533,46 +3695,6 @@ export interface components {
             mode?: string;
             /** @description Port configuration */
             ports?: string;
-        };
-        /**
-         * workflow-processor Configuration
-         * @description Orchestrates multi-step agentic workflows with loops, limits, and timeouts
-         */
-        "workflow-processor.v1": {
-            /** @description Suffix appended to consumer names for uniqueness */
-            consumer_name_suffix?: string;
-            /**
-             * @description Default max iterations for loop workflows
-             * @default 10
-             */
-            default_max_iterations: number;
-            /**
-             * @description Default timeout for workflows (e.g. 10m)
-             * @default 10m
-             */
-            default_timeout: string;
-            /**
-             * @description NATS KV bucket for workflow definitions
-             * @default WORKFLOW_DEFINITIONS
-             */
-            definitions_bucket: string;
-            /**
-             * @description NATS KV bucket for workflow execution state
-             * @default WORKFLOW_EXECUTIONS
-             */
-            executions_bucket: string;
-            /** @description Port configuration for workflow inputs and outputs */
-            ports?: string;
-            /**
-             * @description Timeout for NATS request/response calls
-             * @default 30s
-             */
-            request_timeout: string;
-            /**
-             * @description JetStream stream name for workflow messages
-             * @default WORKFLOW
-             */
-            stream_name: string;
         };
     };
     responses: never;

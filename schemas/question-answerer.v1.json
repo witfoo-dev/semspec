@@ -43,7 +43,7 @@
     "task_subject": {
       "type": "string",
       "description": "Subject pattern for question-answering tasks",
-      "default": "agent.task.question-answerer",
+      "default": "dev.task.question-answerer",
       "category": "basic"
     }
   },

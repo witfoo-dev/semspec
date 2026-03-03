@@ -15,8 +15,8 @@
     },
     "index_interval": {
       "type": "string",
-      "description": "Full reindex interval (e.g. 5m)",
-      "default": "5m",
+      "description": "Full reindex interval (e.g. 60s). Empty string disables periodic reindex.",
+      "default": "60s",
       "category": "advanced"
     },
     "languages": {
