@@ -1548,7 +1548,7 @@ func (s *HelloWorldScenario) stageVerifyTasksCompleted(ctx context.Context, resu
 }
 
 // stageCaptureTrajectory retrieves trajectory data using the trace ID from plan creation.
-// Falls back to polling the LLM_CALLS KV bucket if no trace ID was captured.
+// Falls back to the workflow trajectory API if no trace ID was captured.
 func (s *HelloWorldScenario) stageCaptureTrajectory(ctx context.Context, result *Result) error {
 	traceID := s.resolveTraceID(ctx, result)
 	if traceID == "" {
@@ -1567,20 +1567,26 @@ func (s *HelloWorldScenario) stageCaptureTrajectory(ctx context.Context, result 
 	return nil
 }
 
-// resolveTraceID gets the trace ID from plan creation or falls back to KV bucket.
+// resolveTraceID gets the trace ID from plan creation or falls back to the
+// workflow trajectory API endpoint.
 func (s *HelloWorldScenario) resolveTraceID(ctx context.Context, result *Result) string {
 	traceID, _ := result.GetDetailString("plan_trace_id")
 	if traceID != "" {
 		return traceID
 	}
 
+	// Fallback: discover trace IDs via external workflow trajectory endpoint
+	slug, _ := result.GetDetailString("plan_slug")
+	if slug == "" {
+		result.AddWarning("no plan_trace_id or plan_slug available for trajectory capture")
+		return ""
+	}
+
 	ticker := time.NewTicker(kvPollInterval)
 	defer ticker.Stop()
 
-	var kvEntries *client.KVEntriesResponse
 	var lastErr error
-
-	for kvEntries == nil {
+	for {
 		select {
 		case <-ctx.Done():
 			if lastErr != nil {
@@ -1590,25 +1596,16 @@ func (s *HelloWorldScenario) resolveTraceID(ctx context.Context, result *Result)
 			}
 			return ""
 		case <-ticker.C:
-			entries, err := s.http.GetKVEntries(ctx, "LLM_CALLS")
+			wt, _, err := s.http.GetWorkflowTrajectory(ctx, slug)
 			if err != nil {
 				lastErr = err
 				continue
 			}
-			if len(entries.Entries) > 0 {
-				kvEntries = entries
+			if len(wt.TraceIDs) > 0 {
+				return wt.TraceIDs[0]
 			}
 		}
 	}
-
-	firstKey := kvEntries.Entries[0].Key
-	parts := strings.SplitN(firstKey, ".", 2)
-	if len(parts) < 2 {
-		result.AddWarning(fmt.Sprintf("LLM_CALLS key %q doesn't contain trace prefix", firstKey))
-		return ""
-	}
-
-	return parts[0]
 }
 
 // capturePlanTrajectory captures the main plan trajectory metrics.
