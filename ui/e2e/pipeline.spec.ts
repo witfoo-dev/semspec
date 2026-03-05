@@ -1,9 +1,25 @@
 import { test, expect, testData, mockPlan } from './helpers/setup';
 
 test.describe('Agent Pipeline View', () => {
-	// All plan detail pages fetch phases - provide a default empty response
+	// All plan detail pages fetch phases, requirements, and scenarios - provide default empty responses
 	test.beforeEach(async ({ page }) => {
 		await page.route('**/workflow-api/plans/*/phases', route => {
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify([])
+			});
+		});
+
+		await page.route('**/workflow-api/plans/*/requirements', route => {
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify([])
+			});
+		});
+
+		await page.route('**/workflow-api/plans/*/scenarios**', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -554,10 +570,10 @@ test.describe('Agent Pipeline View', () => {
 			await planDetailPage.expectApprovePlanBtnVisible();
 		});
 
-		test('shows Generate Tasks button for approved plan with no phases', async ({ page, planDetailPage }) => {
+		test('shows cascade status during requirement generation', async ({ page, planDetailPage }) => {
 			const plan = mockPlan({
-				slug: 'generate-plan',
-				title: 'Generate Plan',
+				slug: 'cascade-plan',
+				title: 'Cascade Plan',
 				approved: true,
 				stage: 'approved'
 			});
@@ -570,7 +586,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/generate-plan', route => {
+			await page.route('**/workflow-api/plans/cascade-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -578,7 +594,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/generate-plan/phases', route => {
+			await page.route('**/workflow-api/plans/cascade-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -586,7 +602,39 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/generate-plan/tasks', route => {
+			await planDetailPage.goto('cascade-plan');
+
+			// Cascade status should be visible with requirement generation message
+			const cascadeStatus = page.locator('.cascade-status');
+			await expect(cascadeStatus).toBeVisible();
+			await expect(cascadeStatus).toContainText('Generating requirements...');
+		});
+
+		test('shows Execute button when ready_for_execution', async ({ page, planDetailPage }) => {
+			const plan = mockPlan({
+				slug: 'ready-plan',
+				title: 'Ready Plan',
+				approved: true,
+				stage: 'ready_for_execution'
+			});
+
+			await page.route('**/workflow-api/plans', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([plan])
+				});
+			});
+
+			await page.route('**/workflow-api/plans/ready-plan', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify(plan)
+				});
+			});
+
+			await page.route('**/workflow-api/plans/ready-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -594,8 +642,8 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await planDetailPage.goto('generate-plan');
-			await planDetailPage.expectGenerateTasksBtnVisible();
+			await planDetailPage.goto('ready-plan');
+			await planDetailPage.expectExecuteBtnVisible();
 		});
 
 		test('shows Execute button when tasks are ready', async ({ page, planDetailPage }) => {
@@ -608,7 +656,7 @@ test.describe('Agent Pipeline View', () => {
 							slug: 'execute-plan',
 							title: 'Execute Plan',
 							approved: true,
-							stage: 'tasks',
+							stage: 'ready_for_execution',
 							active_loops: []
 						}
 					])
@@ -623,7 +671,7 @@ test.describe('Agent Pipeline View', () => {
 						slug: 'execute-plan',
 						title: 'Execute Plan',
 						approved: true,
-						stage: 'tasks',
+						stage: 'ready_for_execution',
 						active_loops: []
 					})
 				});

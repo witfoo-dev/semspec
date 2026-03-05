@@ -1,6 +1,6 @@
 import { test, expect, waitForHydration, seedInitializedProject, restoreWorkspace } from './helpers/setup';
 import { MockLLMClient } from './helpers/mock-llm';
-import { getPlans, getPlan, waitForPlanStageOneOf, forceApprovePlan, forceApprovePhases, waitForPhasesOnDisk } from './helpers/workflow';
+import { getPlans, getPlan, waitForPlanStageOneOf, forceApprovePlan } from './helpers/workflow';
 
 /**
  * Full UI Lifecycle E2E Test using Mock LLM.
@@ -163,89 +163,59 @@ test.describe('Full UI Lifecycle', () => {
 			await forceApprovePlan(planSlug);
 		}
 
-		// Verify API reflects approved state
+		// Verify API reflects approved state (auto-cascade may progress rapidly)
 		const approved = await waitForPlanStageOneOf(page, planSlug,
-			['approved', 'phases_generated', 'phases_approved', 'tasks_generated', 'tasks_approved', 'implementing', 'complete'],
+			['approved', 'requirements_generated', 'scenarios_generated', 'ready_for_execution',
+			 'phases_generated', 'phases_approved', 'tasks_generated', 'tasks_approved', 'implementing', 'complete'],
 			{ timeout: 15000 });
 		expect(approved).toBeTruthy();
 		expect(approved!.approved).toBe(true);
 	});
 
-	// ── Phase 7: Generate tasks ──────────────────────────────────────
-	// The mock scenario generates phases first (auto-approved), then tasks.
-	// After phases, the per-phase "Generate Tasks" button lives inside PhaseDetail
-	// rather than the ActionBar, so we trigger task generation via API.
-	//
-	// NOTE: The reactive engine's handle-approved rule has the same bug for
-	// phase-review-loop as for plan-review-loop — it never fires after
-	// reviewer-completed. We work around this by force-approving phases
-	// via the shared filesystem volume, just like we do for plan approval.
+	// ── Phase 7: Wait for auto-cascade to complete ──────────────────
+	// After plan approval, the auto-cascade generates:
+	//   requirements → scenarios → ready_for_execution
+	// The mock LLM handles this automatically. We just poll for completion.
+	// Legacy plans may still go through phases → tasks path.
 
-	test('generate tasks and wait for tasks', async ({ page, planDetailPage }) => {
-		const currentPlan = await getPlan(page, planSlug);
-		const stage = currentPlan?.stage ?? '';
-
-		// Step 1: Generate phases if not already done
-		if (!['phases_generated', 'phases_approved', 'tasks_generated', 'tasks_approved', 'implementing', 'complete'].includes(stage)) {
-			// Trigger phase generation via API
-			const phaseResp = await page.request.post(
-				`http://localhost:3000/workflow-api/plans/${planSlug}/phases/generate`,
-				{ data: {} }
-			);
-			expect(phaseResp.ok()).toBe(true);
-
-			// Wait for phases to appear on disk
-			const phasesReady = await waitForPhasesOnDisk(planSlug, { timeout: 60000 });
-			expect(phasesReady).toBe(true);
-		}
-
-		// Step 2: Force-approve phases if needed (reactive engine bug workaround)
-		const afterPhasesPlan = await getPlan(page, planSlug);
-		if (afterPhasesPlan &&
-			!['phases_approved', 'tasks_generated', 'tasks_approved', 'implementing', 'complete'].includes(afterPhasesPlan.stage)) {
-			await forceApprovePhases(planSlug);
-		}
-
-		// Step 3: Generate tasks via API
-		const afterApprovePlan = await getPlan(page, planSlug);
-		if (afterApprovePlan &&
-			!['tasks_generated', 'tasks_approved', 'implementing', 'complete'].includes(afterApprovePlan.stage)) {
-			const taskResp = await page.request.post(
-				`http://localhost:3000/workflow-api/plans/${planSlug}/tasks/generate`,
-				{ data: {} }
-			);
-			expect(taskResp.ok()).toBe(true);
-		}
-
-		// Wait for tasks — mock LLM may race past tasks_generated quickly
+	test('wait for cascade or task generation', async ({ page, planDetailPage }) => {
+		// Wait for the plan to reach an execution-ready state via either path:
+		// New path: approved → requirements_generated → scenarios_generated → ready_for_execution
+		// Legacy path: approved → phases_generated → phases_approved → tasks_generated → tasks_approved
 		const plan = await waitForPlanStageOneOf(page, planSlug,
-			['tasks_generated', 'tasks_approved', 'implementing', 'complete'],
-			{ timeout: 60000 });
+			['ready_for_execution', 'tasks_generated', 'tasks_approved', 'implementing', 'complete'],
+			{ timeout: 90000 });
 		expect(plan).toBeTruthy();
 
-		// Verify plan detail page renders the tasks
+		// Verify plan detail page renders
 		await planDetailPage.goto(planSlug);
 		await planDetailPage.expectVisible();
 	});
 
-	// ── Phase 8: Task Approval → Execution ─────────────────────────────
+	// ── Phase 8: Ensure ready for execution ─────────────────────────────
+	// With auto-cascade, the plan goes directly to ready_for_execution.
+	// Legacy plans may need task approval. Handle both paths.
 
-	test('approve all tasks', async ({ page }) => {
-		// Mock task-reviewer auto-approves, so tasks may already be approved.
-		// Try to approve via API; 409 (already approved) is a success case.
-		const response = await page.request.post(
-			`http://localhost:3000/workflow-api/plans/${planSlug}/tasks/approve`,
-			{ data: {} }
-		);
-		if (!response.ok() && response.status() !== 409) {
-			const body = await response.text();
-			throw new Error(`Task approval failed (${response.status()}): ${body}`);
+	test('plan is ready for execution', async ({ page }) => {
+		const plan = await getPlan(page, planSlug);
+		const stage = plan?.stage ?? '';
+
+		// If on legacy path with tasks, try to approve them
+		if (['tasks_generated'].includes(stage)) {
+			const response = await page.request.post(
+				`http://localhost:3000/workflow-api/plans/${planSlug}/tasks/approve`,
+				{ data: {} }
+			);
+			if (!response.ok() && response.status() !== 409) {
+				const body = await response.text();
+				throw new Error(`Task approval failed (${response.status()}): ${body}`);
+			}
 		}
 
-		// Mock LLM may progress past tasks_approved very quickly
-		const plan = await waitForPlanStageOneOf(page, planSlug,
-			['tasks_approved', 'implementing', 'complete'], { timeout: 30000 });
-		expect(plan).toBeTruthy();
+		// Verify plan is in an execution-ready or later state
+		const readyPlan = await waitForPlanStageOneOf(page, planSlug,
+			['ready_for_execution', 'tasks_approved', 'implementing', 'complete'], { timeout: 30000 });
+		expect(readyPlan).toBeTruthy();
 	});
 
 	test('start execution and verify pipeline indicator', async ({ page, planDetailPage }) => {
@@ -261,7 +231,7 @@ test.describe('Full UI Lifecycle', () => {
 
 		// Verify pipeline indicator renders on the plan detail page.
 		// The full AgentPipelineView requires active_loops, which may be empty
-		// if the mock LLM completes instantly. The PipelineIndicator (plan/tasks/exec
+		// if the mock LLM completes instantly. The PipelineIndicator (plan/reqs/exec
 		// status badges) should always render for approved plans.
 		await planDetailPage.goto(planSlug);
 		await planDetailPage.expectVisible();
@@ -294,10 +264,10 @@ test.describe('Full UI Lifecycle', () => {
 	// wired up in the reactive engine. We verify that the plan is at
 	// least at tasks_approved (execution was triggered successfully).
 
-	test('verify plan reached tasks_approved', async ({ page }) => {
+	test('verify plan reached execution-ready state', async ({ page }) => {
 		const plan = await getPlan(page, planSlug);
 		expect(plan).toBeTruthy();
-		expect(['tasks_approved', 'implementing', 'complete']).toContain(plan!.stage);
+		expect(['ready_for_execution', 'tasks_approved', 'implementing', 'complete']).toContain(plan!.stage);
 	});
 
 	// ── Phase 11: Sources Page ─────────────────────────────────────────

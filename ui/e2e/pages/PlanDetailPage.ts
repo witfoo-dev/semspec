@@ -7,6 +7,8 @@ import { type Page, type Locator, expect } from '@playwright/test';
  * - Plan information and metadata
  * - Agent Pipeline View (stages, progress, parallel branches)
  * - Review Dashboard (spec gate, reviewer cards, findings)
+ * - Requirements/Scenarios tree navigation (current UI)
+ * - Phase/Task tree navigation (legacy plans - kept for backwards compat)
  */
 export class PlanDetailPage {
 	readonly page: Page;
@@ -37,10 +39,13 @@ export class PlanDetailPage {
 	// ActionBar (consolidated action buttons)
 	readonly actionBar: Locator;
 	readonly approvePlanBtn: Locator;
+	// Legacy ActionBar buttons (removed from current UI, kept for old-plan backwards compat)
 	readonly generatePhasesBtn: Locator;
 	readonly generateTasksBtn: Locator;
 	readonly approveAllBtn: Locator;
 	readonly executeBtn: Locator;
+	// Cascade status shown during auto-cascade in requirements/scenarios workflow
+	readonly cascadeStatus: Locator;
 
 	// ResizableSplit (2-panel layout: Plan + Tasks)
 	readonly resizableSplit: Locator;
@@ -74,6 +79,12 @@ export class PlanDetailPage {
 	// Navigation tree
 	readonly navTree: Locator;
 	readonly treeNodes: Locator;
+	// Requirement/scenario tree nodes (current UI)
+	readonly requirementNodes: Locator;
+	readonly scenarioNodes: Locator;
+	// Requirement detail panel (shown when requirement selected in tree)
+	readonly requirementDetail: Locator;
+	readonly requirementDetailTitle: Locator;
 
 	// Task detail panel (shown when task selected in tree)
 	readonly taskDetail: Locator;
@@ -116,6 +127,7 @@ export class PlanDetailPage {
 		this.generateTasksBtn = this.actionBar.locator('button', { hasText: 'Generate Tasks' });
 		this.approveAllBtn = this.actionBar.locator('button', { hasText: /Approve All/ });
 		this.executeBtn = this.actionBar.locator('button', { hasText: /Start Execution/ });
+		this.cascadeStatus = page.locator('.cascade-status');
 
 		// ResizableSplit (2-panel layout: Nav Tree + Detail/Chat)
 		this.resizableSplit = page.locator('.resizable-split').first();
@@ -150,6 +162,12 @@ export class PlanDetailPage {
 		// Navigation tree (PlanNavTree)
 		this.navTree = page.locator('.plan-nav-tree');
 		this.treeNodes = page.locator('.tree-node');
+		// Requirement/scenario tree nodes (current UI)
+		this.requirementNodes = this.navTree.locator('.tree-node.req-node');
+		this.scenarioNodes = this.navTree.locator('.tree-node.scenario-node');
+		// Requirement detail panel
+		this.requirementDetail = page.locator('.requirement-detail');
+		this.requirementDetailTitle = this.requirementDetail.locator('.detail-title');
 
 		// Task detail panel (TaskDetail rendered when task selected in tree)
 		this.taskDetail = page.locator('.task-detail');
@@ -350,6 +368,27 @@ export class PlanDetailPage {
 		await expect(this.approvePlanBtn).toBeVisible();
 	}
 
+	async expectExecuteBtnVisible(): Promise<void> {
+		await expect(this.executeBtn).toBeVisible();
+	}
+
+	async expectCascadeStatusVisible(): Promise<void> {
+		await expect(this.cascadeStatus).toBeVisible();
+	}
+
+	async expectCascadeStatusText(text: string): Promise<void> {
+		await expect(this.cascadeStatus).toContainText(text);
+	}
+
+	async clickApprovePlan(): Promise<void> {
+		await this.approvePlanBtn.click();
+	}
+
+	async clickExecute(): Promise<void> {
+		await this.executeBtn.click();
+	}
+
+	// Legacy ActionBar methods - removed from current UI, kept for old-plan backwards compat
 	async expectGeneratePhasesBtnVisible(): Promise<void> {
 		await expect(this.generatePhasesBtn).toBeVisible();
 	}
@@ -362,14 +401,6 @@ export class PlanDetailPage {
 		await expect(this.approveAllBtn).toBeVisible();
 	}
 
-	async expectExecuteBtnVisible(): Promise<void> {
-		await expect(this.executeBtn).toBeVisible();
-	}
-
-	async clickApprovePlan(): Promise<void> {
-		await this.approvePlanBtn.click();
-	}
-
 	async clickGeneratePhases(): Promise<void> {
 		await this.generatePhasesBtn.click();
 	}
@@ -380,10 +411,6 @@ export class PlanDetailPage {
 
 	async clickApproveAll(): Promise<void> {
 		await this.approveAllBtn.click();
-	}
-
-	async clickExecute(): Promise<void> {
-		await this.executeBtn.click();
 	}
 
 	async goBack(): Promise<void> {
@@ -569,7 +596,47 @@ export class PlanDetailPage {
 		await row.locator('button[title="Edit task"]').click();
 	}
 
-	// Tree navigation methods
+	// Requirement/scenario tree navigation methods (current UI)
+	async selectRequirementInTree(title: string): Promise<void> {
+		const reqNode = this.navTree.locator('.tree-node.req-node', { hasText: title });
+		await reqNode.click();
+		await expect(this.requirementDetail).toBeVisible({ timeout: 5000 });
+	}
+
+	async expandRequirementInTree(title: string): Promise<void> {
+		const reqRow = this.navTree.locator('.req-row').filter({ hasText: title });
+		const expandBtn = reqRow.locator('.expand-btn');
+		const isExpanded = await expandBtn.getAttribute('aria-expanded');
+		if (isExpanded !== 'true') {
+			await expandBtn.click();
+		}
+	}
+
+	async selectScenarioInTree(scenarioText: string): Promise<void> {
+		const scenarioNode = this.navTree.locator('.tree-node.scenario-node', { hasText: scenarioText });
+		await scenarioNode.click();
+	}
+
+	async expectRequirementInTree(title: string): Promise<void> {
+		const reqNode = this.navTree.locator('.tree-node.req-node', { hasText: title });
+		await expect(reqNode).toBeVisible();
+	}
+
+	async expectScenarioInTree(scenarioText: string): Promise<void> {
+		const scenarioNode = this.navTree.locator('.tree-node.scenario-node', { hasText: scenarioText });
+		await expect(scenarioNode).toBeVisible();
+	}
+
+	// Requirement detail methods (current UI)
+	async expectRequirementDetailVisible(): Promise<void> {
+		await expect(this.requirementDetail).toBeVisible();
+	}
+
+	async expectRequirementDetailTitle(title: string): Promise<void> {
+		await expect(this.requirementDetailTitle).toContainText(title);
+	}
+
+	// Legacy tree navigation methods - phase/task UI, kept for backwards compat with old plans
 	async selectPhaseInTree(phaseName: string): Promise<void> {
 		const phaseNode = this.navTree.locator('.tree-node.phase-node', { hasText: phaseName });
 		await phaseNode.click();
@@ -597,6 +664,7 @@ export class PlanDetailPage {
 		await expect(this.navTree).toBeVisible();
 	}
 
+	// Legacy: phase/task tree assertions for old plans
 	async expectPhaseInTree(phaseName: string): Promise<void> {
 		const phaseNode = this.navTree.locator('.tree-node.phase-node', { hasText: phaseName });
 		await expect(phaseNode).toBeVisible();
@@ -607,7 +675,7 @@ export class PlanDetailPage {
 		await expect(taskNode).toBeVisible();
 	}
 
-	// Task detail methods (when task selected via tree)
+	// Task detail methods (when task selected via tree - legacy phase/task plans)
 	async expectTaskDetailVisible(): Promise<void> {
 		await expect(this.taskDetail).toBeVisible();
 	}
