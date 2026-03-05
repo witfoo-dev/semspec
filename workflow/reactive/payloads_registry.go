@@ -60,6 +60,21 @@ func registerRequestPayloads() {
 		{ScenarioGeneratorRequestType, "Scenario generator request from reactive workflow engine", func() any { return &ScenarioGeneratorRequest{} }},
 		{ChangeProposalReviewRequestType, "Change proposal review request from reactive workflow engine", func() any { return &ChangeProposalReviewRequest{} }},
 		{ChangeProposalCascadeRequestType, "Change proposal cascade request from reactive workflow engine", func() any { return &ChangeProposalCascadeRequest{} }},
+		// DAG execution payload types (ADR-025 Phase 3)
+		{dagExecutionTriggerType, "DAG execution trigger payload", func() any { return &DAGExecutionTriggerPayload{} }},
+		{dagNodeTaskType, "DAG node task dispatch payload", func() any { return &DAGNodeTaskPayload{} }},
+		{dagExecutionCompleteType, "DAG execution complete event payload", func() any { return &DAGExecutionCompletePayload{} }},
+		{dagExecutionFailedType, "DAG execution failed event payload", func() any { return &DAGExecutionFailedPayload{} }},
+		{dagNodeCompleteType, "DAG node complete event payload", func() any { return &DAGNodeCompletePayload{} }},
+		{dagNodeFailedType, "DAG node failed event payload", func() any { return &DAGNodeFailedPayload{} }},
+		// Scenario execution payload types (ADR-025 Phase 4)
+		{scenarioExecutionTriggerType, "Scenario execution trigger payload", func() any { return &ScenarioExecutionTriggerPayload{} }},
+		{scenarioDecomposeRequestType, "Scenario decompose request payload", func() any { return &ScenarioDecomposeRequest{} }},
+		{scenarioDecomposedType, "Scenario decomposed result payload", func() any { return &ScenarioDecomposedPayload{} }},
+		{scenarioCompleteType, "Scenario execution complete event payload", func() any { return &ScenarioCompletePayload{} }},
+		{scenarioFailedType, "Scenario execution failed event payload", func() any { return &ScenarioFailedPayload{} }},
+		// Cancellation signal payload type (ADR-025 Phase 6)
+		{cancellationSignalType, "Cancellation signal for running workflow loops", func() any { return &CancellationSignal{} }},
 	}
 
 	for _, p := range payloads {

@@ -37,6 +37,10 @@ const (
 	StatusRequirementsGenerated Status = "requirements_generated"
 	// StatusScenariosGenerated indicates scenarios have been generated for all requirements.
 	StatusScenariosGenerated Status = "scenarios_generated"
+	// StatusReadyForExecution indicates the plan has scenarios and is ready for the scenario
+	// orchestrator to pick up and decompose into tasks at runtime (reactive execution mode).
+	// This status is set by task-generator when reactive_mode=true, bypassing task generation.
+	StatusReadyForExecution Status = "ready_for_execution"
 	// StatusPhasesGenerated indicates phases have been generated from the plan.
 	StatusPhasesGenerated Status = "phases_generated"
 	// StatusPhasesApproved indicates generated phases have been reviewed and approved.
@@ -65,6 +69,7 @@ func (s Status) IsValid() bool {
 	switch s {
 	case StatusCreated, StatusDrafted, StatusReviewed, StatusApproved,
 		StatusRequirementsGenerated, StatusScenariosGenerated,
+		StatusReadyForExecution,
 		StatusPhasesGenerated, StatusPhasesApproved,
 		StatusTasksGenerated, StatusTasksApproved,
 		StatusImplementing, StatusComplete, StatusArchived, StatusRejected:
@@ -91,7 +96,14 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusRequirementsGenerated:
 		return target == StatusScenariosGenerated || target == StatusRejected
 	case StatusScenariosGenerated:
-		return target == StatusPhasesGenerated || target == StatusRejected
+		// scenarios_generated → phases_generated (static mode)
+		// scenarios_generated → ready_for_execution (reactive mode — task-generator reactive_mode=true)
+		// scenarios_generated → rejected (validation failure)
+		return target == StatusPhasesGenerated || target == StatusReadyForExecution || target == StatusRejected
+	case StatusReadyForExecution:
+		// ready_for_execution → implementing (scenario orchestrator picks up the plan)
+		// ready_for_execution → rejected (orchestration failure)
+		return target == StatusImplementing || target == StatusRejected
 	case StatusPhasesGenerated:
 		// phases_generated → phases_approved (normal) or rejected (phase review escalation)
 		return target == StatusPhasesApproved || target == StatusRejected

@@ -313,6 +313,14 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"slug", trigger.Slug,
 		"trace_id", trigger.TraceID)
 
+	// In reactive mode skip LLM task generation entirely and transition the plan
+	// directly from scenarios_generated → ready_for_execution. The scenario
+	// orchestrator will decompose work at runtime.
+	if c.config.ReactiveMode {
+		c.handleReactiveMode(ctx, msg, trigger)
+		return
+	}
+
 	// Signal in-progress to prevent redelivery during LLM operations.
 	if err := msg.InProgress(); err != nil {
 		c.logger.Debug("Failed to signal in-progress", "error", err)
@@ -388,6 +396,85 @@ func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg,
 	if nakErr := msg.Nak(); nakErr != nil {
 		c.logger.Warn("Failed to NAK message", "error", nakErr)
 	}
+}
+
+// handleReactiveMode handles task generation triggers when reactive_mode=true.
+// Instead of invoking the LLM, it transitions the plan status directly from
+// scenarios_generated → ready_for_execution so the scenario orchestrator can
+// decompose work at runtime.
+func (c *Component) handleReactiveMode(ctx context.Context, msg jetstream.Msg, trigger *reactive.TaskGeneratorRequest) {
+	c.logger.Info("Reactive mode: skipping task generation, transitioning to ready_for_execution",
+		"request_id", trigger.RequestID,
+		"slug", trigger.Slug)
+
+	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = os.Getwd()
+		if err != nil {
+			c.handleTriggerFailure(ctx, msg, trigger, "Failed to get working directory (reactive mode)", err)
+			return
+		}
+	}
+
+	manager := workflow.NewManager(repoRoot)
+	plan, err := manager.LoadPlan(ctx, trigger.Slug)
+	if err != nil {
+		c.handleTriggerFailure(ctx, msg, trigger, "Failed to load plan (reactive mode)", err)
+		return
+	}
+
+	if err := manager.SetPlanStatus(ctx, plan, workflow.StatusReadyForExecution); err != nil {
+		c.handleTriggerFailure(ctx, msg, trigger, "Failed to set plan status to ready_for_execution", err)
+		return
+	}
+
+	// If dispatched by the reactive engine, update KV state so the engine
+	// can advance. Without this, the engine would wait forever for a
+	// tasks-generated phase that never comes in reactive mode.
+	if trigger.ExecutionID != "" && c.stateBucket != nil {
+		if kvErr := c.completeReactiveExecution(ctx, trigger.ExecutionID); kvErr != nil {
+			c.logger.Warn("Failed to update KV state for reactive mode (non-fatal)",
+				"execution_id", trigger.ExecutionID, "error", kvErr)
+		}
+	}
+
+	c.logger.Info("Plan transitioned to ready_for_execution (reactive mode)",
+		"slug", trigger.Slug,
+		"request_id", trigger.RequestID)
+
+	if err := msg.Ack(); err != nil {
+		c.logger.Warn("Failed to ACK message", "error", err)
+	}
+}
+
+// completeReactiveExecution updates the KV workflow state to mark the
+// task-generation step as complete in reactive mode. This allows the reactive
+// engine to advance past the task-generator step.
+func (c *Component) completeReactiveExecution(ctx context.Context, executionID string) error {
+	entry, err := c.stateBucket.Get(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("get workflow state %s: %w", executionID, err)
+	}
+
+	var state reactive.TaskReviewState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		return fmt.Errorf("unmarshal state: %w", err)
+	}
+
+	state.Phase = "tasks_generated"
+	state.UpdatedAt = time.Now()
+
+	data, err := json.Marshal(&state)
+	if err != nil {
+		return fmt.Errorf("marshal state: %w", err)
+	}
+
+	if _, err := c.stateBucket.Put(ctx, executionID, data); err != nil {
+		return fmt.Errorf("put workflow state: %w", err)
+	}
+
+	return nil
 }
 
 // transitionToFailure transitions the workflow to the generator-failed phase.

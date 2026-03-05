@@ -421,8 +421,12 @@ to the knowledge graph.
 ### task-generator
 
 **Purpose**: Runs the multi-step planning pipeline (Requirements → Scenarios → Phases → Tasks)
-from an approved plan. See [Workflow System: Planning Pipeline](05-workflow-system.md#planning-pipeline-adr-024)
-for the full pipeline description.
+from an approved plan when `reactive_mode=false` (default). When `reactive_mode=true`, it skips
+task generation entirely and advances the plan status to `ready_for_execution` so the
+scenario-orchestrator can decompose work at runtime.
+
+See [Workflow System: Planning Pipeline](05-workflow-system.md#planning-pipeline-adr-024) for the
+full pipeline description.
 
 **Location**: `processor/task-generator/`
 
@@ -434,7 +438,8 @@ for the full pipeline description.
   "consumer_name": "task-generator",
   "trigger_subject": "workflow.trigger.task-generator",
   "default_capability": "planning",
-  "pipeline_mode": "pipeline"
+  "pipeline_mode": "pipeline",
+  "reactive_mode": false
 }
 ```
 
@@ -445,10 +450,11 @@ for the full pipeline description.
 | `trigger_subject` | string | `workflow.trigger.task-generator` | Subject to consume triggers from |
 | `default_capability` | string | `planning` | Default model capability |
 | `pipeline_mode` | string | `pipeline` | `pipeline` (default) or `single_shot` |
+| `reactive_mode` | bool | `false` | Skip task generation; advance plan to `ready_for_execution` |
 
 #### Behavior
 
-**Pipeline mode** (default) — four focused LLM calls:
+**Pipeline mode** (default, `reactive_mode=false`) — four focused LLM calls:
 
 1. **Subscribes**: Consumes from `workflow.trigger.task-generator` on the WORKFLOWS stream
 1. **Loads Plan**: Reads plan from `.semspec/plans/{slug}/plan.json`
@@ -462,8 +468,18 @@ for the full pipeline description.
 1. **Saves Tasks**: Writes to `.semspec/plans/{slug}/tasks.json`
 1. **Publishes Result**: Sends completion to `workflow.result.tasks.{slug}`
 
-**Single-shot mode** — one LLM call producing all tasks directly. Use when pipeline latency is
-unacceptable (e.g., local development with small models).
+**Single-shot mode** (`pipeline_mode=single_shot`) — one LLM call producing all tasks directly.
+Use when pipeline latency is unacceptable (e.g., local development with small models).
+
+**Reactive mode** (`reactive_mode=true`) — skips all LLM calls after Scenario generation:
+
+1. Runs Requirements and Scenarios generation steps as normal
+1. After `scenarios_generated`, advances plan status directly to `ready_for_execution`
+1. Does **not** generate Phases or Tasks; does **not** write `tasks.json`
+1. Publishes result to `workflow.result.tasks.{slug}` to signal completion
+
+The `scenario-orchestrator` picks up plans in `ready_for_execution` status and decomposes each
+Scenario into a TaskDAG at execution time via the reactive workflows.
 
 #### Task JSON Format
 
@@ -547,6 +563,72 @@ dispatches each task to an agentic development loop.
 | `context.build.implementation` | Core NATS | Output | Context build requests |
 | `agent.task.development` | JetStream | Output | Agent task messages |
 | `workflow.result.task-dispatcher.<slug>` | Core NATS | Output | Batch completion notifications |
+
+---
+
+### scenario-orchestrator
+
+**Purpose**: Entry point for reactive execution (ADR-025). Receives an orchestration trigger for
+a plan, and fires a `scenario-execution-loop` workflow for each pending or dirty Scenario. Only
+active when `reactive_mode=true` on `task-generator`.
+
+**Location**: `processor/scenario-orchestrator/`
+
+#### Configuration
+
+```json
+{
+  "stream_name": "WORKFLOW",
+  "consumer_name": "scenario-orchestrator",
+  "trigger_subject": "scenario.orchestrate.*",
+  "workflow_trigger_subject": "workflow.trigger.scenario-execution-loop",
+  "execution_timeout": "120s",
+  "max_concurrent": 5
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `stream_name` | string | `WORKFLOW` | JetStream stream for orchestration triggers |
+| `consumer_name` | string | `scenario-orchestrator` | Durable consumer name |
+| `trigger_subject` | string | `scenario.orchestrate.*` | Pattern for per-plan triggers |
+| `workflow_trigger_subject` | string | `workflow.trigger.scenario-execution-loop` | Subject for per-scenario triggers |
+| `execution_timeout` | string | `120s` | Maximum time for a single orchestration cycle |
+| `max_concurrent` | int | `5` | Maximum parallel scenario executions triggered per cycle (1–20) |
+
+#### Trigger Payload
+
+```json
+{
+  "plan_slug": "add-user-authentication",
+  "scenarios": [
+    {
+      "scenario_id": "scenario.add-user-authentication.1.1",
+      "prompt": "Given the user is logged out ...",
+      "role": "developer",
+      "model": "qwen"
+    }
+  ],
+  "trace_id": "abc123"
+}
+```
+
+#### Behavior
+
+1. **Receives trigger**: Consumes `OrchestratorTrigger` from `scenario.orchestrate.<planSlug>`
+1. **Dispatches concurrently**: Fires one `ScenarioExecutionTriggerPayload` per Scenario, bounded
+   by `max_concurrent`
+1. **ACKs on success**: NAKs on any dispatch failure (message will be redelivered, max 3 attempts)
+
+The orchestrator does not track execution results. Once triggers are dispatched it is done.
+The `scenario-execution-loop` and `dag-execution-loop` reactive workflows handle the rest.
+
+#### NATS Subjects
+
+| Subject | Transport | Direction | Description |
+|---------|-----------|-----------|-------------|
+| `scenario.orchestrate.*` | JetStream (WORKFLOW) | Input | Per-plan orchestration triggers |
+| `workflow.trigger.scenario-execution-loop` | JetStream (WORKFLOW) | Output | Per-scenario execution triggers |
 
 ---
 

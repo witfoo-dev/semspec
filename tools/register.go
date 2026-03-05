@@ -3,18 +3,106 @@
 package tools
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
 	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
 
+	"github.com/c360studio/semspec/tools/create"
+	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/tools/doc"
 	"github.com/c360studio/semspec/tools/file"
 	"github.com/c360studio/semspec/tools/git"
 	"github.com/c360studio/semspec/tools/github"
+	"github.com/c360studio/semspec/tools/spawn"
+	"github.com/c360studio/semspec/tools/tree"
 	// Register workflow tools via init()
 	_ "github.com/c360studio/semspec/tools/workflow"
 )
+
+// AgenticToolDeps carries the infrastructure dependencies required by
+// spawn_agent and query_agent_tree. These are not available at init() time
+// so callers must invoke RegisterAgenticTools explicitly during startup.
+type AgenticToolDeps struct {
+	// NATSClient is required by spawn_agent for publishing task messages and
+	// subscribing to child completion events.
+	NATSClient spawn.NATSClient
+
+	// GraphHelper is required by spawn_agent and query_agent_tree for
+	// recording spawn relationships and querying the agent hierarchy.
+	GraphHelper spawn.GraphHelper
+
+	// TreeQuerier is the graphQuerier interface required by query_agent_tree.
+	// If nil and GraphHelper satisfies the interface, it will be used directly.
+	TreeQuerier tree.GraphQuerier
+
+	// DefaultModel is the fallback LLM model for spawned agents when the
+	// tool call does not specify one.
+	DefaultModel string
+
+	// MaxDepth overrides the default spawn depth limit (5). Zero uses default.
+	MaxDepth int
+}
+
+// RegisterAgenticTools registers the three agentic tool executors that require
+// runtime infrastructure (NATS client, graph helper). Call this once during
+// component startup after the NATS connection is established.
+//
+// decompose_task is also registered here because its Executor is stateless
+// and doesn't need infrastructure, but grouping all agentic tools together
+// makes the startup sequence explicit.
+func RegisterAgenticTools(deps AgenticToolDeps) {
+	// decompose_task — stateless, no infrastructure dependencies.
+	decomposeExec := decompose.NewExecutor()
+	for _, tool := range decomposeExec.ListTools() {
+		_ = agentictools.RegisterTool(tool.Name, decomposeExec)
+	}
+
+	// create_tool — stateless MVP, no infrastructure dependencies.
+	createExec := create.NewExecutor()
+	for _, tool := range createExec.ListTools() {
+		_ = agentictools.RegisterTool(tool.Name, createExec)
+	}
+
+	if deps.NATSClient == nil || deps.GraphHelper == nil {
+		// Infrastructure not available; skip spawn_agent and query_agent_tree.
+		return
+	}
+
+	// spawn_agent — requires NATS and graph.
+	spawnOpts := []spawn.Option{}
+	if deps.DefaultModel != "" {
+		spawnOpts = append(spawnOpts, spawn.WithDefaultModel(deps.DefaultModel))
+	}
+	if deps.MaxDepth > 0 {
+		spawnOpts = append(spawnOpts, spawn.WithMaxDepth(deps.MaxDepth))
+	}
+	spawnExec := spawn.NewExecutor(deps.NATSClient, deps.GraphHelper, spawnOpts...)
+	for _, tool := range spawnExec.ListTools() {
+		_ = agentictools.RegisterTool(tool.Name, spawnExec)
+	}
+
+	// query_agent_tree — requires graph querier.
+	querier := deps.TreeQuerier
+	if querier == nil {
+		if q, ok := deps.GraphHelper.(tree.GraphQuerier); ok {
+			querier = q
+		}
+	}
+	if querier != nil {
+		treeExec := tree.NewExecutor(querier)
+		for _, tool := range treeExec.ListTools() {
+			_ = agentictools.RegisterTool(tool.Name, treeExec)
+		}
+	}
+}
+
+// RegisterAgenticToolsWithContext is RegisterAgenticTools with a context for
+// future use (e.g. graceful shutdown). Currently a pass-through.
+func RegisterAgenticToolsWithContext(_ context.Context, deps AgenticToolDeps) {
+	RegisterAgenticTools(deps)
+}
 
 func init() {
 	// Determine repo root from environment or current directory

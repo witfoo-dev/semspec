@@ -436,7 +436,7 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Route phase-by-ID endpoints (e.g. /phases/{phaseId}/approve).
-	if strings.HasPrefix(endpoint, "phases/") && endpoint != "phases/generate" && endpoint != "phases/approve" && endpoint != "phases/reorder" {
+	if strings.HasPrefix(endpoint, "phases/") && endpoint != "phases/generate" && endpoint != "phases/approve" && endpoint != "phases/reorder" && endpoint != "phases/retrospective" {
 		_, phaseID, action := extractSlugPhaseAndAction(r.URL.Path)
 		if phaseID != "" {
 			c.handlePhaseByID(w, r, slug, phaseID, action)
@@ -543,6 +543,8 @@ func (c *Component) handlePhaseCollectionEndpoint(w http.ResponseWriter, r *http
 		requireMethod(w, r, http.MethodPost, func() { c.handleApproveAllPhases(w, r, slug) })
 	case "phases/reorder":
 		requireMethod(w, r, http.MethodPut, func() { c.handleReorderPhases(w, r, slug) })
+	case "phases/retrospective":
+		requireMethod(w, r, http.MethodGet, func() { c.handlePhasesRetrospective(w, r, slug) })
 	default:
 		return false
 	}

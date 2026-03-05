@@ -16,6 +16,74 @@ Semspec is a spec-driven development agent with a **persistent knowledge graph**
 everything in a knowledge graph, so your AI assistant remembers your codebase, your plans, and your
 team's coding standards.
 
+## Reactive Execution Model (ADR-025)
+
+Semspec supports two execution modes, selected by the `reactive_mode` flag on the `task-generator`
+component.
+
+### Static Mode (default: `reactive_mode=false`)
+
+Planning produces a fully decomposed task graph upfront:
+
+```
+Plan approved → Requirements → Scenarios → Phases → Tasks → tasks.json → dispatch
+```
+
+All tasks are known before any execution begins. Task dependencies are resolved at dispatch time
+by `task-dispatcher`.
+
+### Reactive Mode (`reactive_mode=true`)
+
+Planning produces Requirements and Scenarios only. Task decomposition happens at runtime for each
+Scenario:
+
+```
+Plan approved → Requirements → Scenarios → ready_for_execution
+                                                  │
+                                          scenario-orchestrator
+                                                  │
+                             ┌────────────────────┼────────────────────┐
+                             ▼                    ▼                    ▼
+                   scenario-execution      scenario-execution   scenario-execution
+                       (Scenario 1)            (Scenario 2)        (Scenario N)
+                             │
+                    LLM: decompose_task
+                             │
+                          TaskDAG
+                             │
+                     dag-execution-loop
+                             │
+                   ┌─────────┼─────────┐
+                   ▼         ▼         ▼
+                node A     node B    node C
+                             │(after A)
+```
+
+**Why reactive mode exists**: Scenarios describe *observable behavior*. The best decomposition into
+implementation tasks depends on what the code looks like at execution time — not at planning time.
+Reactive mode lets the agent inspect the live codebase and choose the right task structure for each
+Scenario when it is ready to execute.
+
+### New Agent Capabilities (Reactive Mode)
+
+Agents running in reactive mode have access to four additional tools:
+
+| Tool | Description |
+|------|-------------|
+| `decompose_task` | Decompose a goal into a validated TaskDAG (passthrough: LLM provides the DAG) |
+| `spawn_agent` | Spawn a child agent loop for a subtask; block until it completes |
+| `create_tool` | Define a new tool via a FlowSpec (validated and returned for confirmation) |
+| `query_agent_tree` | Inspect the agent hierarchy: children, full tree, or loop status |
+
+### ChangeProposal Cancellation
+
+When a ChangeProposal is accepted during reactive execution, running scenario loops are cancelled
+via `CancellationSignal` messages on `agent.signal.cancel.<loopID>`. Affected Scenarios are
+re-queued for fresh execution with the updated behavioral contracts.
+
+See [Workflow System](05-workflow-system.md#reactive-workflows-adr-025) for the detailed rule
+descriptions of the `dag-execution-loop` and `scenario-execution-loop` reactive workflows.
+
 ## The Semstreams Relationship
 
 Semspec is an **extension** of semstreams, not a standalone tool.
@@ -250,8 +318,11 @@ Semspec registers 15 components at startup alongside the full semstreams compone
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────── Execution ───────────────────────────────────────────────┐
-│  task-generator     BDD task generation from approved plans          │
+│  task-generator     BDD task generation (static) OR advance plan to  │
+│                     ready_for_execution (reactive_mode=true)         │
 │  task-dispatcher    Dependency-aware task execution via agent loops  │
+│  scenario-orchestrator  Dispatches scenario-execution-loop per       │
+│                          pending Scenario (reactive mode only)       │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────── Indexing ────────────────────────────────────────────────┐

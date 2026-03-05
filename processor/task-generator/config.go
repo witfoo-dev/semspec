@@ -34,6 +34,13 @@ type Config struct {
 	// StateBucket is the KV bucket for workflow state (reactive engine state).
 	StateBucket string `json:"state_bucket" schema:"type:string,description:KV bucket for workflow state,category:basic,default:REACTIVE_STATE"`
 
+	// ReactiveMode controls whether task generation is skipped in favour of reactive execution.
+	// When true, the component transitions the plan directly from scenarios_generated to
+	// ready_for_execution without invoking the LLM or writing tasks.json. The scenario
+	// orchestrator then decomposes work at runtime. When false (default), the existing
+	// task generation pipeline runs unchanged for full backward compatibility.
+	ReactiveMode bool `json:"reactive_mode" schema:"type:bool,description:When true skip task generation and transition directly to ready_for_execution,category:advanced,default:false"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }

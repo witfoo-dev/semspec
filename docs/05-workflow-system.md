@@ -415,6 +415,148 @@ Task completion or escalation to user
 | `change_proposal.created` | New ChangeProposal submitted |
 | `change_proposal.accepted` | Proposal accepted; cascade complete |
 | `change_proposal.rejected` | Proposal rejected; no graph mutations |
+| `scenario.orchestrate.*` | Scenario orchestration trigger (per plan slug) |
+| `workflow.trigger.scenario-execution-loop` | Per-Scenario execution trigger |
+| `workflow.trigger.dag-execution` | DAG execution trigger |
+| `workflow.async.scenario-decomposer` | Decompose request dispatched to agentic loop |
+| `scenario.decomposed.*` | Decomposition result (DAG) from agentic loop |
+| `dag.node.complete.*` | Individual DAG node completed |
+| `dag.node.failed.*` | Individual DAG node failed |
+| `dag.execution.complete.*` | Entire DAG completed successfully |
+| `dag.execution.failed.*` | DAG failed (at least one node failed) |
+| `scenario.complete.*` | Scenario execution completed |
+| `scenario.failed.*` | Scenario execution failed |
+| `agent.signal.cancel.*` | Cancellation signal to a running loop |
+
+## Reactive Workflows (ADR-025)
+
+ADR-025 introduces two reactive workflows for runtime scenario decomposition and execution. Both
+are built with the semstreams reactive engine and follow the OODA-loop pattern.
+
+### Plan Status with Reactive Mode
+
+When `task-generator` runs with `reactive_mode=true`, the plan status flow takes a shortcut after
+Scenario generation:
+
+```
+created → drafted → reviewed → approved
+  → requirements_generated → scenarios_generated
+  → ready_for_execution      ← reactive mode shortcut (no tasks.json)
+    → implementing → complete
+```
+
+The `ready_for_execution` status signals the `scenario-orchestrator` to begin dispatching
+`scenario-execution-loop` workflows for each pending Scenario.
+
+### scenario-execution-loop
+
+**Workflow ID**: `scenario-execution-loop`
+
+**Purpose**: Drives the full lifecycle of executing a single Scenario. Decomposes the Scenario
+into a `TaskDAG` via the `decompose_task` tool (LLM call), then triggers `dag-execution-loop`.
+
+**Phases**: `decomposing` → `decomposed` → `executing` → `complete` | `failed`
+
+**Rules** (7 total):
+
+| Rule | Trigger | Action |
+|------|---------|--------|
+| `accept-trigger` | `workflow.trigger.scenario-execution-loop` | Initialize state, set phase → `decomposing` |
+| `dispatch-decompose` | KV watch (phase = `decomposing`) | Publish `ScenarioDecomposeRequest` to `workflow.async.scenario-decomposer`; set phase → `decomposed` |
+| `handle-decomposed` | `scenario.decomposed.*` | Validate DAG; publish `DAGExecutionTriggerPayload` to `workflow.trigger.dag-execution`; set phase → `executing` |
+| `handle-dag-complete` | `dag.execution.complete.*` | Store completed nodes; set phase → `complete` |
+| `handle-dag-failed` | `dag.execution.failed.*` | Store failed nodes; set phase → `failed` |
+| `handle-complete` | KV watch (phase = `complete`) | Publish `ScenarioCompletePayload` to `scenario.complete.<scenarioID>`; mark done |
+| `handle-failed` | KV watch (phase = `failed`) | Publish `ScenarioFailedPayload` to `scenario.failed.<scenarioID>`; mark done |
+
+**State key pattern**: `scenario-execution.<scenarioID>`
+
+**Timeout**: 90 minutes
+
+```mermaid
+flowchart LR
+    A[accept-trigger] --> B[dispatch-decompose]
+    B --> C[handle-decomposed]
+    C -->|DAG trigger| D[dag-execution-loop]
+    D -->|complete| E[handle-dag-complete]
+    D -->|failed| F[handle-dag-failed]
+    E --> G[handle-complete\nscenario.complete.*]
+    F --> H[handle-failed\nscenario.failed.*]
+```
+
+### dag-execution-loop
+
+**Workflow ID**: `dag-execution-loop`
+
+**Purpose**: Executes a `TaskDAG` reactively: dispatches ready nodes (pending + all dependencies
+completed), tracks per-node completion, and transitions to terminal state when done.
+
+**Phases**: `executing` → `complete` | `failed`
+
+**Rules** (6 total):
+
+| Rule | Trigger | Action |
+|------|---------|--------|
+| `accept-trigger` | `workflow.trigger.dag-execution` | Initialize all node states to `pending`; set phase → `executing` |
+| `dispatch-ready-nodes` | KV watch (phase = `executing`) | Find nodes with all deps completed; mark them `running`; detect terminal state |
+| `handle-node-complete` | `dag.node.complete.*` | Mark node `completed`; KV write re-triggers `dispatch-ready-nodes` |
+| `handle-node-failed` | `dag.node.failed.*` | Mark node `failed`; KV write re-triggers `dispatch-ready-nodes` |
+| `handle-complete` | KV watch (phase = `complete`) | Publish `DAGExecutionCompletePayload` to `dag.execution.complete.<executionID>`; mark done |
+| `handle-failed` | KV watch (phase = `failed`) | Publish `DAGExecutionFailedPayload` to `dag.execution.failed.<executionID>`; mark done |
+
+**State key pattern**: `dag-execution.<executionID>`
+
+**Node states**: `pending` → `running` → `completed` | `failed`
+
+**Terminal conditions** (evaluated by `dispatch-ready-nodes`):
+
+- All nodes `completed` → phase → `complete`
+- No ready nodes, no running nodes, at least one `failed` → phase → `failed`
+
+**Timeout**: 60 minutes
+
+```mermaid
+flowchart LR
+    A[accept-trigger\nall nodes: pending] --> B[dispatch-ready-nodes]
+    B -->|ready nodes found| C[mark running\nKV write]
+    C --> B
+    B -->|all complete| D[handle-complete\ndag.execution.complete.*]
+    B -->|nodes failed + idle| E[handle-failed\ndag.execution.failed.*]
+    F[handle-node-complete\ndag.node.complete.*] --> B
+    G[handle-node-failed\ndag.node.failed.*] --> B
+```
+
+### ChangeProposal Cancellation in Reactive Mode
+
+When a ChangeProposal is accepted while Scenarios are executing reactively, the cascade logic
+publishes `CancellationSignal` messages to stop affected loops before re-queuing:
+
+```
+ChangeProposal accepted
+  │
+  ├── dirty cascade: mark affected Tasks and Scenarios dirty
+  ├── publish CancellationSignal to agent.signal.cancel.<loopID>
+  │     for each running scenario-execution-loop or dag-execution-loop
+  └── scenario-orchestrator re-triggered for the plan to pick up dirty Scenarios
+```
+
+The `CancellationSignal` is published on Core NATS (ephemeral) to the specific loop's cancel
+subject. Loops that observe the signal transition to their `failed` terminal state with the
+cancellation reason included in the failure event.
+
+### Implementation Files (Reactive Workflows)
+
+| File | Purpose |
+|------|---------|
+| `workflow/reactive/scenario_execution.go` | `scenario-execution-loop`: 7 rules, payloads, state |
+| `workflow/reactive/dag_execution.go` | `dag-execution-loop`: 6 rules, payloads, state |
+| `workflow/reactive/cancellation.go` | `CancellationSignal` payload type |
+| `tools/decompose/executor.go` | `decompose_task` tool: validates LLM-provided TaskDAG |
+| `tools/spawn/executor.go` | `spawn_agent` tool: spawns and awaits a child loop |
+| `tools/create/executor.go` | `create_tool` tool: validates FlowSpec (MVP passthrough) |
+| `tools/tree/executor.go` | `query_agent_tree` tool: hierarchy inspection |
+| `agentgraph/graph.go` | Graph helper: records spawn, status, tree queries |
+| `processor/scenario-orchestrator/` | Entry point component for reactive execution |
 
 ## ChangeProposal Lifecycle (ADR-024)
 

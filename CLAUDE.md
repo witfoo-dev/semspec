@@ -32,11 +32,18 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | `processor/plan-reviewer/` | SOP-aware plan validation |
 | `processor/context-builder/` | Strategy-based LLM context assembly |
 | `processor/source-ingester/` | Document/SOP ingestion |
-| `processor/task-generator/` | Plan → task decomposition |
+| `processor/task-generator/` | Plan → task decomposition (or status advance in reactive mode) |
 | `processor/task-dispatcher/` | Dependency-aware task dispatch |
+| `processor/scenario-orchestrator/` | Reactive execution entry point (ADR-025) |
 | `processor/ast-indexer/` | Go/TS AST parsing → graph entities |
 | `processor/ast/` | AST parsing library |
-| `tools/` | Tool executor implementations (file, git) |
+| `tools/` | Tool executor implementations (file, git, decompose, spawn, create, tree) |
+| `tools/decompose/` | `decompose_task` — validates LLM-provided TaskDAG |
+| `tools/spawn/` | `spawn_agent` — spawns and awaits a child agentic loop |
+| `tools/create/` | `create_tool` — validates FlowSpec for dynamic tool creation |
+| `tools/tree/` | `query_agent_tree` — agent hierarchy inspection |
+| `workflow/reactive/` | Reactive workflow rules (dag-execution-loop, scenario-execution-loop) |
+| `agentgraph/` | Graph helpers for agent hierarchy tracking (spawn, status, tree) |
 | `vocabulary/` | Predicate vocabularies (source, spec, semspec, ics) |
 | `configs/` | Flow configuration files |
 
@@ -119,6 +126,18 @@ executed by the semstreams `agentic-tools` component.
 | `change_proposal.rejected` | JetStream | Proposal rejected |
 | `tool.register.<name>` | Core NATS | Tool advertisement (ephemeral) |
 | `tool.heartbeat.semspec` | Core NATS | Provider health (ephemeral) |
+| `scenario.orchestrate.*` | JetStream | Scenario orchestration trigger (reactive mode) |
+| `workflow.trigger.scenario-execution-loop` | JetStream | Per-Scenario execution trigger |
+| `workflow.trigger.dag-execution` | JetStream | DAG execution trigger |
+| `workflow.async.scenario-decomposer` | JetStream | Decompose request to agentic loop |
+| `scenario.decomposed.*` | JetStream | Decomposition result (DAG) |
+| `dag.node.complete.*` | JetStream | DAG node completed |
+| `dag.node.failed.*` | JetStream | DAG node failed |
+| `dag.execution.complete.*` | JetStream | Entire DAG execution completed |
+| `dag.execution.failed.*` | JetStream | DAG execution failed |
+| `scenario.complete.*` | JetStream | Scenario execution completed |
+| `scenario.failed.*` | JetStream | Scenario execution failed |
+| `agent.signal.cancel.*` | Core NATS | Cancellation signal to running loop (ephemeral) |
 
 See [docs/03-architecture.md](docs/03-architecture.md) for the complete NATS subject reference.
 
@@ -134,8 +153,9 @@ semspec/
 │   ├── plan-reviewer/        # SOP-aware plan validation
 │   ├── context-builder/      # Strategy-based context assembly
 │   ├── source-ingester/      # Document/SOP ingestion
-│   ├── task-generator/       # Plan → task decomposition
+│   ├── task-generator/       # Plan → task decomposition (static) or status advance (reactive)
 │   ├── task-dispatcher/      # Dependency-aware task dispatch
+│   ├── scenario-orchestrator/ # Reactive execution entry point (ADR-025)
 │   ├── ast-indexer/          # Go/TS AST parsing
 │   ├── question-answerer/    # LLM question answering
 │   ├── question-timeout/     # SLA monitoring and escalation
@@ -150,10 +170,19 @@ semspec/
 │   ├── plan.go               # SaveRequirements, LoadRequirements, SaveScenarios, etc.
 │   └── reactive/
 │       ├── change_proposal.go         # ChangeProposal OODA reactive rules
-│       └── change_proposal_actions.go # Cascade logic (graph traversal + dirty marking)
+│       ├── change_proposal_actions.go # Cascade logic (graph traversal + dirty marking)
+│       ├── scenario_execution.go      # scenario-execution-loop (7 rules, ADR-025)
+│       ├── dag_execution.go           # dag-execution-loop (6 rules, ADR-025)
+│       └── cancellation.go            # CancellationSignal payload
+├── agentgraph/
+│   └── graph.go              # RecordSpawn, GetChildren, GetTree, GetStatus
 ├── tools/
 │   ├── file/executor.go      # file_read, file_write, file_list
-│   └── git/executor.go       # git_status, git_branch, git_commit
+│   ├── git/executor.go       # git_status, git_branch, git_commit
+│   ├── decompose/executor.go # decompose_task (validate LLM-provided TaskDAG)
+│   ├── spawn/executor.go     # spawn_agent (child loop, blocks until complete)
+│   ├── create/executor.go    # create_tool (validate FlowSpec, MVP passthrough)
+│   └── tree/executor.go      # query_agent_tree (hierarchy inspection)
 ├── vocabulary/
 │   ├── source/               # source.meta.*, source.doc.*, source.web.*
 │   ├── spec/                 # spec.meta.*, spec.rel.*, spec.requirement.*
@@ -238,6 +267,10 @@ Configuration supports environment variable expansion with defaults:
 Common environment variables:
 - `LLM_API_URL` - OpenAI-compatible API endpoint (Ollama, vLLM, OpenRouter, etc.)
 - `NATS_URL` - NATS server URL
+
+Key configuration flags (in `configs/semspec.json`):
+- `task-generator.reactive_mode` — When `true`, skip task generation and advance plan to
+  `ready_for_execution` for reactive execution via the scenario-orchestrator (default: `false`)
 
 ## Graph-First Architecture
 

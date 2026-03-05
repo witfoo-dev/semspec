@@ -1829,6 +1829,7 @@ func init() {
 	registerRequirementPredicates()
 	registerScenarioPredicates()
 	registerChangeProposalPredicates()
+	registerAgenticPredicates()
 }
 
 func registerRequirementPredicates() {
@@ -1960,4 +1961,115 @@ func registerChangeProposalPredicates() {
 		vocabulary.WithDescription("Decision timestamp (RFC3339)"),
 		vocabulary.WithDataType("datetime"),
 		vocabulary.WithIRI(Namespace+"changeProposalDecidedAt"))
+}
+
+// Agentic loop predicates (ADR-025) define the reactive execution model's
+// graph representation for agent spawning, DAG task decomposition, and hierarchy tracking.
+const (
+	// PredicateLoopSpawned records a parent loop spawning a child loop.
+	// Direction: parent loop entity -> child loop entity.
+	PredicateLoopSpawned = "agentic.loop.spawned"
+
+	// PredicateLoopTaskLink records the association between a loop and a task it owns.
+	// Direction: loop entity -> task entity.
+	PredicateLoopTaskLink = "agentic.loop.task"
+
+	// PredicateLoopStatus records the current lifecycle status of a loop.
+	// Values: created, running, paused, complete, failed, cancelled
+	PredicateAgenticLoopStatus = "agentic.loop.status"
+
+	// PredicateLoopRole records the functional role of a loop (e.g., "planner", "executor").
+	PredicateAgenticLoopRole = "agentic.loop.role"
+
+	// PredicateLoopModel records the LLM model identifier used by a loop.
+	PredicateAgenticLoopModel = "agentic.loop.model"
+
+	// PredicateLoopParent records the parent loop for a child loop (inverse of PredicateLoopSpawned).
+	// Direction: child loop entity -> parent loop entity.
+	PredicateLoopParent = "agentic.loop.parent"
+
+	// PredicateLoopDepth records the nesting depth of a loop within the spawn hierarchy.
+	// Root loops have depth 0; each spawn increments depth by 1.
+	PredicateLoopDepth = "agentic.loop.depth"
+
+	// PredicateLoopCreatedAt records the creation timestamp of a loop (RFC3339).
+	PredicateLoopCreatedAt = "agentic.loop.created_at"
+
+	// PredicateTaskDependsOn records a task-to-task dependency (DAG edge).
+	// Direction: dependent task entity -> prerequisite task entity.
+	PredicateTaskDependsOn = "agentic.task.depends_on"
+
+	// PredicateTaskDAG links a task to its parent DAG execution entity.
+	// Direction: task entity -> DAG entity.
+	PredicateTaskDAG = "agentic.task.dag"
+
+	// PredicateTaskPrompt stores the task prompt content.
+	PredicateTaskPrompt = "agentic.task.prompt"
+
+	// PredicateTaskNodeID stores the node ID of the task within its DAG.
+	PredicateTaskNodeID = "agentic.task.node_id"
+)
+
+func registerAgenticPredicates() {
+	// Loop hierarchy predicates
+	vocabulary.Register(PredicateLoopSpawned,
+		vocabulary.WithDescription("Parent loop -> child loop spawn relationship"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"agenticLoopSpawned"))
+
+	vocabulary.Register(PredicateLoopTaskLink,
+		vocabulary.WithDescription("Loop -> task association"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"agenticLoopTask"))
+
+	vocabulary.Register(PredicateAgenticLoopStatus,
+		vocabulary.WithDescription("Loop lifecycle status (created, running, complete, failed)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"agenticLoopStatus"))
+
+	vocabulary.Register(PredicateAgenticLoopRole,
+		vocabulary.WithDescription("Agent functional role (planner, executor, reviewer)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"agenticLoopRole"))
+
+	vocabulary.Register(PredicateAgenticLoopModel,
+		vocabulary.WithDescription("LLM model identifier used by the loop"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"agenticLoopModel"))
+
+	vocabulary.Register(PredicateLoopParent,
+		vocabulary.WithDescription("Child loop -> parent loop reference (inverse of spawned)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"agenticLoopParent"))
+
+	vocabulary.Register(PredicateLoopDepth,
+		vocabulary.WithDescription("Nesting depth within spawn hierarchy (root=0)"),
+		vocabulary.WithDataType("int"),
+		vocabulary.WithIRI(Namespace+"agenticLoopDepth"))
+
+	vocabulary.Register(PredicateLoopCreatedAt,
+		vocabulary.WithDescription("Loop creation timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
+
+	// Task DAG predicates
+	vocabulary.Register(PredicateTaskDependsOn,
+		vocabulary.WithDescription("DAG dependency edge: dependent task -> prerequisite task"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"agenticTaskDependsOn"))
+
+	vocabulary.Register(PredicateTaskDAG,
+		vocabulary.WithDescription("Task -> DAG execution entity association"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"agenticTaskDag"))
+
+	vocabulary.Register(PredicateTaskPrompt,
+		vocabulary.WithDescription("Task prompt content"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"agenticTaskPrompt"))
+
+	vocabulary.Register(PredicateTaskNodeID,
+		vocabulary.WithDescription("Node ID of the task within its DAG"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"agenticTaskNodeId"))
 }

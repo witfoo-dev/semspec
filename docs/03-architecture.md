@@ -51,8 +51,11 @@ via the component lifecycle.
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌──────────── Execution ───────────────────────────────────────────────┐   │
-│  │  task-generator     BDD task generation from approved plans           │   │
+│  │  task-generator     BDD task generation (static) OR advance to       │   │
+│  │                     ready_for_execution (reactive_mode=true)         │   │
 │  │  task-dispatcher    Dependency-aware task execution via agent loops   │   │
+│  │  scenario-orchestrator  Dispatches scenario-execution-loop per       │   │
+│  │                         pending Scenario (reactive mode only)        │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌──────────── Indexing ────────────────────────────────────────────────┐   │
@@ -229,6 +232,119 @@ Workflows can trigger components when specialized processing is needed:
 
 The workflow handles orchestration; the component handles processing.
 
+## Reactive Execution Architecture (ADR-025)
+
+ADR-025 introduces a reactive execution model alongside the existing static model. The two modes
+are selected via the `reactive_mode` flag on `task-generator`.
+
+### Static vs Reactive Execution Paths
+
+```mermaid
+flowchart TD
+    A[Plan approved] --> B[task-generator]
+    B -->|reactive_mode=false| C[Generate Tasks\nWrite tasks.json]
+    B -->|reactive_mode=true| D[Set status:\nready_for_execution]
+    C --> E[task-dispatcher\nStatic dispatch]
+    D --> F[scenario-orchestrator]
+    F --> G[scenario-execution-loop\nper Scenario]
+    G --> H[LLM: decompose_task\nProduces TaskDAG]
+    H --> I[dag-execution-loop\nDispatch ready nodes]
+    I --> J[Agent tasks run\nIn dependency order]
+```
+
+### Scenario Orchestrator
+
+The `scenario-orchestrator` component is the entry point for reactive execution. It receives an
+orchestration trigger (`scenario.orchestrate.<planSlug>`) listing pending or dirty Scenarios and
+fires a `scenario-execution-loop` workflow trigger for each one, subject to `max_concurrent`.
+
+```
+scenario.orchestrate.<planSlug>
+  │
+  ▼
+scenario-orchestrator
+  ├── (concurrent, bounded by max_concurrent)
+  ├── workflow.trigger.scenario-execution-loop → Scenario 1
+  ├── workflow.trigger.scenario-execution-loop → Scenario 2
+  └── workflow.trigger.scenario-execution-loop → Scenario N
+```
+
+The orchestrator is deliberately minimal: it dispatches then ACKs. All decomposition and execution
+logic lives in the downstream reactive workflows.
+
+### Agent Spawn Hierarchy
+
+Agents in reactive mode can spawn child agents via the `spawn_agent` tool. Each spawn is recorded
+in the knowledge graph using the `agentgraph` package, enabling tree queries at runtime.
+
+```mermaid
+flowchart TD
+    O[Orchestrator loop] -->|spawn_agent| S1[Scenario executor loop]
+    S1 -->|decompose_task| D[TaskDAG]
+    D -->|dag-execution-loop| N1[Node A loop]
+    D -->|dag-execution-loop| N2[Node B loop]
+    N1 -->|spawn_agent| C1[Child loop]
+    style O fill:#334,color:#fff
+    style S1 fill:#334,color:#fff
+    style N1 fill:#334,color:#fff
+    style N2 fill:#334,color:#fff
+    style C1 fill:#334,color:#fff
+```
+
+Spawn depth is capped at `maxDepth` (default: 5). The `query_agent_tree` tool lets any agent
+inspect the hierarchy: its own children, the full subtree, or the status of a specific loop.
+
+### New Tool Executors (Reactive Mode)
+
+Four new tool executors are registered when reactive mode is in use:
+
+| Tool | Package | Description |
+|------|---------|-------------|
+| `decompose_task` | `tools/decompose` | Validates a TaskDAG provided by the LLM and returns it |
+| `spawn_agent` | `tools/spawn` | Publishes a child TaskMessage, waits for completion |
+| `create_tool` | `tools/create` | Validates a FlowSpec defining a new tool (MVP: passthrough) |
+| `query_agent_tree` | `tools/tree` | Queries agent hierarchy via `agentgraph.Helper` |
+
+All four follow the `agentic.ToolExecutor` contract: validation errors return `ToolResult.Error`
+(forwarded to the LLM as feedback); infrastructure errors return Go errors (logged by the
+dispatcher as fatal).
+
+### Agent Graph Vocabulary (`agentgraph` Package)
+
+The `agentgraph` package stores agent hierarchy as graph triples using predicates from
+`vocabulary/semspec/predicates.go`:
+
+| Predicate | Direction | Meaning |
+|-----------|-----------|---------|
+| `agentic.loop.spawned` | parent loop → child loop | Records a spawn relationship |
+| `agentic.loop.task` | loop → task entity | Loop owns this task |
+| `agentic.task.depends_on` | task → prerequisite task | DAG dependency edge |
+| `agentic.loop.role` | loop → string | Functional role of the loop |
+| `agentic.loop.model` | loop → string | LLM model used by the loop |
+| `agentic.loop.status` | loop → string | Current lifecycle status |
+
+Entity IDs follow the 6-part format: `semspec.local.agentic.orchestrator.{type}.{instance}`.
+
+### Cancellation Signals
+
+When a ChangeProposal is accepted during reactive execution, running loops are cancelled via
+`CancellationSignal` messages published to `agent.signal.cancel.<loopID>`. The affected
+`scenario-execution-loop` or `dag-execution-loop` observes this signal and transitions to a
+terminal failed state. The scenario-orchestrator re-queues affected Scenarios for fresh execution.
+
+```
+ChangeProposal accepted
+  │
+  ├── dirty cascade: mark affected Tasks/Scenarios as dirty
+  └── publish CancellationSignal → agent.signal.cancel.<loopID>
+                                           │
+                                   dag-execution-loop
+                                   (transitions to failed)
+                                           │
+                                   scenario-execution-loop
+                                   (transitions to failed)
+```
+
 ## Graph Node Hierarchy (ADR-024)
 
 The knowledge graph stores all planning artifacts as typed nodes with directed edges. ADR-024
@@ -357,6 +473,10 @@ agentic-loop                    NATS                       agentic-tools
 | `tools/github` | `github_pr_create`, `github_issue_create`, `github_pr_list` |
 | `tools/doc` | `doc_list`, `doc_read` |
 | `tools/workflow` | Registered via separate `init()` |
+| `tools/decompose` | `decompose_task` — validates LLM-provided TaskDAG (reactive mode) |
+| `tools/spawn` | `spawn_agent` — spawns and awaits a child agent loop (reactive mode) |
+| `tools/create` | `create_tool` — validates a FlowSpec for dynamic tool creation (reactive mode) |
+| `tools/tree` | `query_agent_tree` — queries agent hierarchy via agentgraph (reactive mode) |
 
 ## NATS Subject Patterns
 
@@ -397,6 +517,18 @@ All streams are created at startup by `config.StreamsManager`. The full subject 
 | `source.ingest.>` | SOURCES | Input | Document/SOP ingestion |
 | `source.status.>` | SOURCES | Output | Ingestion status |
 | `user.message.>` | USER | Input | User messages (agentic-dispatch) |
+| `scenario.orchestrate.*` | WORKFLOW | Input | Scenario orchestration trigger (per plan slug) |
+| `workflow.trigger.scenario-execution-loop` | WORKFLOW | Input | Per-Scenario execution trigger |
+| `workflow.trigger.dag-execution` | WORKFLOW | Input | DAG execution trigger |
+| `workflow.async.scenario-decomposer` | WORKFLOW | Internal | Decompose request to agentic loop |
+| `scenario.decomposed.*` | WORKFLOW | Internal | Decompose result (per scenario ID) |
+| `dag.node.complete.*` | WORKFLOW | Internal | Single DAG node completed |
+| `dag.node.failed.*` | WORKFLOW | Internal | Single DAG node failed |
+| `dag.execution.complete.*` | WORKFLOW | Output | Entire DAG completed successfully |
+| `dag.execution.failed.*` | WORKFLOW | Output | DAG failed (at least one node failed) |
+| `scenario.complete.*` | WORKFLOW | Output | Scenario execution completed |
+| `scenario.failed.*` | WORKFLOW | Output | Scenario execution failed |
+| `agent.signal.cancel.*` | Core NATS | Input | Cancellation signal to a running loop |
 
 **JetStream subjects** are durable and replay-capable. **Core NATS subjects** (`tool.register.*`) are ephemeral
 request/reply with no persistence.

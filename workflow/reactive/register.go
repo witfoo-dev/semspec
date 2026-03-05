@@ -70,5 +70,17 @@ func RegisterAll(engine *reactiveEngine.Engine) error {
 		return fmt.Errorf("register change-proposal-loop: %w", err)
 	}
 
+	// ADR-025: dag-execution-loop (reactive DAG execution for decompose_task output)
+	def = BuildDAGExecutionWorkflow(stateBucket)
+	if err := engine.RegisterWorkflow(def); err != nil {
+		return fmt.Errorf("register dag-execution-loop: %w", err)
+	}
+
+	// ADR-025 Phase 4: scenario-execution-loop (scenario → decompose → DAG execution)
+	def = BuildScenarioExecutionWorkflow(stateBucket)
+	if err := engine.RegisterWorkflow(def); err != nil {
+		return fmt.Errorf("register scenario-execution-loop: %w", err)
+	}
+
 	return nil
 }
