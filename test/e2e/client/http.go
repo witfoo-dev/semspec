@@ -3235,3 +3235,346 @@ func (c *HTTPClient) GetTask(ctx context.Context, slug, taskID string) (*Task, e
 
 	return &task, nil
 }
+
+// ============================================================================
+// Change Proposal Methods
+// ============================================================================
+
+// ChangeProposal represents a workflow.ChangeProposal as returned by the HTTP API.
+type ChangeProposal struct {
+	ID             string     `json:"id"`
+	PlanID         string     `json:"plan_id"`
+	Title          string     `json:"title"`
+	Rationale      string     `json:"rationale,omitempty"`
+	Status         string     `json:"status"`
+	ProposedBy     string     `json:"proposed_by"`
+	AffectedReqIDs []string   `json:"affected_requirement_ids"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ReviewedAt     *time.Time `json:"reviewed_at,omitempty"`
+	DecidedAt      *time.Time `json:"decided_at,omitempty"`
+}
+
+// CascadeResult summarizes the effect of accepting a ChangeProposal.
+type CascadeResult struct {
+	AffectedRequirementIDs []string `json:"AffectedRequirementIDs"`
+	AffectedScenarioIDs    []string `json:"AffectedScenarioIDs"`
+	AffectedTaskIDs        []string `json:"AffectedTaskIDs"`
+	TasksDirtied           int      `json:"TasksDirtied"`
+}
+
+// AcceptChangeProposalResponse is the response from POST .../accept.
+type AcceptChangeProposalResponse struct {
+	Proposal ChangeProposal `json:"proposal"`
+	Cascade  *CascadeResult `json:"cascade,omitempty"`
+}
+
+// CreateChangeProposalRequest is the request body for creating a change proposal.
+type CreateChangeProposalRequest struct {
+	Title          string   `json:"title"`
+	Rationale      string   `json:"rationale,omitempty"`
+	ProposedBy     string   `json:"proposed_by,omitempty"`
+	AffectedReqIDs []string `json:"affected_requirement_ids,omitempty"`
+}
+
+// UpdateChangeProposalRequest is the request body for updating a change proposal.
+type UpdateChangeProposalRequest struct {
+	Title          *string  `json:"title,omitempty"`
+	Rationale      *string  `json:"rationale,omitempty"`
+	AffectedReqIDs []string `json:"affected_requirement_ids,omitempty"`
+}
+
+// CreateChangeProposal creates a new change proposal for a plan.
+// POST /workflow-api/plans/{slug}/change-proposals
+func (c *HTTPClient) CreateChangeProposal(ctx context.Context, slug string, req *CreateChangeProposalRequest) (*ChangeProposal, int, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals", c.baseURL, slug)
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var proposal ChangeProposal
+	if err := json.Unmarshal(body, &proposal); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &proposal, resp.StatusCode, nil
+}
+
+// GetChangeProposal retrieves a single change proposal by ID.
+// GET /workflow-api/plans/{slug}/change-proposals/{proposalID}
+func (c *HTTPClient) GetChangeProposal(ctx context.Context, slug, proposalID string) (*ChangeProposal, int, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals/%s", c.baseURL, slug, proposalID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var proposal ChangeProposal
+	if err := json.Unmarshal(body, &proposal); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &proposal, resp.StatusCode, nil
+}
+
+// ListChangeProposals lists all change proposals for a plan.
+// GET /workflow-api/plans/{slug}/change-proposals
+// Optional status filter: "proposed", "under_review", "accepted", "rejected", "archived"
+func (c *HTTPClient) ListChangeProposals(ctx context.Context, slug, statusFilter string) ([]*ChangeProposal, error) {
+	rawURL := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals", c.baseURL, slug)
+	if statusFilter != "" {
+		rawURL += "?status=" + statusFilter
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var proposals []*ChangeProposal
+	if err := json.Unmarshal(body, &proposals); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return proposals, nil
+}
+
+// UpdateChangeProposal updates a change proposal's fields.
+// PATCH /workflow-api/plans/{slug}/change-proposals/{proposalID}
+func (c *HTTPClient) UpdateChangeProposal(ctx context.Context, slug, proposalID string, req *UpdateChangeProposalRequest) (*ChangeProposal, int, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals/%s", c.baseURL, slug, proposalID)
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var proposal ChangeProposal
+	if err := json.Unmarshal(body, &proposal); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &proposal, resp.StatusCode, nil
+}
+
+// DeleteChangeProposal deletes a change proposal (only allowed when status is "proposed").
+// DELETE /workflow-api/plans/{slug}/change-proposals/{proposalID}
+// Returns the HTTP status code.
+func (c *HTTPClient) DeleteChangeProposal(ctx context.Context, slug, proposalID string) (int, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals/%s", c.baseURL, slug, proposalID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	return resp.StatusCode, nil
+}
+
+// SubmitChangeProposal transitions a proposal from "proposed" to "under_review".
+// POST /workflow-api/plans/{slug}/change-proposals/{proposalID}/submit
+func (c *HTTPClient) SubmitChangeProposal(ctx context.Context, slug, proposalID string) (*ChangeProposal, int, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals/%s/submit", c.baseURL, slug, proposalID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, http.NoBody)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var proposal ChangeProposal
+	if err := json.Unmarshal(body, &proposal); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &proposal, resp.StatusCode, nil
+}
+
+// AcceptChangeProposal transitions a proposal from "under_review" to "accepted"
+// and triggers the cascade that marks affected tasks dirty.
+// POST /workflow-api/plans/{slug}/change-proposals/{proposalID}/accept
+func (c *HTTPClient) AcceptChangeProposal(ctx context.Context, slug, proposalID, reviewedBy string) (*AcceptChangeProposalResponse, int, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals/%s/accept", c.baseURL, slug, proposalID)
+
+	type acceptBody struct {
+		ReviewedBy string `json:"reviewed_by,omitempty"`
+	}
+	reqBody := acceptBody{ReviewedBy: reviewedBy}
+
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, 0, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var acceptResp AcceptChangeProposalResponse
+	if err := json.Unmarshal(body, &acceptResp); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &acceptResp, resp.StatusCode, nil
+}
+
+// RejectChangeProposal transitions a proposal from "under_review" to "rejected".
+// POST /workflow-api/plans/{slug}/change-proposals/{proposalID}/reject
+func (c *HTTPClient) RejectChangeProposal(ctx context.Context, slug, proposalID, reviewedBy, reason string) (*ChangeProposal, int, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals/%s/reject", c.baseURL, slug, proposalID)
+
+	type rejectBody struct {
+		ReviewedBy string `json:"reviewed_by,omitempty"`
+		Reason     string `json:"reason,omitempty"`
+	}
+	reqBody := rejectBody{ReviewedBy: reviewedBy, Reason: reason}
+
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, 0, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var proposal ChangeProposal
+	if err := json.Unmarshal(body, &proposal); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &proposal, resp.StatusCode, nil
+}

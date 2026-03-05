@@ -3,6 +3,7 @@ package reactive
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1926,4 +1927,534 @@ func taskExecFailedState(slug, taskID, phase, errMsg string) *TaskExecutionState
 	s.Phase = phase
 	s.Error = errMsg
 	return s
+}
+
+// ---------------------------------------------------------------------------
+// Quality gate enforcement tests
+//
+// These tests verify the safety property that quality gates cannot be bypassed:
+//   - A failed validation must NOT allow progression to reviewing
+//   - A rejected review must NOT allow progression to evaluated/approved
+//   - validation-passed and validation-failed-retry/escalate are mutually exclusive
+//   - handle-approved and fixable-retry/escalate are mutually exclusive
+// ---------------------------------------------------------------------------
+
+// TestTaskExecutionQualityGate_ValidationBlocksReviewing verifies that when
+// ValidationPassed=false, the validation-passed rule (which transitions to
+// reviewing) does NOT fire, and validation-failed-retry DOES fire. This is
+// the primary safety check: failed validation cannot bypass the retry gate
+// to reach the reviewer.
+func TestTaskExecutionQualityGate_ValidationBlocksReviewing(t *testing.T) {
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+
+	passedRule := findRule(t, def, "validation-passed")
+	retryRule := findRule(t, def, "validation-failed-retry")
+
+	// Both rules watch the same phase (validation_checked). When validation
+	// fails, exactly ONE of them should fire. This test confirms that failure
+	// state satisfies retry conditions but not passed conditions, and vice versa.
+
+	t.Run("failed validation: passed rule blocked, retry rule fires", func(t *testing.T) {
+		state := taskExecValidationCheckedState("qg-proj", "qg-t1", false)
+		state.Iteration = 0
+		ctx := &reactiveEngine.RuleContext{State: state}
+
+		// validation-passed must NOT fire when validation failed.
+		allPassedConditionsPass := true
+		for _, cond := range passedRule.Conditions {
+			if !cond.Evaluate(ctx) {
+				allPassedConditionsPass = false
+				break
+			}
+		}
+		if allPassedConditionsPass {
+			t.Error("quality gate violated: validation-passed rule fired despite ValidationPassed=false")
+		}
+
+		// validation-failed-retry MUST fire.
+		assertAllConditionsPass(t, retryRule, ctx)
+	})
+
+	t.Run("passed validation: retry rule blocked, passed rule fires", func(t *testing.T) {
+		state := taskExecValidationCheckedState("qg-proj", "qg-t2", true)
+		state.Iteration = 0
+		ctx := &reactiveEngine.RuleContext{State: state}
+
+		// validation-passed MUST fire.
+		assertAllConditionsPass(t, passedRule, ctx)
+
+		// validation-failed-retry must NOT fire.
+		allRetryConditionsPass := true
+		for _, cond := range retryRule.Conditions {
+			if !cond.Evaluate(ctx) {
+				allRetryConditionsPass = false
+				break
+			}
+		}
+		if allRetryConditionsPass {
+			t.Error("quality gate violated: validation-failed-retry rule fired despite ValidationPassed=true")
+		}
+	})
+}
+
+// TestTaskExecutionQualityGate_ValidationWithZeroChecksStillGates verifies that
+// when ChecksRun=0 but ValidationPassed=true (empty checklist case), the workflow
+// still correctly advances to reviewing. The gate is on ValidationPassed, not on
+// ChecksRun, so a zero-check pass is valid.
+func TestTaskExecutionQualityGate_ValidationWithZeroChecksStillGates(t *testing.T) {
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+
+	t.Run("zero checks passed=true progresses to reviewing", func(t *testing.T) {
+		state := taskExecValidationCheckedState("qg-proj", "qg-t3", true)
+		state.ChecksRun = 0 // override — no checklist ran
+		ctx := &reactiveEngine.RuleContext{State: state}
+
+		passedRule := findRule(t, def, "validation-passed")
+		assertAllConditionsPass(t, passedRule, ctx)
+
+		// Mutation must advance to reviewing — not stay stuck.
+		if err := passedRule.Action.MutateState(ctx, nil); err != nil {
+			t.Fatalf("MutateState failed: %v", err)
+		}
+		if state.Phase != phases.TaskExecReviewing {
+			t.Errorf("expected phase %q after zero-check pass, got %q",
+				phases.TaskExecReviewing, state.Phase)
+		}
+	})
+
+	t.Run("zero checks passed=false blocks progression", func(t *testing.T) {
+		state := taskExecValidationCheckedState("qg-proj", "qg-t4", false)
+		state.ChecksRun = 0
+		state.Iteration = 0
+		ctx := &reactiveEngine.RuleContext{State: state}
+
+		passedRule := findRule(t, def, "validation-passed")
+		assertSomeConditionFails(t, passedRule, ctx)
+
+		// Must not transition to reviewing via mutation.
+		originalPhase := state.Phase
+		_ = passedRule.Action.MutateState(ctx, nil) //nolint:errcheck — expect no-op or error
+		// Phase should remain unchanged (condition blocked the rule from running in production).
+		// Here we confirm the condition gate itself rejects the state, which is the safety invariant.
+		// The MutateState call is only meaningful if conditions pass; we verify conditions fail.
+		_ = originalPhase
+	})
+}
+
+// TestTaskExecutionQualityGate_ReviewBlocksApproval verifies that when the
+// reviewer rejects a task, the handle-approved rule does NOT fire. This ensures
+// a rejected task cannot bypass the review gate and complete as approved.
+func TestTaskExecutionQualityGate_ReviewBlocksApproval(t *testing.T) {
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+
+	approvedRule := findRule(t, def, "handle-approved")
+	fixableRule := findRule(t, def, "handle-fixable-retry")
+
+	t.Run("rejected task: approved rule blocked", func(t *testing.T) {
+		state := taskExecEvaluatedState("qg-proj", "qg-t5", "rejected", "fixable")
+		ctx := &reactiveEngine.RuleContext{State: state}
+
+		assertSomeConditionFails(t, approvedRule, ctx)
+	})
+
+	t.Run("approved task: fixable-retry rule blocked", func(t *testing.T) {
+		state := taskExecEvaluatedState("qg-proj", "qg-t6", "approved", "")
+		ctx := &reactiveEngine.RuleContext{State: state}
+
+		assertSomeConditionFails(t, fixableRule, ctx)
+	})
+
+	t.Run("all known rejection types block approval", func(t *testing.T) {
+		rejectionTypes := []string{"fixable", "misscoped", "architectural", "too_big", "unknown_type"}
+		for _, rt := range rejectionTypes {
+			rt := rt
+			t.Run(rt, func(t *testing.T) {
+				state := taskExecEvaluatedState("qg-proj", "qg-t7", "rejected", rt)
+				ctx := &reactiveEngine.RuleContext{State: state}
+				assertSomeConditionFails(t, approvedRule, ctx)
+			})
+		}
+	})
+}
+
+// TestTaskExecutionQualityGate_ReviewingRequiresValidationPass verifies that
+// the reviewing phase can only be entered after a successful validation. A task
+// with ValidationPassed=false must not satisfy the reviewing dispatch rule's
+// prerequisite path. We verify this by checking that the validation-passed rule
+// (which is the only path into the reviewing phase) requires ValidationPassed=true.
+func TestTaskExecutionQualityGate_ReviewingRequiresValidationPass(t *testing.T) {
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+
+	// The only transition into the reviewing phase is via the validation-passed rule's
+	// mutation. The dispatch-review rule then picks up from reviewing phase.
+	// We verify that a state at validation_checked with passed=false cannot
+	// satisfy the validation-passed rule (the gate into reviewing).
+	reviewDispatchRule := findRule(t, def, "dispatch-review")
+	validationPassedRule := findRule(t, def, "validation-passed")
+
+	t.Run("dispatch-review does not fire from validation_checked with failed validation", func(t *testing.T) {
+		// A state with failed validation is in validation_checked, not reviewing.
+		// dispatch-review watches for the reviewing phase — it should not match.
+		state := taskExecValidationCheckedState("qg-proj", "qg-t8", false)
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertSomeConditionFails(t, reviewDispatchRule, ctx)
+	})
+
+	t.Run("dispatch-review does not fire from validation_checked with passed validation", func(t *testing.T) {
+		// Even a passed validation at validation_checked phase cannot directly
+		// trigger dispatch-review — it must go through validation-passed mutation first.
+		state := taskExecValidationCheckedState("qg-proj", "qg-t9", true)
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertSomeConditionFails(t, reviewDispatchRule, ctx)
+	})
+
+	t.Run("validation-passed mutation is the sole gateway into reviewing", func(t *testing.T) {
+		// Apply the validation-passed mutation to a passed state and confirm it
+		// produces the reviewing phase — the one and only legal entry point.
+		state := taskExecValidationCheckedState("qg-proj", "qg-t10", true)
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertAllConditionsPass(t, validationPassedRule, ctx)
+
+		if err := validationPassedRule.Action.MutateState(ctx, nil); err != nil {
+			t.Fatalf("MutateState failed: %v", err)
+		}
+		if state.Phase != phases.TaskExecReviewing {
+			t.Errorf("expected reviewing phase after validation-passed mutation, got %q", state.Phase)
+		}
+
+		// Now dispatch-review conditions should pass.
+		ctxAfter := &reactiveEngine.RuleContext{State: state}
+		assertAllConditionsPass(t, reviewDispatchRule, ctxAfter)
+	})
+}
+
+// TestTaskExecutionQualityGate_EscalateAndRetryMutuallyExclusive verifies that
+// the escalation and retry rules at the validation boundary are mutually exclusive:
+// - validation-failed-retry only fires when under the iteration limit
+// - validation-failed-escalate only fires when at or over the iteration limit
+// They cannot both fire for the same state.
+func TestTaskExecutionQualityGate_EscalateAndRetryMutuallyExclusive(t *testing.T) {
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+
+	retryRule := findRule(t, def, "validation-failed-retry")
+	escalateRule := findRule(t, def, "validation-failed-escalate")
+
+	for iter := 0; iter <= 4; iter++ {
+		iter := iter
+		t.Run(fmt.Sprintf("iteration_%d", iter), func(t *testing.T) {
+			state := taskExecValidationCheckedState("qg-proj", "qg-t11", false)
+			state.Iteration = iter
+			ctx := &reactiveEngine.RuleContext{State: state}
+
+			retryFires := true
+			for _, cond := range retryRule.Conditions {
+				if !cond.Evaluate(ctx) {
+					retryFires = false
+					break
+				}
+			}
+
+			escalateFires := true
+			// not-completed guard: state is not yet completed
+			for _, cond := range escalateRule.Conditions {
+				if !cond.Evaluate(ctx) {
+					escalateFires = false
+					break
+				}
+			}
+
+			// Safety property: at most one of the two rules fires for any given state.
+			if retryFires && escalateFires {
+				t.Errorf("iteration %d: both validation-failed-retry and validation-failed-escalate fire — mutual exclusion violated", iter)
+			}
+
+			// At least one must fire for a failed, non-completed state (max=3).
+			if iter < 3 && !retryFires {
+				t.Errorf("iteration %d: expected validation-failed-retry to fire (under limit), but it did not", iter)
+			}
+			if iter >= 3 && !escalateFires {
+				t.Errorf("iteration %d: expected validation-failed-escalate to fire (at/over limit), but it did not", iter)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Full pipeline integration tests (quality gate safety properties)
+// ---------------------------------------------------------------------------
+
+// TestTaskExecutionQualityGate_FullPipeline_ValidationFailStaysBlocked is an
+// integration test verifying that when validation fails, the task stays in
+// validation_checked phase (not reviewing) and the retry rule is the correct
+// next step — not dispatch-review.
+func TestTaskExecutionQualityGate_FullPipeline_ValidationFailStaysBlocked(t *testing.T) {
+	engine := testutil.NewTestEngine(t)
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+
+	if err := engine.RegisterWorkflow(def); err != nil {
+		t.Fatalf("RegisterWorkflow failed: %v", err)
+	}
+
+	const key = "task-execution.qg-pipe.task-vfail"
+
+	// Seed the state as validation_checked with a failure.
+	state := &TaskExecutionState{
+		ExecutionState: reactiveEngine.ExecutionState{
+			ID:         key,
+			WorkflowID: "task-execution-loop",
+			Phase:      phases.TaskExecValidationChecked,
+			Status:     reactiveEngine.StatusRunning,
+			Iteration:  0,
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+		},
+		Slug:             "qg-pipe",
+		TaskID:           "task-vfail",
+		ValidationPassed: false,
+		ChecksRun:        3,
+		CheckResults:     json.RawMessage(`[{"check":"go-test","passed":false,"message":"FAIL: TestFoo"}]`),
+	}
+
+	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
+		t.Fatalf("TriggerKV failed: %v", err)
+	}
+
+	// Confirm we are in validation_checked (failed).
+	engine.AssertPhase(key, phases.TaskExecValidationChecked)
+	engine.AssertStatus(key, reactiveEngine.StatusRunning)
+
+	// Confirm dispatch-review conditions do NOT pass — the phase is wrong.
+	reviewDispatchRule := findRule(t, def, "dispatch-review")
+	if err := engine.GetStateAs(key, state); err != nil {
+		t.Fatalf("GetStateAs failed: %v", err)
+	}
+	ctx := &reactiveEngine.RuleContext{State: state}
+	assertSomeConditionFails(t, reviewDispatchRule, ctx)
+
+	// Confirm validation-failed-retry conditions DO pass.
+	retryRule := findRule(t, def, "validation-failed-retry")
+	assertAllConditionsPass(t, retryRule, ctx)
+
+	// Apply the retry mutator and confirm we return to developing — NOT reviewing.
+	if err := retryRule.Action.MutateState(ctx, nil); err != nil {
+		t.Fatalf("retry MutateState failed: %v", err)
+	}
+	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
+		t.Fatalf("TriggerKV (retry) failed: %v", err)
+	}
+	engine.AssertPhase(key, phases.TaskExecDeveloping)
+	engine.AssertIteration(key, 1)
+
+	if err := engine.GetStateAs(key, state); err != nil {
+		t.Fatalf("GetStateAs failed: %v", err)
+	}
+	if state.Phase == phases.TaskExecReviewing {
+		t.Error("quality gate violated: task entered reviewing phase after a failed validation")
+	}
+	if state.RevisionSource != "validation" {
+		t.Errorf("expected RevisionSource 'validation', got %q", state.RevisionSource)
+	}
+}
+
+// TestTaskExecutionQualityGate_FullPipeline_ValidatePassReviewRejectRetry is an
+// integration test that drives the full validate-pass → review-reject → retry-develop
+// pipeline and confirms the task returns to developing with the correct revision source.
+func TestTaskExecutionQualityGate_FullPipeline_ValidatePassReviewRejectRetry(t *testing.T) {
+	engine := testutil.NewTestEngine(t)
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+
+	if err := engine.RegisterWorkflow(def); err != nil {
+		t.Fatalf("RegisterWorkflow failed: %v", err)
+	}
+
+	const key = "task-execution.qg-pipe.task-vrev"
+
+	// Step 1: Seed state at validation_checked with passed=true.
+	state := &TaskExecutionState{
+		ExecutionState: reactiveEngine.ExecutionState{
+			ID:         key,
+			WorkflowID: "task-execution-loop",
+			Phase:      phases.TaskExecValidationChecked,
+			Status:     reactiveEngine.StatusRunning,
+			Iteration:  0,
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+		},
+		Slug:             "qg-pipe",
+		TaskID:           "task-vrev",
+		Prompt:           "Implement the feature",
+		ValidationPassed: true,
+		ChecksRun:        5,
+	}
+	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
+		t.Fatalf("TriggerKV (validation_checked) failed: %v", err)
+	}
+	engine.AssertPhase(key, phases.TaskExecValidationChecked)
+
+	// Step 2: Apply validation-passed mutation → reviewing.
+	validationPassedRule := findRule(t, def, "validation-passed")
+	if err := engine.GetStateAs(key, state); err != nil {
+		t.Fatalf("GetStateAs failed: %v", err)
+	}
+	ctx := &reactiveEngine.RuleContext{State: state}
+	assertAllConditionsPass(t, validationPassedRule, ctx)
+
+	if err := validationPassedRule.Action.MutateState(ctx, nil); err != nil {
+		t.Fatalf("validation-passed MutateState failed: %v", err)
+	}
+	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
+		t.Fatalf("TriggerKV (reviewing) failed: %v", err)
+	}
+	engine.AssertPhase(key, phases.TaskExecReviewing)
+
+	// Step 3: Simulate reviewer setting evaluated phase with a fixable rejection.
+	if err := engine.GetStateAs(key, state); err != nil {
+		t.Fatalf("GetStateAs failed: %v", err)
+	}
+	state.Phase = phases.TaskExecEvaluated
+	state.Verdict = "rejected"
+	state.RejectionType = "fixable"
+	state.Feedback = "Missing input validation on all endpoints"
+	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
+		t.Fatalf("TriggerKV (evaluated) failed: %v", err)
+	}
+	engine.AssertPhase(key, phases.TaskExecEvaluated)
+
+	// Step 4: Confirm handle-approved does NOT fire.
+	approvedRule := findRule(t, def, "handle-approved")
+	if err := engine.GetStateAs(key, state); err != nil {
+		t.Fatalf("GetStateAs failed: %v", err)
+	}
+	ctx = &reactiveEngine.RuleContext{State: state}
+	assertSomeConditionFails(t, approvedRule, ctx)
+
+	// Step 5: Apply fixable-retry mutation → developing.
+	fixableRule := findRule(t, def, "handle-fixable-retry")
+	assertAllConditionsPass(t, fixableRule, ctx)
+
+	if err := fixableRule.Action.MutateState(ctx, nil); err != nil {
+		t.Fatalf("fixable-retry MutateState failed: %v", err)
+	}
+	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
+		t.Fatalf("TriggerKV (developing) failed: %v", err)
+	}
+	engine.AssertPhase(key, phases.TaskExecDeveloping)
+	engine.AssertIteration(key, 1)
+
+	assertReviewRetryState(t, engine, key)
+}
+
+// assertReviewRetryState verifies the state after a fixable review rejection
+// returns the task to developing with the correct revision metadata.
+func assertReviewRetryState(t *testing.T, engine *testutil.TestEngine, key string) {
+	t.Helper()
+	state := &TaskExecutionState{}
+	if err := engine.GetStateAs(key, state); err != nil {
+		t.Fatalf("GetStateAs failed: %v", err)
+	}
+	if state.Phase == phases.TaskExecEvaluated {
+		t.Error("quality gate violated: task stayed in evaluated after fixable rejection")
+	}
+	if state.RevisionSource != "review" {
+		t.Errorf("expected RevisionSource 'review', got %q", state.RevisionSource)
+	}
+	if state.Verdict != "" {
+		t.Errorf("expected Verdict to be cleared after fixable retry, got %q", state.Verdict)
+	}
+	if state.Feedback != "Missing input validation on all endpoints" {
+		t.Errorf("expected Feedback to be preserved after fixable retry, got %q", state.Feedback)
+	}
+}
+
+// TestTaskExecutionQualityGate_FullPipeline_ValidatePassReviewApprove is an
+// integration test that drives the complete happy-path quality gate pipeline:
+// validation passes → reviewer approves → workflow completes.
+func TestTaskExecutionQualityGate_FullPipeline_ValidatePassReviewApprove(t *testing.T) {
+	engine := testutil.NewTestEngine(t)
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+
+	if err := engine.RegisterWorkflow(def); err != nil {
+		t.Fatalf("RegisterWorkflow failed: %v", err)
+	}
+
+	const key = "task-execution.qg-pipe.task-vapprove"
+
+	// Seed from validation_checked with passed=true.
+	state := &TaskExecutionState{
+		ExecutionState: reactiveEngine.ExecutionState{
+			ID:         key,
+			WorkflowID: "task-execution-loop",
+			Phase:      phases.TaskExecValidationChecked,
+			Status:     reactiveEngine.StatusRunning,
+			Iteration:  0,
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+		},
+		Slug:             "qg-pipe",
+		TaskID:           "task-vapprove",
+		ValidationPassed: true,
+		ChecksRun:        8,
+	}
+	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
+		t.Fatalf("TriggerKV (validation_checked) failed: %v", err)
+	}
+
+	// Gate 1: validation-passed mutation → reviewing.
+	validationPassedRule := findRule(t, def, "validation-passed")
+	if err := engine.GetStateAs(key, state); err != nil {
+		t.Fatalf("GetStateAs failed: %v", err)
+	}
+	if err := validationPassedRule.Action.MutateState(&reactiveEngine.RuleContext{State: state}, nil); err != nil {
+		t.Fatalf("validation-passed MutateState failed: %v", err)
+	}
+	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
+		t.Fatalf("TriggerKV (reviewing) failed: %v", err)
+	}
+	engine.AssertPhase(key, phases.TaskExecReviewing)
+
+	// Gate 2: reviewer approves → evaluated.
+	if err := engine.GetStateAs(key, state); err != nil {
+		t.Fatalf("GetStateAs failed: %v", err)
+	}
+	state.Phase = phases.TaskExecEvaluated
+	state.Verdict = "approved"
+	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
+		t.Fatalf("TriggerKV (evaluated) failed: %v", err)
+	}
+	engine.AssertPhase(key, phases.TaskExecEvaluated)
+
+	// Confirm all rejection rules do NOT fire when approved.
+	if err := engine.GetStateAs(key, state); err != nil {
+		t.Fatalf("GetStateAs failed: %v", err)
+	}
+	ctx := &reactiveEngine.RuleContext{State: state}
+	for _, ruleID := range []string{"handle-fixable-retry", "handle-max-retries", "handle-misscoped", "handle-too-big", "handle-unknown-rejection"} {
+		rule := findRule(t, def, ruleID)
+		allPass := true
+		for _, cond := range rule.Conditions {
+			if !cond.Evaluate(ctx) {
+				allPass = false
+				break
+			}
+		}
+		if allPass {
+			t.Errorf("quality gate violated: rule %q should not fire on approved verdict", ruleID)
+		}
+	}
+
+	// Confirm handle-approved fires.
+	approvedRule := findRule(t, def, "handle-approved")
+	assertAllConditionsPass(t, approvedRule, ctx)
+
+	payload, err := approvedRule.Action.BuildPayload(ctx)
+	if err != nil {
+		t.Fatalf("BuildPayload failed: %v", err)
+	}
+	complete, ok := payload.(*TaskCompletePayload)
+	if !ok {
+		t.Fatalf("expected *TaskCompletePayload, got %T", payload)
+	}
+	if complete.TaskID != "task-vapprove" {
+		t.Errorf("expected TaskID 'task-vapprove', got %q", complete.TaskID)
+	}
 }
