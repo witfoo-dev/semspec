@@ -8,64 +8,88 @@
 
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import StatusBadge from '$lib/components/shared/StatusBadge.svelte';
+	import RequirementPanel from './RequirementPanel.svelte';
 	import { api } from '$lib/api/client';
 	import { plansStore } from '$lib/stores/plans.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { Phase } from '$lib/types/phase';
+	import type { Requirement } from '$lib/types/requirement';
 
 	interface Props {
 		plan: PlanWithStatus;
 		phases: Phase[];
+		requirements?: Requirement[];
 		onRefresh?: () => Promise<void>;
-		onGeneratePhases?: () => Promise<void>;
 	}
 
-	let { plan, phases, onRefresh, onGeneratePhases }: Props = $props();
+	let { plan, phases, requirements = [], onRefresh }: Props = $props();
 
 	let isEditing = $state(false);
 	let editGoal = $state('');
 	let editContext = $state('');
 	let saving = $state(false);
 	let approving = $state(false);
-	let generatingPhases = $state(false);
 	let error = $state<string | null>(null);
 
 	// Workflow guidance based on plan stage
 	const guidance = $derived.by(() => {
 		if (!plan.approved) {
 			return {
-				message: 'Review the plan details and approve to generate phases.',
+				message: 'Review the plan details and approve to begin the auto-cascade.',
 				showApprove: true,
-				showEdit: true,
-				showGeneratePhases: false
+				showEdit: true
 			};
 		}
 
-		if (phases.length === 0) {
+		const stage = plan.stage;
+
+		if (stage === 'approved' && requirements.length === 0) {
 			return {
-				message: 'Generating phases from the plan...',
+				message: 'Generating requirements from the approved plan...',
 				showApprove: false,
 				showEdit: false,
-				showGeneratePhases: true,
-				isLoading: generatingPhases
+				isLoading: true
 			};
 		}
 
-		const unapprovedPhases = phases.filter((p) => p.requires_approval && !p.approved);
-		if (unapprovedPhases.length > 0) {
+		if (stage === 'requirements_generated') {
 			return {
-				message: `Review and approve ${unapprovedPhases.length} phase${unapprovedPhases.length > 1 ? 's' : ''} to continue.`,
+				message: 'Requirements generated. Generating scenarios...',
 				showApprove: false,
 				showEdit: false,
-				showGeneratePhases: false
+				isLoading: true
 			};
 		}
 
+		if (stage === 'scenarios_generated' || stage === 'ready_for_execution') {
+			return {
+				message: 'Requirements and scenarios are ready. Click Execute to start.',
+				showApprove: false,
+				showEdit: false
+			};
+		}
+
+		if (['implementing', 'executing'].includes(stage)) {
+			return {
+				message: 'Plan is executing. Select a requirement to view progress.',
+				showApprove: false,
+				showEdit: false
+			};
+		}
+
+		if (stage === 'complete') {
+			return {
+				message: 'Plan execution complete.',
+				showApprove: false,
+				showEdit: false
+			};
+		}
+
+		// Fallback for legacy stages
 		return {
-			message: 'All phases approved. Select a phase to view its tasks.',
+			message: 'Select a requirement to view its scenarios.',
 			showApprove: false,
-			showEdit: false,
-			showGeneratePhases: false
+			showEdit: false
 		};
 	});
 
@@ -119,19 +143,6 @@
 			error = err instanceof Error ? err.message : 'Failed to approve plan';
 		} finally {
 			approving = false;
-		}
-	}
-
-	async function handleGeneratePhases(): Promise<void> {
-		generatingPhases = true;
-		error = null;
-		try {
-			await api.phases.generate(plan.slug);
-			await onGeneratePhases?.();
-		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to generate phases';
-		} finally {
-			generatingPhases = false;
 		}
 	}
 </script>
@@ -279,7 +290,11 @@
 	{#if !isEditing}
 		<div class="detail-guidance">
 			<div class="guidance-hint">
-				<Icon name="lightbulb" size={14} />
+				{#if guidance.isLoading}
+					<Icon name="loader" size={14} />
+				{:else}
+					<Icon name="lightbulb" size={14} />
+				{/if}
 				<span>{guidance.message}</span>
 			</div>
 			<div class="guidance-actions">
@@ -298,22 +313,14 @@
 						{/if}
 					</button>
 				{/if}
-				{#if guidance.showGeneratePhases}
-					<button
-						class="btn btn-primary"
-						onclick={handleGeneratePhases}
-						disabled={generatingPhases}
-					>
-						{#if generatingPhases}
-							<Icon name="loader" size={14} />
-							Generating...
-						{:else}
-							<Icon name="zap" size={14} />
-							Generate Phases
-						{/if}
-					</button>
-				{/if}
 			</div>
+		</div>
+	{/if}
+
+	<!-- Inline Requirements (when viewing plan detail) -->
+	{#if plan.approved && requirements.length > 0}
+		<div class="requirements-inline">
+			<RequirementPanel slug={plan.slug} />
 		</div>
 	{/if}
 </div>
@@ -563,9 +570,21 @@
 		color: var(--color-text-primary);
 	}
 
+	/* Requirements inline */
+	.requirements-inline {
+		padding-top: var(--space-4);
+		border-top: 1px solid var(--color-border);
+	}
+
 	/* Loader animation */
 	.btn :global(svg.loader),
-	.guidance-actions .btn :global([data-icon='loader']) {
+	.guidance-actions .btn :global([data-icon='loader']),
+	.guidance-hint :global(svg) {
+		flex-shrink: 0;
+		margin-top: 2px;
+	}
+
+	.detail-guidance :global([data-icon='loader']) {
 		animation: spin 1s linear infinite;
 	}
 

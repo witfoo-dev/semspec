@@ -75,7 +75,7 @@
 		<div class="pipeline-row">
 			<PipelineIndicator
 				plan={pipeline.plan}
-				tasks={pipeline.tasks}
+				requirements={pipeline.requirements}
 				execute={pipeline.execute}
 			/>
 			{#if plan.task_stats}

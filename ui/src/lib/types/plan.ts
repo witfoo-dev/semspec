@@ -38,10 +38,13 @@ export type PlanStage =
 	| 'planning' // Approved, finalizing approach
 	| 'approved' // Plan explicitly approved
 	| 'rejected' // Plan rejected
-	| 'phases_generated' // Phases generated, awaiting approval
-	| 'phases_approved' // Phases approved, ready for task generation
-	| 'tasks_generated' // Tasks generated, awaiting approval
-	| 'tasks_approved' // All tasks approved, ready for execution
+	| 'requirements_generated' // Requirements generated via auto-cascade
+	| 'scenarios_generated' // Scenarios generated via auto-cascade
+	| 'ready_for_execution' // Auto-cascade complete, ready to execute
+	| 'phases_generated' // Legacy: Phases generated
+	| 'phases_approved' // Legacy: Phases approved
+	| 'tasks_generated' // Legacy: Tasks generated
+	| 'tasks_approved' // Legacy: All tasks approved
 	| 'tasks' // Legacy: Tasks generated
 	| 'implementing' // Tasks being implemented
 	| 'executing' // Legacy: Tasks being executed
@@ -56,10 +59,11 @@ export type PlanPhaseState = 'none' | 'active' | 'complete' | 'failed';
 
 /**
  * PlanPipeline represents the 3-phase pipeline state.
+ * Phases: plan → requirements (auto-cascade) → execute
  */
 export interface PlanPipeline {
 	plan: PlanPhaseState;
-	tasks: PlanPhaseState;
+	requirements: PlanPhaseState;
 	execute: PlanPhaseState;
 }
 
@@ -135,11 +139,9 @@ export interface PlanWithStatus extends Omit<GeneratedPlanWithStatus, 'active_lo
 
 /**
  * Derive the pipeline state from a plan with status.
+ * Pipeline: plan → requirements (auto-cascade) → execute
  */
 export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
-	const isGeneratingTasks = (plan.active_loops ?? []).some(
-		(l) => l.state === 'executing' && l.role === 'task-generator'
-	);
 	const isExecuting = (plan.active_loops ?? []).some(
 		(l) => l.state === 'executing' && l.current_task_id
 	);
@@ -156,14 +158,28 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 		planState = 'active';
 	}
 
-	// Determine tasks phase state
-	const tasksDoneStages: PlanStage[] = ['tasks_approved', 'implementing', 'executing', 'complete'];
-	const tasksActiveStages: PlanStage[] = ['phases_generated', 'phases_approved', 'tasks_generated'];
-	let tasksState: PlanPhaseState = 'none';
-	if (tasksDoneStages.includes(stage) || (plan.task_stats && plan.task_stats.total > 0)) {
-		tasksState = 'complete';
-	} else if (tasksActiveStages.includes(stage) || isGeneratingTasks) {
-		tasksState = 'active';
+	// Determine requirements phase state (auto-cascade: approved → requirements → scenarios → ready)
+	const reqsDoneStages: PlanStage[] = [
+		'ready_for_execution',
+		'tasks_approved',
+		'implementing',
+		'executing',
+		'complete'
+	];
+	const reqsActiveStages: PlanStage[] = [
+		'approved',
+		'requirements_generated',
+		'scenarios_generated',
+		// Legacy stages
+		'phases_generated',
+		'phases_approved',
+		'tasks_generated'
+	];
+	let reqsState: PlanPhaseState = 'none';
+	if (reqsDoneStages.includes(stage)) {
+		reqsState = 'complete';
+	} else if (reqsActiveStages.includes(stage)) {
+		reqsState = 'active';
 	}
 
 	// Determine execute phase state
@@ -178,7 +194,7 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 
 	return {
 		plan: planState,
-		tasks: tasksState,
+		requirements: reqsState,
 		execute: executeState
 	};
 }

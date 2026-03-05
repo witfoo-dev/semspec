@@ -11,11 +11,13 @@
 
 // Chat context for tracking which plan/phase/task a message is associated with
 export interface MessageContext {
-	type: 'plan' | 'phase' | 'task';
+	type: 'plan' | 'phase' | 'task' | 'requirement' | 'scenario';
 	planSlug: string;
 	phaseId?: string;
 	taskId?: string;
-	label: string; // Human-readable label like "Phase 2: Implementation"
+	requirementId?: string;
+	scenarioId?: string;
+	label: string;
 }
 
 // UI-only message type for chat display (not from API)

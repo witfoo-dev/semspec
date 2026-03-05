@@ -66,6 +66,12 @@
 				return 'Approved';
 			case 'rejected':
 				return 'Rejected';
+			case 'requirements_generated':
+				return 'Reqs Generated';
+			case 'scenarios_generated':
+				return 'Scenarios Generated';
+			case 'ready_for_execution':
+				return 'Ready';
 			case 'phases_generated':
 				return 'Phases Generated';
 			case 'phases_approved':
@@ -163,7 +169,7 @@
 						{#if plan.approved}
 							<PipelineIndicator
 								plan={pipeline.plan}
-								tasks={pipeline.tasks}
+								requirements={pipeline.requirements}
 								execute={pipeline.execute}
 								compact
 							/>

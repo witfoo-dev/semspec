@@ -6,13 +6,15 @@
  * context for chat messages.
  */
 
-export type SelectionType = 'plan' | 'phase' | 'task';
+export type SelectionType = 'plan' | 'phase' | 'task' | 'requirement' | 'scenario';
 
 export interface PlanSelection {
 	type: SelectionType;
 	planSlug: string;
 	phaseId?: string;
 	taskId?: string;
+	requirementId?: string;
+	scenarioId?: string;
 }
 
 export interface ChatContext {
@@ -20,6 +22,8 @@ export interface ChatContext {
 	planSlug: string;
 	phaseId?: string;
 	taskId?: string;
+	requirementId?: string;
+	scenarioId?: string;
 	label: string;
 }
 
@@ -53,6 +57,23 @@ class PlanSelectionStore {
 		};
 	}
 
+	selectRequirement(slug: string, requirementId: string): void {
+		this.selection = {
+			type: 'requirement',
+			planSlug: slug,
+			requirementId
+		};
+	}
+
+	selectScenario(slug: string, requirementId: string, scenarioId: string): void {
+		this.selection = {
+			type: 'scenario',
+			planSlug: slug,
+			requirementId,
+			scenarioId
+		};
+	}
+
 	clear(): void {
 		this.selection = null;
 	}
@@ -77,6 +98,12 @@ class PlanSelectionStore {
 		}
 		if (selection.type === 'task' && selection.taskId) {
 			return this.labelCache.get(`task:${selection.taskId}`) ?? `Task ${selection.taskId.slice(0, 8)}`;
+		}
+		if (selection.type === 'requirement' && selection.requirementId) {
+			return this.labelCache.get(`requirement:${selection.requirementId}`) ?? `Requirement ${selection.requirementId.slice(0, 8)}`;
+		}
+		if (selection.type === 'scenario' && selection.scenarioId) {
+			return this.labelCache.get(`scenario:${selection.scenarioId}`) ?? `Scenario ${selection.scenarioId.slice(0, 8)}`;
 		}
 		return selection.planSlug;
 	}
@@ -113,6 +140,13 @@ class PlanSelectionStore {
 				);
 			case 'task':
 				return this.selection.type === 'task' && this.selection.taskId === id;
+			case 'requirement':
+				return (
+					(this.selection.type === 'requirement' || this.selection.type === 'scenario') &&
+					this.selection.requirementId === id
+				);
+			case 'scenario':
+				return this.selection.type === 'scenario' && this.selection.scenarioId === id;
 			default:
 				return false;
 		}

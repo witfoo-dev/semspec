@@ -2,154 +2,131 @@
 	/**
 	 * PlanNavTree - Progressive disclosure navigation tree for plans.
 	 *
-	 * Shows plan → phases → tasks hierarchy with:
-	 * - Expand/collapse for phases (only shown after plan approved)
-	 * - Task nodes within expanded phases (only shown after phase approved)
+	 * Shows plan → requirements → scenarios hierarchy with:
+	 * - Expand/collapse for requirements
+	 * - Scenario nodes within expanded requirements
 	 * - Status indicators and selection highlighting
 	 * - Keyboard navigation support
 	 */
 
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
-	import type { Phase, PhaseStatus } from '$lib/types/phase';
-	import type { Task, TaskStatus } from '$lib/types/task';
+	import type { Requirement, RequirementStatus } from '$lib/types/requirement';
+	import type { Scenario, ScenarioStatus } from '$lib/types/scenario';
 	import type { PlanSelection, SelectionType } from '$lib/stores/planSelection.svelte';
 
 	interface Props {
 		plan: PlanWithStatus;
-		phases: Phase[];
-		tasksByPhase: Record<string, Task[]>;
+		requirements: Requirement[];
+		scenariosByReq: Record<string, Scenario[]>;
 		selection: PlanSelection | null;
 		onSelect: (selection: PlanSelection) => void;
+		onExpandRequirement?: (reqId: string) => void;
 	}
 
-	let { plan, phases, tasksByPhase, selection, onSelect }: Props = $props();
+	let { plan, requirements, scenariosByReq, selection, onSelect, onExpandRequirement }: Props = $props();
 
-	// Track which phases are manually expanded (beyond auto-expand from selection)
+	// Track which requirements are manually expanded
 	let manuallyExpanded = $state<Set<string>>(new Set());
 
-	// A phase is expanded if it's manually expanded or contains the selected task
-	function isExpanded(phaseId: string): boolean {
-		if (manuallyExpanded.has(phaseId)) return true;
-		if (selection?.phaseId === phaseId) return true;
+	function isExpanded(reqId: string): boolean {
+		if (manuallyExpanded.has(reqId)) return true;
+		if (selection?.requirementId === reqId) return true;
 		return false;
 	}
 
-	function togglePhase(phaseId: string): void {
+	function toggleRequirement(reqId: string): void {
 		const newExpanded = new Set(manuallyExpanded);
-		if (newExpanded.has(phaseId)) {
-			newExpanded.delete(phaseId);
+		if (newExpanded.has(reqId)) {
+			newExpanded.delete(reqId);
 		} else {
-			newExpanded.add(phaseId);
+			newExpanded.add(reqId);
+			onExpandRequirement?.(reqId);
 		}
 		manuallyExpanded = newExpanded;
 	}
 
 	function handleSelectPlan(): void {
-		onSelect({
-			type: 'plan',
-			planSlug: plan.slug
-		});
+		onSelect({ type: 'plan', planSlug: plan.slug });
 	}
 
-	function handleSelectPhase(phaseId: string): void {
-		onSelect({
-			type: 'phase',
-			planSlug: plan.slug,
-			phaseId
-		});
+	function handleSelectRequirement(reqId: string): void {
+		onSelect({ type: 'requirement', planSlug: plan.slug, requirementId: reqId });
+		// Auto-expand when selected
+		if (!manuallyExpanded.has(reqId)) {
+			const newExpanded = new Set(manuallyExpanded);
+			newExpanded.add(reqId);
+			manuallyExpanded = newExpanded;
+			onExpandRequirement?.(reqId);
+		}
 	}
 
-	function handleSelectTask(phaseId: string, taskId: string): void {
-		onSelect({
-			type: 'task',
-			planSlug: plan.slug,
-			phaseId,
-			taskId
-		});
+	function handleSelectScenario(reqId: string, scenarioId: string): void {
+		onSelect({ type: 'scenario', planSlug: plan.slug, requirementId: reqId, scenarioId });
 	}
 
-	// Check if a specific item is selected
 	function isSelected(type: SelectionType, id?: string): boolean {
 		if (!selection) return false;
-		if (type === 'plan') {
-			return selection.type === 'plan';
-		}
-		if (type === 'phase') {
-			return selection.type === 'phase' && selection.phaseId === id;
-		}
-		if (type === 'task') {
-			return selection.type === 'task' && selection.taskId === id;
-		}
+		if (type === 'plan') return selection.type === 'plan';
+		if (type === 'requirement') return (selection.type === 'requirement' || selection.type === 'scenario') && selection.requirementId === id;
+		if (type === 'scenario') return selection.type === 'scenario' && selection.scenarioId === id;
 		return false;
 	}
 
-	// Get status icon for phases
-	function getPhaseStatusIcon(status: PhaseStatus): string {
+	function getReqStatusIcon(status: RequirementStatus): string {
 		switch (status) {
-			case 'complete':
-				return 'check-circle';
 			case 'active':
-				return 'loader';
-			case 'failed':
-				return 'x-circle';
-			case 'blocked':
-				return 'lock';
-			case 'ready':
-				return 'play-circle';
-			default:
-				return 'circle';
-		}
-	}
-
-	// Get status icon for tasks
-	function getTaskStatusIcon(status: TaskStatus): string {
-		switch (status) {
-			case 'completed':
-				return 'check';
-			case 'in_progress':
-				return 'loader';
-			case 'failed':
-				return 'x';
-			case 'approved':
 				return 'check-circle';
-			case 'rejected':
-				return 'x-circle';
-			case 'pending_approval':
-				return 'clock';
-			case 'dirty':
-				return 'alert-circle';
-			case 'blocked':
-				return 'lock';
+			case 'deprecated':
+				return 'archive';
+			case 'superseded':
+				return 'arrow-right-circle';
 			default:
 				return 'circle';
 		}
 	}
 
-	// Count dirty tasks in a phase
-	function getDirtyCount(phaseId: string): number {
-		return tasksByPhase[phaseId]?.filter((t) => t.status === 'dirty').length ?? 0;
+	function getScenarioStatusIcon(status: ScenarioStatus): string {
+		switch (status) {
+			case 'passing':
+				return 'check';
+			case 'failing':
+				return 'x';
+			case 'skipped':
+				return 'skip-forward';
+			default:
+				return 'circle';
+		}
 	}
 
-	// Get task count for a phase
-	function getTaskCount(phaseId: string): number {
-		return tasksByPhase[phaseId]?.length ?? 0;
+	function getScenarioCount(reqId: string): number {
+		return scenariosByReq[reqId]?.length ?? 0;
 	}
 
-	// Get completed task count for a phase
-	function getCompletedCount(phaseId: string): number {
-		return tasksByPhase[phaseId]?.filter((t) => t.status === 'completed').length ?? 0;
+	function getPassingCount(reqId: string): number {
+		return scenariosByReq[reqId]?.filter((s) => s.status === 'passing').length ?? 0;
 	}
 
-	// Determine if phases should be shown (plan is approved)
-	const showPhases = $derived(plan.approved && phases.length > 0);
+	const showRequirements = $derived(plan.approved && requirements.length > 0);
 
-	// Keyboard navigation
+	// Cascade status text when requirements are being generated
+	const cascadeStatus = $derived.by(() => {
+		if (!plan.approved) return '';
+		if (plan.stage === 'approved' && requirements.length === 0) return 'Generating requirements...';
+		if (plan.stage === 'requirements_generated') return 'Generating scenarios...';
+		return '';
+	});
+
 	function handleKeyDown(e: KeyboardEvent, action: () => void): void {
 		if (e.key === 'Enter' || e.key === ' ') {
 			e.preventDefault();
 			action();
 		}
+	}
+
+	function formatScenarioLabel(scenario: Scenario): string {
+		const text = `When ${scenario.when}`;
+		return text.length > 40 ? text.slice(0, 40) + '...' : text;
 	}
 </script>
 
@@ -173,84 +150,76 @@
 		{/if}
 	</button>
 
-	<!-- Phase nodes -->
-	{#if showPhases}
+	<!-- Requirement nodes -->
+	{#if showRequirements}
 		<div class="tree-children" role="group">
-			{#each phases as phase (phase.id)}
-				{@const expanded = isExpanded(phase.id)}
-				{@const phaseTasks = tasksByPhase[phase.id] ?? []}
-				{@const hasApprovedPhase = phase.approved}
-				{@const hasTasks = phaseTasks.length > 0}
+			{#each requirements as req (req.id)}
+				{@const expanded = isExpanded(req.id)}
+				{@const scenarios = scenariosByReq[req.id] ?? []}
+				{@const hasScenarios = scenarios.length > 0}
 
 				<div class="tree-branch">
-					<div class="phase-row">
-						<!-- Expand/collapse button (only if phase has tasks) -->
-						{#if hasTasks}
+					<div class="req-row">
+						{#if hasScenarios || expanded}
 							<button
 								type="button"
 								class="expand-btn"
-								onclick={() => togglePhase(phase.id)}
+								onclick={() => toggleRequirement(req.id)}
 								aria-expanded={expanded}
-								aria-label={expanded ? 'Collapse phase' : 'Expand phase'}
+								aria-label={expanded ? 'Collapse requirement' : 'Expand requirement'}
 							>
 								<Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={14} />
 							</button>
 						{:else}
-							<span class="expand-placeholder"></span>
+							<button
+								type="button"
+								class="expand-btn"
+								onclick={() => toggleRequirement(req.id)}
+								aria-label="Expand requirement"
+							>
+								<Icon name="chevron-right" size={14} />
+							</button>
 						{/if}
 
-						<!-- Phase node -->
 						<button
-							class="tree-node phase-node"
-							class:selected={isSelected('phase', phase.id)}
-							onclick={() => handleSelectPhase(phase.id)}
-							onkeydown={(e) => handleKeyDown(e, () => handleSelectPhase(phase.id))}
+							class="tree-node req-node"
+							class:selected={isSelected('requirement', req.id)}
+							onclick={() => handleSelectRequirement(req.id)}
+							onkeydown={(e) => handleKeyDown(e, () => handleSelectRequirement(req.id))}
 							role="treeitem"
-							aria-selected={isSelected('phase', phase.id)}
+							aria-selected={isSelected('requirement', req.id)}
 							aria-level={2}
-							aria-expanded={hasTasks ? expanded : undefined}
+							aria-expanded={expanded}
 						>
-							<span class="node-icon phase-status" data-status={phase.status}>
-								<Icon name={getPhaseStatusIcon(phase.status as PhaseStatus)} size={14} />
+							<span class="node-icon req-status" data-status={req.status}>
+								<Icon name={getReqStatusIcon(req.status)} size={14} />
 							</span>
-							<span class="node-label">{phase.name}</span>
-							{#if hasTasks}
-								<span class="task-count">
-									{getCompletedCount(phase.id)}/{getTaskCount(phase.id)}
+							<span class="node-label">{req.title}</span>
+							{#if hasScenarios}
+								<span class="scenario-count">
+									{getPassingCount(req.id)}/{getScenarioCount(req.id)}
 								</span>
-								{#if getDirtyCount(phase.id) > 0}
-									<span class="dirty-count-badge" title="{getDirtyCount(phase.id)} task{getDirtyCount(phase.id) !== 1 ? 's' : ''} need re-evaluation">
-										{getDirtyCount(phase.id)}
-									</span>
-								{/if}
-							{:else if hasApprovedPhase}
-								<span class="node-badge pending">No tasks</span>
-							{:else}
-								<span class="node-badge awaiting">Awaiting approval</span>
 							{/if}
 						</button>
 					</div>
 
-					<!-- Task nodes (if expanded and has tasks) -->
-					{#if expanded && hasTasks}
-						<div class="tree-children tasks" role="group">
-							{#each phaseTasks as task (task.id)}
+					<!-- Scenario nodes (if expanded) -->
+					{#if expanded && hasScenarios}
+						<div class="tree-children scenarios" role="group">
+							{#each scenarios as scenario (scenario.id)}
 								<button
-									class="tree-node task-node"
-									class:selected={isSelected('task', task.id)}
-									onclick={() => handleSelectTask(phase.id, task.id)}
-									onkeydown={(e) => handleKeyDown(e, () => handleSelectTask(phase.id, task.id))}
+									class="tree-node scenario-node"
+									class:selected={isSelected('scenario', scenario.id)}
+									onclick={() => handleSelectScenario(req.id, scenario.id)}
+									onkeydown={(e) => handleKeyDown(e, () => handleSelectScenario(req.id, scenario.id))}
 									role="treeitem"
-									aria-selected={isSelected('task', task.id)}
+									aria-selected={isSelected('scenario', scenario.id)}
 									aria-level={3}
 								>
-									<span class="node-icon task-status" data-status={task.status}>
-										<Icon name={getTaskStatusIcon(task.status)} size={12} />
+									<span class="node-icon scenario-status" data-status={scenario.status}>
+										<Icon name={getScenarioStatusIcon(scenario.status)} size={12} />
 									</span>
-									<span class="node-label">{task.description}</span>
-									{#if task.status === 'dirty'}
-										<span class="dirty-dot" aria-label="Needs re-evaluation" title="Requirement changed"></span>
-									{/if}
+									<span class="node-label">{formatScenarioLabel(scenario)}</span>
 								</button>
 							{/each}
 						</div>
@@ -258,11 +227,15 @@
 				</div>
 			{/each}
 		</div>
-	{:else if plan.approved && phases.length === 0}
-		<!-- Plan approved but no phases yet -->
+	{:else if cascadeStatus}
 		<div class="tree-empty">
-			<Icon name="layers" size={14} />
-			<span>Generating phases...</span>
+			<Icon name="loader" size={14} />
+			<span>{cascadeStatus}</span>
+		</div>
+	{:else if plan.approved && requirements.length === 0}
+		<div class="tree-empty">
+			<Icon name="list-checks" size={14} />
+			<span>No requirements yet</span>
 		</div>
 	{/if}
 </div>
@@ -305,7 +278,6 @@
 		border-color: var(--color-accent);
 	}
 
-	/* Plan node styling */
 	.plan-node {
 		font-weight: var(--font-weight-semibold);
 	}
@@ -314,8 +286,8 @@
 		color: var(--color-accent);
 	}
 
-	/* Phase row with expand button */
-	.phase-row {
+	/* Requirement row with expand button */
+	.req-row {
 		display: flex;
 		align-items: center;
 		gap: var(--space-1);
@@ -341,13 +313,7 @@
 		color: var(--color-text-primary);
 	}
 
-	.expand-placeholder {
-		width: 20px;
-		flex-shrink: 0;
-	}
-
-	/* Phase node */
-	.phase-node {
+	.req-node {
 		flex: 1;
 	}
 
@@ -358,7 +324,7 @@
 		border-left: 1px solid var(--color-border);
 	}
 
-	.tree-children.tasks {
+	.tree-children.scenarios {
 		margin-left: calc(20px + var(--space-1));
 	}
 
@@ -368,13 +334,12 @@
 		gap: var(--space-1);
 	}
 
-	/* Task node */
-	.task-node {
+	.scenario-node {
 		padding: var(--space-1) var(--space-2);
 		font-size: var(--font-size-xs);
 	}
 
-	.task-node .node-label {
+	.scenario-node .node-label {
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -394,69 +359,32 @@
 	}
 
 	/* Status colors */
-	.phase-status[data-status='complete'],
-	.task-status[data-status='completed'],
-	.task-status[data-status='approved'] {
+	.req-status[data-status='active'] {
 		color: var(--color-success);
 	}
 
-	.phase-status[data-status='active'],
-	.task-status[data-status='in_progress'] {
-		color: var(--color-accent);
-	}
-
-	.phase-status[data-status='failed'],
-	.task-status[data-status='failed'],
-	.task-status[data-status='rejected'] {
-		color: var(--color-error);
-	}
-
-	.phase-status[data-status='blocked'] {
-		color: var(--color-warning);
-	}
-
-	.phase-status[data-status='ready'],
-	.task-status[data-status='pending_approval'] {
-		color: var(--color-warning);
-	}
-
-	.phase-status[data-status='pending'],
-	.task-status[data-status='pending'] {
+	.req-status[data-status='deprecated'] {
 		color: var(--color-text-muted);
 	}
 
-	.task-status[data-status='dirty'] {
+	.req-status[data-status='superseded'] {
 		color: var(--color-warning);
 	}
 
-	.task-status[data-status='blocked'] {
+	.scenario-status[data-status='passing'] {
+		color: var(--color-success);
+	}
+
+	.scenario-status[data-status='failing'] {
 		color: var(--color-error);
 	}
 
-	/* Dirty dot indicator on task nodes */
-	.dirty-dot {
-		width: 6px;
-		height: 6px;
-		border-radius: var(--radius-full);
-		background: var(--color-warning);
-		flex-shrink: 0;
-		box-shadow: 0 0 0 2px var(--color-warning-muted);
+	.scenario-status[data-status='skipped'] {
+		color: var(--color-warning);
 	}
 
-	/* Dirty count badge on phase nodes */
-	.dirty-count-badge {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		min-width: 16px;
-		height: 16px;
-		padding: 0 4px;
-		background: var(--color-warning-muted);
-		color: var(--color-warning);
-		border-radius: var(--radius-full);
-		font-size: 10px;
-		font-weight: var(--font-weight-semibold);
-		flex-shrink: 0;
+	.scenario-status[data-status='pending'] {
+		color: var(--color-text-muted);
 	}
 
 	/* Badges and counts */
@@ -472,18 +400,7 @@
 		color: var(--color-warning);
 	}
 
-	.node-badge.pending {
-		background: var(--color-bg-tertiary);
-		color: var(--color-text-muted);
-	}
-
-	.node-badge.awaiting {
-		background: var(--color-accent-muted);
-		color: var(--color-accent);
-		font-size: 10px;
-	}
-
-	.task-count {
+	.scenario-count {
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
 		flex-shrink: 0;
@@ -500,9 +417,8 @@
 		color: var(--color-text-muted);
 	}
 
-	/* Loader animation for active/in_progress */
-	.phase-status[data-status='active'] :global(svg),
-	.task-status[data-status='in_progress'] :global(svg) {
+	/* Loader animation */
+	.tree-empty :global(svg) {
 		animation: spin 1s linear infinite;
 	}
 

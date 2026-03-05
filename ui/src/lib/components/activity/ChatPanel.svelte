@@ -39,6 +39,8 @@
 			planSlug: selectionContext.planSlug,
 			phaseId: selectionContext.phaseId,
 			taskId: selectionContext.taskId,
+			requirementId: selectionContext.requirementId,
+			scenarioId: selectionContext.scenarioId,
 			label
 		};
 	}

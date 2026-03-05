@@ -3,16 +3,16 @@
 
 	interface Props {
 		plan: PlanPhaseState;
-		tasks: PlanPhaseState;
+		requirements: PlanPhaseState;
 		execute: PlanPhaseState;
 		compact?: boolean;
 	}
 
-	let { plan, tasks, execute, compact = false }: Props = $props();
+	let { plan, requirements, execute, compact = false }: Props = $props();
 
 	const phases = $derived([
 		{ key: 'plan', label: 'plan', state: plan },
-		{ key: 'tasks', label: 'tasks', state: tasks },
+		{ key: 'requirements', label: 'reqs', state: requirements },
 		{ key: 'execute', label: 'exec', state: execute }
 	]);
 

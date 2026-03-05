@@ -1,72 +1,43 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
-	import type { PlanWithStatus } from '$lib/types/plan';
-	import type { Task } from '$lib/types/task';
-	import type { Phase } from '$lib/types/phase';
+	import type { PlanWithStatus, PlanStage } from '$lib/types/plan';
 
 	interface Props {
 		plan: PlanWithStatus;
-		tasks: Task[];
-		phases?: Phase[];
 		onPromote: () => Promise<void>;
-		onGenerateTasks: () => Promise<void>;
-		onGeneratePhases?: () => Promise<void>;
-		onApproveAll: () => Promise<void>;
 		onExecute: () => Promise<void>;
 	}
 
-	let { plan, tasks, phases = [], onPromote, onGenerateTasks, onGeneratePhases, onApproveAll, onExecute }: Props = $props();
+	let { plan, onPromote, onExecute }: Props = $props();
 
 	// Button visibility logic
 	const showApprovePlan = $derived(!plan.approved && !!plan.goal);
 
-	// Phase-related logic
-	const hasPhases = $derived(phases.length > 0);
-	const showGeneratePhases = $derived(
-		plan.approved &&
-			['approved', 'reviewed'].includes(plan.stage) &&
-			phases.length === 0 &&
-			onGeneratePhases
-	);
+	// Cascade status: show when plan is approved but not yet ready for execution
+	const cascadeStages: PlanStage[] = ['approved', 'requirements_generated', 'scenarios_generated'];
+	const isCascading = $derived(plan.approved && cascadeStages.includes(plan.stage));
 
-	const pendingPhaseApprovalCount = $derived(
-		phases.filter((p) => p.requires_approval && !p.approved).length
-	);
-	const showApprovePhases = $derived(pendingPhaseApprovalCount > 0);
+	const cascadeLabel = $derived.by(() => {
+		switch (plan.stage) {
+			case 'approved':
+				return 'Generating requirements...';
+			case 'requirements_generated':
+				return 'Generating scenarios...';
+			case 'scenarios_generated':
+				return 'Preparing for execution...';
+			default:
+				return '';
+		}
+	});
 
-	// Task-related logic (modified for phase workflow)
-	const showGenerateTasks = $derived(
-		plan.approved &&
-			['approved', 'reviewed'].includes(plan.stage) &&
-			!hasPhases &&
-			tasks.length === 0
-	);
-
-	const pendingApprovalCount = $derived(
-		tasks.filter((t) => t.status === 'pending_approval').length
-	);
-	const showApproveAll = $derived(pendingApprovalCount > 0);
-
-	const allTasksApproved = $derived(
-		tasks.length > 0 && tasks.every((t) => t.status === 'approved' || t.status === 'completed')
-	);
-	const approvedCount = $derived(tasks.filter((t) => t.status === 'approved').length);
-
-	// Execute requires all phases and tasks approved (if phases exist)
-	const allPhasesApproved = $derived(
-		!hasPhases || phases.every((p) => !p.requires_approval || p.approved)
-	);
+	// Execute when auto-cascade is complete
 	const showExecute = $derived(
-		allTasksApproved &&
-			allPhasesApproved &&
-			['tasks', 'tasks_approved', 'tasks_generated'].includes(plan.stage)
+		plan.approved &&
+			['ready_for_execution', 'tasks_approved', 'tasks', 'tasks_generated'].includes(plan.stage)
 	);
 
 	// Loading states
 	let promoteLoading = $state(false);
-	let generatePhasesLoading = $state(false);
-	let generateTasksLoading = $state(false);
-	let approveAllLoading = $state(false);
 	let executeLoading = $state(false);
 
 	async function handlePromote() {
@@ -75,34 +46,6 @@
 			await onPromote();
 		} finally {
 			promoteLoading = false;
-		}
-	}
-
-	async function handleGeneratePhases() {
-		if (!onGeneratePhases) return;
-		generatePhasesLoading = true;
-		try {
-			await onGeneratePhases();
-		} finally {
-			generatePhasesLoading = false;
-		}
-	}
-
-	async function handleGenerateTasks() {
-		generateTasksLoading = true;
-		try {
-			await onGenerateTasks();
-		} finally {
-			generateTasksLoading = false;
-		}
-	}
-
-	async function handleApproveAll() {
-		approveAllLoading = true;
-		try {
-			await onApproveAll();
-		} finally {
-			approveAllLoading = false;
 		}
 	}
 
@@ -116,7 +59,7 @@
 	}
 </script>
 
-{#if showApprovePlan || showGeneratePhases || showGenerateTasks || showApprovePhases || showApproveAll || showExecute}
+{#if showApprovePlan || isCascading || showExecute}
 	<div class="action-bar">
 		{#if showApprovePlan}
 			<button
@@ -130,51 +73,11 @@
 			</button>
 		{/if}
 
-		{#if showGeneratePhases}
-			<button
-				class="action-btn btn-primary"
-				onclick={handleGeneratePhases}
-				disabled={generatePhasesLoading}
-				aria-busy={generatePhasesLoading}
-			>
-				<Icon name="layers" size={16} />
-				<span>Generate Phases</span>
-			</button>
-		{/if}
-
-		{#if showGenerateTasks}
-			<button
-				class="action-btn btn-primary"
-				onclick={handleGenerateTasks}
-				disabled={generateTasksLoading}
-				aria-busy={generateTasksLoading}
-			>
-				<Icon name="list" size={16} />
-				<span>Generate Tasks</span>
-			</button>
-		{/if}
-
-		{#if showApprovePhases}
-			<button
-				class="action-btn btn-warning"
-				disabled
-				title="Approve phases from the Phases panel"
-			>
-				<Icon name="layers" size={16} />
-				<span>Phases Pending ({pendingPhaseApprovalCount})</span>
-			</button>
-		{/if}
-
-		{#if showApproveAll}
-			<button
-				class="action-btn btn-primary"
-				onclick={handleApproveAll}
-				disabled={approveAllLoading}
-				aria-busy={approveAllLoading}
-			>
-				<Icon name="clock" size={16} />
-				<span>Approve All Tasks ({pendingApprovalCount})</span>
-			</button>
+		{#if isCascading}
+			<div class="cascade-status" role="status">
+				<Icon name="loader" size={16} />
+				<span>{cascadeLabel}</span>
+			</div>
 		{/if}
 
 		{#if showExecute}
@@ -185,7 +88,7 @@
 				aria-busy={executeLoading}
 			>
 				<Icon name="play" size={16} />
-				<span>Start Execution ({approvedCount} task{approvedCount === 1 ? '' : 's'})</span>
+				<span>Start Execution</span>
 			</button>
 		{/if}
 	</div>
@@ -198,6 +101,7 @@
 		padding: var(--space-4) 0;
 		margin-bottom: var(--space-4);
 		flex-wrap: wrap;
+		align-items: center;
 	}
 
 	.action-btn {
@@ -231,7 +135,7 @@
 
 	.action-btn[aria-busy='true'] {
 		position: relative;
-		padding-right: calc(var(--space-4) + 20px); /* Extra space for spinner */
+		padding-right: calc(var(--space-4) + 20px);
 	}
 
 	.action-btn[aria-busy='true']::after {
@@ -264,12 +168,21 @@
 		color: white;
 	}
 
-	.btn-warning {
-		background: var(--color-warning);
-		color: white;
+	.cascade-status {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-4);
+		background: var(--color-accent-muted);
+		border-radius: var(--radius-md);
+		font-size: var(--font-size-sm);
+		color: var(--color-accent);
 	}
 
-	/* Responsive: stack buttons on mobile */
+	.cascade-status :global(svg) {
+		animation: spin 1s linear infinite;
+	}
+
 	@media (max-width: 600px) {
 		.action-bar {
 			flex-direction: column;

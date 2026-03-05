@@ -21,6 +21,8 @@
 	import { derivePlanPipeline, type PlanStage } from '$lib/types/plan';
 	import type { Task } from '$lib/types/task';
 	import type { Phase } from '$lib/types/phase';
+	import type { Requirement } from '$lib/types/requirement';
+	import type { Scenario } from '$lib/types/scenario';
 	import { onMount } from 'svelte';
 
 	const slug = $derived($page.params.slug);
@@ -29,10 +31,12 @@
 
 	let tasks = $state<Task[]>([]);
 	let phases = $state<Phase[]>([]);
+	let requirements = $state<Requirement[]>([]);
+	let scenariosByReq = $state<Record<string, Scenario[]>>({});
 	let showReviews = $state(false);
 	let activeTab = $state<'nav' | 'detail'>('nav');
 
-	// Group tasks by phase ID for nav tree
+	// Group tasks by phase ID for legacy nav tree support
 	const tasksByPhase = $derived.by(() => {
 		const grouped: Record<string, Task[]> = {};
 		for (const task of tasks) {
@@ -52,16 +56,25 @@
 		}
 	});
 
-	// Update label cache when plan/phases/tasks change
+	// Update label cache when plan/requirements/scenarios change
 	$effect(() => {
 		if (plan) {
 			planSelectionStore.setLabel(`plan:${plan.slug}`, plan.title || plan.slug);
 		}
+		for (const req of requirements) {
+			planSelectionStore.setLabel(`requirement:${req.id}`, req.title);
+		}
+		for (const [reqId, scenarios] of Object.entries(scenariosByReq)) {
+			for (const scenario of scenarios) {
+				const label = `When ${scenario.when}`.slice(0, 30);
+				planSelectionStore.setLabel(`scenario:${scenario.id}`, label);
+			}
+		}
+		// Legacy labels
 		for (const phase of phases) {
 			planSelectionStore.setLabel(`phase:${phase.id}`, phase.name);
 		}
 		for (const task of tasks) {
-			// Use short description for label
 			const label = task.description.length > 30
 				? task.description.slice(0, 30) + '...'
 				: task.description;
@@ -81,28 +94,54 @@
 		// Initial data fetch
 		plansStore.fetch().then(() => {
 			if (slug) {
-				// Fetch both tasks and phases
+				// Fetch requirements and scenarios
+				fetchRequirements();
+				// Legacy: fetch phases and tasks
 				plansStore.fetchTasks(slug).then((fetched) => {
 					tasks = fetched;
 				});
 				api.phases.list(slug).then((fetched) => {
 					phases = fetched;
-				}).catch((err) => {
-					console.warn('Failed to fetch phases:', err);
+				}).catch(() => {
 					phases = [];
 				});
 			}
 		});
 		// Fetch questions for QuestionQueue
 		questionsStore.fetch('pending');
-		const interval = setInterval(() => questionsStore.fetch('pending'), 10000);
+		const interval = setInterval(() => {
+			questionsStore.fetch('pending');
+			// Periodically refresh requirements during cascade
+			if (plan && ['approved', 'requirements_generated', 'scenarios_generated'].includes(plan.stage)) {
+				fetchRequirements();
+				plansStore.fetch();
+			}
+		}, 5000);
 
-		// Clear selection on unmount
 		return () => {
 			clearInterval(interval);
 			planSelectionStore.clear();
 		};
 	});
+
+	async function fetchRequirements(): Promise<void> {
+		if (!slug) return;
+		try {
+			requirements = await api.requirements.list(slug);
+		} catch {
+			requirements = [];
+		}
+	}
+
+	async function fetchScenariosForReq(reqId: string): Promise<void> {
+		if (!slug) return;
+		try {
+			const scenarios = await api.scenarios.listByRequirement(slug, reqId);
+			scenariosByReq = { ...scenariosByReq, [reqId]: scenarios };
+		} catch {
+			scenariosByReq = { ...scenariosByReq, [reqId]: [] };
+		}
+	}
 
 	// Get plan's loop IDs for filtering questions
 	const planLoopIds = $derived.by(() => {
@@ -117,7 +156,6 @@
 		)
 	);
 
-	// Handle "Answer" click - opens drawer with question context
 	function handleAnswerQuestion(questionId: string): void {
 		chatDrawerStore.open({ type: 'question', questionId, planSlug: slug });
 	}
@@ -128,12 +166,10 @@
 		return rejectedTask ? { task: rejectedTask, rejection: rejectedTask.rejection! } : null;
 	});
 
-	// Selection handler
 	function handleSelect(selection: PlanSelection): void {
 		planSelectionStore.selection = selection;
 	}
 
-	// Get label for a selection (for chat context)
 	function getContextLabel(selection: PlanSelection): string {
 		return planSelectionStore.getLabel(selection);
 	}
@@ -142,12 +178,6 @@
 	async function handlePromote() {
 		if (plan) {
 			await plansStore.promote(plan.slug);
-		}
-	}
-
-	async function handleGenerateTasks() {
-		if (plan) {
-			await plansStore.generateTasks(plan.slug);
 		}
 	}
 
@@ -163,6 +193,32 @@
 		}
 	}
 
+	async function handleRefreshRequirements() {
+		await fetchRequirements();
+	}
+
+	async function handleRefreshScenarios(reqId: string) {
+		await fetchScenariosForReq(reqId);
+	}
+
+	async function handleDeleteRequirement(reqId: string) {
+		if (!slug) return;
+		await api.requirements.delete(slug, reqId);
+		await fetchRequirements();
+		// Clear scenarios cache
+		const { [reqId]: _, ...rest } = scenariosByReq;
+		scenariosByReq = rest;
+		// Navigate back to plan
+		planSelectionStore.selectPlan(slug);
+	}
+
+	async function handleExpandRequirement(reqId: string) {
+		if (!scenariosByReq[reqId]) {
+			await fetchScenariosForReq(reqId);
+		}
+	}
+
+	// Legacy handlers for phases/tasks
 	async function handleRefreshTasks() {
 		if (slug) {
 			tasks = await plansStore.fetchTasks(slug);
@@ -173,80 +229,41 @@
 		if (slug) {
 			try {
 				phases = await api.phases.list(slug);
-			} catch (err) {
-				console.warn('Failed to fetch phases:', err);
+			} catch {
+				// ignore
 			}
 		}
 	}
 
-	async function handleGeneratePhases() {
-		if (slug) {
-			try {
-				const generated = await api.phases.generate(slug);
-				phases = generated;
-			} catch (err) {
-				console.error('Failed to generate phases:', err);
-			}
-		}
-	}
-
-	// Phase approval handlers
 	async function handleApprovePhase(phaseId: string) {
 		if (!slug) return;
-		try {
-			await api.phases.approve(slug, phaseId);
-			await handleRefreshPhases();
-		} catch (err) {
-			console.error('Failed to approve phase:', err);
-		}
+		await api.phases.approve(slug, phaseId);
+		await handleRefreshPhases();
 	}
 
 	async function handleRejectPhase(phaseId: string, reason: string) {
 		if (!slug) return;
-		try {
-			await api.phases.reject(slug, phaseId, reason);
-			await handleRefreshPhases();
-		} catch (err) {
-			console.error('Failed to reject phase:', err);
-		}
+		await api.phases.reject(slug, phaseId, reason);
+		await handleRefreshPhases();
 	}
 
-	// Task approval handlers
 	async function handleApproveTask(taskId: string) {
 		if (!slug) return;
-		try {
-			const updated = await api.tasks.approve(slug, taskId);
-			const index = tasks.findIndex((t) => t.id === taskId);
-			if (index !== -1) {
-				tasks[index] = updated;
-				tasks = [...tasks];
-			}
-		} catch (err) {
-			console.error('Failed to approve task:', err);
+		const updated = await api.tasks.approve(slug, taskId);
+		const index = tasks.findIndex((t) => t.id === taskId);
+		if (index !== -1) {
+			tasks[index] = updated;
+			tasks = [...tasks];
 		}
 	}
 
 	async function handleRejectTask(taskId: string, reason: string) {
 		if (!slug) return;
-		try {
-			const updated = await api.tasks.reject(slug, taskId, reason);
-			const index = tasks.findIndex((t) => t.id === taskId);
-			if (index !== -1) {
-				tasks[index] = updated;
-				tasks = [...tasks];
-			}
-		} catch (err) {
-			console.error('Failed to reject task:', err);
-		}
-	}
-
-	async function handleApproveAllTasks() {
-		if (!slug) return;
-		try {
-			await api.plans.approveTasks(slug);
-			tasks = await plansStore.fetchTasks(slug);
-		} catch (err) {
-			console.error('Failed to approve all tasks:', err);
+		const updated = await api.tasks.reject(slug, taskId, reason);
+		const index = tasks.findIndex((t) => t.id === taskId);
+		if (index !== -1) {
+			tasks[index] = updated;
+			tasks = [...tasks];
 		}
 	}
 
@@ -267,6 +284,12 @@
 				return 'Approved';
 			case 'rejected':
 				return 'Rejected';
+			case 'requirements_generated':
+				return 'Requirements Generated';
+			case 'scenarios_generated':
+				return 'Scenarios Generated';
+			case 'ready_for_execution':
+				return 'Ready to Execute';
 			case 'phases_generated':
 				return 'Phases Generated';
 			case 'phases_approved':
@@ -341,7 +364,7 @@
 			<div class="pipeline-section">
 				<PipelineIndicator
 					plan={pipeline.plan}
-					tasks={pipeline.tasks}
+					requirements={pipeline.requirements}
 					execute={pipeline.execute}
 				/>
 				{#if plan.active_loops && plan.active_loops.length > 0}
@@ -359,7 +382,6 @@
 			/>
 		{/if}
 
-		<!-- Questions Queue - inline above panels -->
 		{#if planQuestions.length > 0}
 			<div class="questions-container">
 				<QuestionQueue questions={planQuestions} onAnswer={handleAnswerQuestion} />
@@ -368,12 +390,7 @@
 
 		<ActionBar
 			{plan}
-			{tasks}
-			{phases}
 			onPromote={handlePromote}
-			onGenerateTasks={handleGenerateTasks}
-			onGeneratePhases={handleGeneratePhases}
-			onApproveAll={handleApproveAllTasks}
 			onExecute={handleExecute}
 		/>
 
@@ -408,10 +425,11 @@
 				{#snippet left()}
 					<PlanNavTree
 						{plan}
-						{phases}
-						{tasksByPhase}
+						{requirements}
+						{scenariosByReq}
 						selection={planSelectionStore.selection}
 						onSelect={handleSelect}
+						onExpandRequirement={handleExpandRequirement}
 					/>
 				{/snippet}
 
@@ -428,9 +446,14 @@
 								{plan}
 								{phases}
 								{tasksByPhase}
+								{requirements}
+								{scenariosByReq}
 								onRefreshPlan={handleRefreshPlan}
 								onRefreshPhases={handleRefreshPhases}
 								onRefreshTasks={handleRefreshTasks}
+								onRefreshRequirements={handleRefreshRequirements}
+								onRefreshScenarios={handleRefreshScenarios}
+								onDeleteRequirement={handleDeleteRequirement}
 								onApprovePhase={handleApprovePhase}
 								onRejectPhase={handleRejectPhase}
 								onApproveTask={handleApproveTask}
@@ -542,6 +565,17 @@
 	.plan-stage[data-stage='executing'] {
 		background: var(--color-accent-muted);
 		color: var(--color-accent);
+	}
+
+	.plan-stage[data-stage='requirements_generated'],
+	.plan-stage[data-stage='scenarios_generated'] {
+		background: var(--color-accent-muted);
+		color: var(--color-accent);
+	}
+
+	.plan-stage[data-stage='ready_for_execution'] {
+		background: var(--color-success-muted, rgba(34, 197, 94, 0.15));
+		color: var(--color-success);
 	}
 
 	.plan-stage[data-stage='needs_changes'],
