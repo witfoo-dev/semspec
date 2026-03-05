@@ -48,7 +48,8 @@
         "model": "Qwen/Qwen3-Coder-Next-FP8",
         "max_tokens": 256000,
         "supports_tools": true,
-        "tool_format": "openai"
+        "tool_format": "openai",
+        "stream": true
       }
     },
     "defaults": {
