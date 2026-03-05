@@ -1,0 +1,580 @@
+package workflowapi
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/reactive"
+)
+
+// AcceptChangeProposalResponse is returned by POST .../accept.
+// It includes the updated proposal and a summary of what the cascade dirtied.
+type AcceptChangeProposalResponse struct {
+	Proposal workflow.ChangeProposal  `json:"proposal"`
+	Cascade  *reactive.CascadeResult  `json:"cascade,omitempty"`
+}
+
+// ChangeProposal HTTP request/response types
+
+// CreateChangeProposalHTTPRequest is the HTTP request body for POST /plans/{slug}/change-proposals.
+type CreateChangeProposalHTTPRequest struct {
+	Title          string   `json:"title"`
+	Rationale      string   `json:"rationale,omitempty"`
+	ProposedBy     string   `json:"proposed_by,omitempty"`
+	AffectedReqIDs []string `json:"affected_requirement_ids,omitempty"`
+}
+
+// UpdateChangeProposalHTTPRequest is the HTTP request body for PATCH /plans/{slug}/change-proposals/{proposalId}.
+type UpdateChangeProposalHTTPRequest struct {
+	Title          *string  `json:"title,omitempty"`
+	Rationale      *string  `json:"rationale,omitempty"`
+	AffectedReqIDs []string `json:"affected_requirement_ids,omitempty"`
+}
+
+// ReviewChangeProposalHTTPRequest is the HTTP request body for POST .../accept or .../reject.
+type ReviewChangeProposalHTTPRequest struct {
+	ReviewedBy string `json:"reviewed_by,omitempty"`
+}
+
+// RejectChangeProposalHTTPRequest is the HTTP request body for POST .../reject.
+type RejectChangeProposalHTTPRequest struct {
+	ReviewedBy string `json:"reviewed_by,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// extractSlugChangeProposalAndAction extracts slug, proposalID, and action from paths like:
+// /workflow-api/plans/{slug}/change-proposals/{proposalId}
+// /workflow-api/plans/{slug}/change-proposals/{proposalId}/accept
+// /workflow-api/plans/{slug}/change-proposals/{proposalId}/reject
+func extractSlugChangeProposalAndAction(path string) (slug, proposalID, action string) {
+	idx := strings.Index(path, "/plans/")
+	if idx == -1 {
+		return "", "", ""
+	}
+
+	remainder := path[idx+len("/plans/"):]
+	parts := strings.Split(strings.TrimSuffix(remainder, "/"), "/")
+
+	// Need at least 3 parts: slug, "change-proposals", proposalID
+	if len(parts) < 3 {
+		return "", "", ""
+	}
+
+	if parts[1] != "change-proposals" {
+		return "", "", ""
+	}
+
+	slug = parts[0]
+	proposalID = parts[2]
+
+	if len(parts) > 3 {
+		action = parts[3]
+	}
+
+	return slug, proposalID, action
+}
+
+// handlePlanChangeProposals handles top-level change-proposal collection endpoints.
+func (c *Component) handlePlanChangeProposals(w http.ResponseWriter, r *http.Request, slug string) {
+	switch r.Method {
+	case http.MethodGet:
+		c.handleListChangeProposals(w, r, slug)
+	case http.MethodPost:
+		c.handleCreateChangeProposal(w, r, slug)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleChangeProposalByID handles change-proposal-specific endpoints: GET, PATCH, DELETE, and lifecycle actions.
+func (c *Component) handleChangeProposalByID(w http.ResponseWriter, r *http.Request, slug, proposalID, action string) {
+	switch action {
+	case "":
+		switch r.Method {
+		case http.MethodGet:
+			c.handleGetChangeProposal(w, r, slug, proposalID)
+		case http.MethodPatch:
+			c.handleUpdateChangeProposal(w, r, slug, proposalID)
+		case http.MethodDelete:
+			c.handleDeleteChangeProposal(w, r, slug, proposalID)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	case "submit":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		c.handleSubmitChangeProposal(w, r, slug, proposalID)
+	case "accept":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		c.handleAcceptChangeProposal(w, r, slug, proposalID)
+	case "reject":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		c.handleRejectChangeProposal(w, r, slug, proposalID)
+	default:
+		http.Error(w, "Unknown endpoint", http.StatusNotFound)
+	}
+}
+
+// handleListChangeProposals handles GET /plans/{slug}/change-proposals.
+func (c *Component) handleListChangeProposals(w http.ResponseWriter, r *http.Request, slug string) {
+	manager := c.getManager(w)
+	if manager == nil {
+		return
+	}
+
+	proposals, err := manager.LoadChangeProposals(r.Context(), slug)
+	if err != nil {
+		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+		return
+	}
+
+	// Optional filter by status
+	if statusFilter := r.URL.Query().Get("status"); statusFilter != "" {
+		filtered := proposals[:0]
+		for _, p := range proposals {
+			if string(p.Status) == statusFilter {
+				filtered = append(filtered, p)
+			}
+		}
+		proposals = filtered
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(proposals); err != nil {
+		c.logger.Warn("Failed to encode response", "error", err)
+	}
+}
+
+// handleGetChangeProposal handles GET /plans/{slug}/change-proposals/{proposalId}.
+func (c *Component) handleGetChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
+	manager := c.getManager(w)
+	if manager == nil {
+		return
+	}
+
+	proposals, err := manager.LoadChangeProposals(r.Context(), slug)
+	if err != nil {
+		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+		return
+	}
+
+	for _, p := range proposals {
+		if p.ID == proposalID {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(p); err != nil {
+				c.logger.Warn("Failed to encode response", "error", err)
+			}
+			return
+		}
+	}
+
+	http.Error(w, "Change proposal not found", http.StatusNotFound)
+}
+
+// handleCreateChangeProposal handles POST /plans/{slug}/change-proposals.
+func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Request, slug string) {
+	manager := c.getManager(w)
+	if manager == nil {
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
+
+	var req CreateChangeProposalHTTPRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Title == "" {
+		http.Error(w, "title is required", http.StatusBadRequest)
+		return
+	}
+
+	proposals, err := manager.LoadChangeProposals(r.Context(), slug)
+	if err != nil {
+		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+		return
+	}
+
+	// Validate that all affected requirement IDs exist in this plan
+	if len(req.AffectedReqIDs) > 0 {
+		requirements, err := manager.LoadRequirements(r.Context(), slug)
+		if err != nil {
+			c.logger.Error("Failed to load requirements for validation", "slug", slug, "error", err)
+			http.Error(w, "Failed to validate requirement IDs", http.StatusInternalServerError)
+			return
+		}
+		reqIndex := make(map[string]bool, len(requirements))
+		for _, r := range requirements {
+			reqIndex[r.ID] = true
+		}
+		for _, reqID := range req.AffectedReqIDs {
+			if !reqIndex[reqID] {
+				http.Error(w, fmt.Sprintf("requirement %q not found in plan", reqID), http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	proposedBy := req.ProposedBy
+	if proposedBy == "" {
+		proposedBy = "user"
+	}
+
+	now := time.Now()
+	id := fmt.Sprintf("change-proposal.%s.%d", slug, len(proposals)+1)
+
+	newProposal := workflow.ChangeProposal{
+		ID:             id,
+		PlanID:         workflow.PlanEntityID(slug),
+		Title:          req.Title,
+		Rationale:      req.Rationale,
+		Status:         workflow.ChangeProposalStatusProposed,
+		ProposedBy:     proposedBy,
+		AffectedReqIDs: req.AffectedReqIDs,
+		CreatedAt:      now,
+	}
+
+	proposals = append(proposals, newProposal)
+
+	if err := manager.SaveChangeProposals(r.Context(), proposals, slug); err != nil {
+		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to save change proposal", http.StatusInternalServerError)
+		return
+	}
+
+	c.logger.Info("Change proposal created via REST API", "slug", slug, "proposal_id", newProposal.ID)
+
+	// Publish to graph (best-effort)
+	if err := c.publishChangeProposalEntity(r.Context(), slug, &newProposal); err != nil {
+		c.logger.Warn("Failed to publish change proposal entity to graph", "proposal_id", newProposal.ID, "error", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(newProposal); err != nil {
+		c.logger.Warn("Failed to encode response", "error", err)
+	}
+}
+
+// handleUpdateChangeProposal handles PATCH /plans/{slug}/change-proposals/{proposalId}.
+func (c *Component) handleUpdateChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
+	manager := c.getManager(w)
+	if manager == nil {
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
+
+	var req UpdateChangeProposalHTTPRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	proposals, err := manager.LoadChangeProposals(r.Context(), slug)
+	if err != nil {
+		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+		return
+	}
+
+	idx := -1
+	for i, p := range proposals {
+		if p.ID == proposalID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		http.Error(w, "Change proposal not found", http.StatusNotFound)
+		return
+	}
+
+	// Only allow edits on proposed or under_review proposals
+	if proposals[idx].Status != workflow.ChangeProposalStatusProposed &&
+		proposals[idx].Status != workflow.ChangeProposalStatusUnderReview {
+		http.Error(w, "Can only update proposals in proposed or under_review status", http.StatusConflict)
+		return
+	}
+
+	if req.Title != nil {
+		proposals[idx].Title = *req.Title
+	}
+	if req.Rationale != nil {
+		proposals[idx].Rationale = *req.Rationale
+	}
+	if req.AffectedReqIDs != nil {
+		proposals[idx].AffectedReqIDs = req.AffectedReqIDs
+	}
+
+	if err := manager.SaveChangeProposals(r.Context(), proposals, slug); err != nil {
+		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to save change proposal", http.StatusInternalServerError)
+		return
+	}
+
+	// Publish to graph (best-effort)
+	if err := c.publishChangeProposalEntity(r.Context(), slug, &proposals[idx]); err != nil {
+		c.logger.Warn("Failed to publish change proposal entity to graph", "proposal_id", proposalID, "error", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(proposals[idx]); err != nil {
+		c.logger.Warn("Failed to encode response", "error", err)
+	}
+}
+
+// handleDeleteChangeProposal handles DELETE /plans/{slug}/change-proposals/{proposalId}.
+func (c *Component) handleDeleteChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
+	manager := c.getManager(w)
+	if manager == nil {
+		return
+	}
+
+	proposals, err := manager.LoadChangeProposals(r.Context(), slug)
+	if err != nil {
+		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+		return
+	}
+
+	idx := -1
+	for i, p := range proposals {
+		if p.ID == proposalID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		http.Error(w, "Change proposal not found", http.StatusNotFound)
+		return
+	}
+
+	// Only allow deletion of proposed proposals (not accepted/archived)
+	if proposals[idx].Status != workflow.ChangeProposalStatusProposed {
+		http.Error(w, "Can only delete proposals in proposed status", http.StatusConflict)
+		return
+	}
+
+	proposals = append(proposals[:idx], proposals[idx+1:]...)
+
+	if err := manager.SaveChangeProposals(r.Context(), proposals, slug); err != nil {
+		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to delete change proposal", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSubmitChangeProposal handles POST /plans/{slug}/change-proposals/{proposalId}/submit.
+// Transitions proposal from proposed → under_review.
+func (c *Component) handleSubmitChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
+	manager := c.getManager(w)
+	if manager == nil {
+		return
+	}
+
+	proposals, err := manager.LoadChangeProposals(r.Context(), slug)
+	if err != nil {
+		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+		return
+	}
+
+	idx := -1
+	for i, p := range proposals {
+		if p.ID == proposalID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		http.Error(w, "Change proposal not found", http.StatusNotFound)
+		return
+	}
+
+	if !proposals[idx].Status.CanTransitionTo(workflow.ChangeProposalStatusUnderReview) {
+		http.Error(w, "Cannot submit proposal in current status", http.StatusConflict)
+		return
+	}
+
+	now := time.Now()
+	proposals[idx].Status = workflow.ChangeProposalStatusUnderReview
+	proposals[idx].ReviewedAt = &now
+
+	if err := manager.SaveChangeProposals(r.Context(), proposals, slug); err != nil {
+		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to submit change proposal", http.StatusInternalServerError)
+		return
+	}
+
+	// Publish to graph (best-effort)
+	if err := c.publishChangeProposalEntity(r.Context(), slug, &proposals[idx]); err != nil {
+		c.logger.Warn("Failed to publish change proposal entity to graph", "proposal_id", proposalID, "error", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(proposals[idx]); err != nil {
+		c.logger.Warn("Failed to encode response", "error", err)
+	}
+}
+
+// handleAcceptChangeProposal handles POST /plans/{slug}/change-proposals/{proposalId}/accept.
+// Transitions proposal to accepted and archives it.
+func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
+	manager := c.getManager(w)
+	if manager == nil {
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
+
+	var req ReviewChangeProposalHTTPRequest
+	// Body is optional
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	proposals, err := manager.LoadChangeProposals(r.Context(), slug)
+	if err != nil {
+		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+		return
+	}
+
+	idx := -1
+	for i, p := range proposals {
+		if p.ID == proposalID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		http.Error(w, "Change proposal not found", http.StatusNotFound)
+		return
+	}
+
+	if !proposals[idx].Status.CanTransitionTo(workflow.ChangeProposalStatusAccepted) {
+		http.Error(w, "Cannot accept proposal in current status", http.StatusConflict)
+		return
+	}
+
+	now := time.Now()
+	proposals[idx].Status = workflow.ChangeProposalStatusAccepted
+	proposals[idx].DecidedAt = &now
+
+	if err := manager.SaveChangeProposals(r.Context(), proposals, slug); err != nil {
+		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to accept change proposal", http.StatusInternalServerError)
+		return
+	}
+
+	c.logger.Info("Change proposal accepted via REST API", "slug", slug, "proposal_id", proposalID)
+
+	// Publish to graph (best-effort)
+	if err := c.publishChangeProposalEntity(r.Context(), slug, &proposals[idx]); err != nil {
+		c.logger.Warn("Failed to publish change proposal entity to graph", "proposal_id", proposalID, "error", err)
+	}
+
+	// Execute cascade: mark affected tasks dirty.
+	// Failure is logged but does not abort the response — the proposal is already accepted.
+	cascadeResult, err := reactive.CascadeChangeProposal(r.Context(), manager, slug, &proposals[idx])
+	if err != nil {
+		c.logger.Error("Cascade failed after proposal acceptance",
+			"slug", slug,
+			"proposal_id", proposalID,
+			"error", err,
+		)
+	} else {
+		c.logger.Info("Cascade complete",
+			"slug", slug,
+			"proposal_id", proposalID,
+			"tasks_dirtied", cascadeResult.TasksDirtied,
+		)
+	}
+
+	resp := AcceptChangeProposalResponse{
+		Proposal: proposals[idx],
+		Cascade:  cascadeResult,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		c.logger.Warn("Failed to encode response", "error", err)
+	}
+}
+
+// handleRejectChangeProposal handles POST /plans/{slug}/change-proposals/{proposalId}/reject.
+func (c *Component) handleRejectChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
+	manager := c.getManager(w)
+	if manager == nil {
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
+
+	var req RejectChangeProposalHTTPRequest
+	// Body is optional for reject
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	proposals, err := manager.LoadChangeProposals(r.Context(), slug)
+	if err != nil {
+		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+		return
+	}
+
+	idx := -1
+	for i, p := range proposals {
+		if p.ID == proposalID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		http.Error(w, "Change proposal not found", http.StatusNotFound)
+		return
+	}
+
+	if !proposals[idx].Status.CanTransitionTo(workflow.ChangeProposalStatusRejected) {
+		http.Error(w, "Cannot reject proposal in current status", http.StatusConflict)
+		return
+	}
+
+	now := time.Now()
+	proposals[idx].Status = workflow.ChangeProposalStatusRejected
+	proposals[idx].DecidedAt = &now
+
+	if err := manager.SaveChangeProposals(r.Context(), proposals, slug); err != nil {
+		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
+		http.Error(w, "Failed to reject change proposal", http.StatusInternalServerError)
+		return
+	}
+
+	// Publish to graph (best-effort)
+	if err := c.publishChangeProposalEntity(r.Context(), slug, &proposals[idx]); err != nil {
+		c.logger.Warn("Failed to publish change proposal entity to graph", "proposal_id", proposalID, "error", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(proposals[idx]); err != nil {
+		c.logger.Warn("Failed to encode response", "error", err)
+	}
+}
+

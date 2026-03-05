@@ -101,6 +101,24 @@ func QuestionEntityID(id string) string {
 	return fmt.Sprintf("c360.semspec.workflow.question.question.%s", id)
 }
 
+// RequirementEntityID returns the entity ID for a requirement.
+// Format: c360.semspec.workflow.requirement.requirement.{id}
+func RequirementEntityID(id string) string {
+	return fmt.Sprintf("c360.semspec.workflow.requirement.requirement.%s", id)
+}
+
+// ScenarioEntityID returns the entity ID for a scenario.
+// Format: c360.semspec.workflow.scenario.scenario.{id}
+func ScenarioEntityID(id string) string {
+	return fmt.Sprintf("c360.semspec.workflow.scenario.scenario.%s", id)
+}
+
+// ChangeProposalEntityID returns the entity ID for a change proposal.
+// Format: c360.semspec.workflow.change-proposal.change-proposal.{id}
+func ChangeProposalEntityID(id string) string {
+	return fmt.Sprintf("c360.semspec.workflow.change-proposal.change-proposal.%s", id)
+}
+
 // EntityType is the message type for plan entity payloads.
 var EntityType = message.Type{
 	Domain:   "plan",
@@ -132,6 +150,27 @@ var TaskEntityType = message.Type{
 // QuestionEntityType is the message type for question entity payloads.
 var QuestionEntityType = message.Type{
 	Domain:   "question",
+	Category: "entity",
+	Version:  "v1",
+}
+
+// RequirementEntityType is the message type for requirement entity payloads.
+var RequirementEntityType = message.Type{
+	Domain:   "requirement",
+	Category: "entity",
+	Version:  "v1",
+}
+
+// ScenarioEntityType is the message type for scenario entity payloads.
+var ScenarioEntityType = message.Type{
+	Domain:   "scenario",
+	Category: "entity",
+	Version:  "v1",
+}
+
+// ChangeProposalEntityType is the message type for change proposal entity payloads.
+var ChangeProposalEntityType = message.Type{
+	Domain:   "change-proposal",
 	Category: "entity",
 	Version:  "v1",
 }
@@ -205,6 +244,9 @@ var workflowEntityTypes = []struct {
 	{"approval", "Approval entity payload for graph ingestion", ApprovalEntityType},
 	{"task", "Task entity payload for graph ingestion", TaskEntityType},
 	{"question", "Question entity payload for graph ingestion", QuestionEntityType},
+	{"requirement", "Requirement entity payload for graph ingestion", RequirementEntityType},
+	{"scenario", "Scenario entity payload for graph ingestion", ScenarioEntityType},
+	{"change-proposal", "ChangeProposal entity payload for graph ingestion", ChangeProposalEntityType},
 }
 
 func init() {

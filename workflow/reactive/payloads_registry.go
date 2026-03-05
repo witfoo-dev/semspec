@@ -55,6 +55,11 @@ func registerRequestPayloads() {
 		{CoordinationPlannerMessageType, "Coordination planner dispatch message", func() any { return &CoordinationPlannerMessage{} }},
 		{CoordinationPlannerResultType, "Coordination planner result for engine merge", func() any { return &CoordinationPlannerResult{} }},
 		{CoordinationSynthesisRequestType, "Coordination synthesis request from engine", func() any { return &CoordinationSynthesisRequest{} }},
+		// Graph topology refactor payload types (ADR-024)
+		{RequirementGeneratorRequestType, "Requirement generator request from reactive workflow engine", func() any { return &RequirementGeneratorRequest{} }},
+		{ScenarioGeneratorRequestType, "Scenario generator request from reactive workflow engine", func() any { return &ScenarioGeneratorRequest{} }},
+		{ChangeProposalReviewRequestType, "Change proposal review request from reactive workflow engine", func() any { return &ChangeProposalReviewRequest{} }},
+		{ChangeProposalCascadeRequestType, "Change proposal cascade request from reactive workflow engine", func() any { return &ChangeProposalCascadeRequest{} }},
 	}
 
 	for _, p := range payloads {

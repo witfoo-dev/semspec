@@ -125,6 +125,9 @@ All components communicate via NATS using the semstreams framework.`,
 		},
 	})
 
+	// Migrate command
+	cmd.AddCommand(migrateCmd())
+
 	return cmd
 }
 

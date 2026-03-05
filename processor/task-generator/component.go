@@ -433,7 +433,7 @@ func (c *Component) generateTasks(ctx context.Context, trigger *reactive.TaskGen
 	}
 
 	// Step 0: Load phases for phase-aware task generation
-	phases := c.loadPhases(ctx, trigger.Slug)
+	loadedPhases := c.loadPhases(ctx, trigger.Slug)
 
 	// Step 1: Request task generation context from centralized context-builder (graph-first)
 	// Pass the capability so context-builder can calculate the correct token budget
@@ -499,7 +499,7 @@ func (c *Component) generateTasks(ctx context.Context, trigger *reactive.TaskGen
 			"attempt", attempt+1)
 
 		// Parse JSON from response
-		parsedTasks, parseErr := c.parseTasksFromResponse(llmResp.Content, trigger.Slug, phases)
+		parsedTasks, parseErr := c.parseTasksFromResponse(llmResp.Content, trigger.Slug, loadedPhases)
 		if parseErr == nil {
 			tasks = parsedTasks
 			break

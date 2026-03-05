@@ -229,6 +229,61 @@ Workflows can trigger components when specialized processing is needed:
 
 The workflow handles orchestration; the component handles processing.
 
+## Graph Node Hierarchy (ADR-024)
+
+The knowledge graph stores all planning artifacts as typed nodes with directed edges. ADR-024
+added Requirements, Scenarios, and ChangeProposals as first-class nodes.
+
+```
+Plan
+  +-- Requirement(s)          (plan-scoped intent)
+  |     +-- Scenario(s)       (Given/When/Then as graph entities)
+  |           +-- Task(s)     (SATISFIES edge; many-to-many)
+  |                 +-- Execution
+  +-- Phase(s)                (organizational view; references Tasks)
+  +-- ChangeProposal(s)       (lifecycle node; mutates Requirements on acceptance)
+```
+
+### Node Types
+
+| Node | ID Format | Key Fields |
+|------|-----------|-----------|
+| Plan | `semspec.plan.{slug}` | status, goal, context, scope |
+| Requirement | `requirement.{plan_slug}.{seq}` | title, description, status (active/deprecated/superseded) |
+| Scenario | `scenario.{plan_slug}.{req_seq}.{seq}` | given, when, then[], status (pending/passing/failing/skipped) |
+| Task | `semspec.plan.task.{slug}.{id}` | scenarioIDs[], status (includes `dirty`, `blocked`) |
+| ChangeProposal | `change-proposal.{plan_slug}.{seq}` | affectedReqIDs[], status lifecycle |
+| Phase | `semspec.plan.phase.{slug}.{id}` | task references (unchanged) |
+
+### Node Edges
+
+| Edge | From | To | Direction |
+|------|------|----|-----------|
+| `BELONGS_TO` | Requirement | Plan | Many-to-one |
+| `HAS_SCENARIO` | Requirement | Scenario | One-to-many |
+| `SATISFIED_BY` | Scenario | Task | Many-to-many |
+| `VALIDATED_BY` | Scenario | Execution | One-to-many |
+| `SUPERSEDED_BY` | Requirement | Requirement | Via ChangeProposal |
+| `MUTATES` | ChangeProposal | Requirement | One-to-many |
+| `INVALIDATES` | ChangeProposal | Task | Computed on acceptance |
+
+### HTTP API Endpoints (ADR-024)
+
+The `workflow-api` component exposes new endpoints for the three new node types:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/plans/{slug}/requirements` | List requirements for a plan |
+| `POST` | `/plans/{slug}/requirements` | Create a requirement |
+| `GET` | `/plans/{slug}/requirements/{id}` | Get a single requirement |
+| `GET` | `/plans/{slug}/scenarios` | List scenarios for a plan |
+| `GET` | `/plans/{slug}/scenarios/{id}` | Get a single scenario |
+| `GET` | `/plans/{slug}/change-proposals` | List change proposals |
+| `POST` | `/plans/{slug}/change-proposals` | Submit a new ChangeProposal |
+| `GET` | `/plans/{slug}/change-proposals/{id}` | Get a single proposal |
+| `POST` | `/plans/{slug}/change-proposals/{id}/accept` | Accept a proposal (triggers cascade) |
+| `POST` | `/plans/{slug}/change-proposals/{id}/reject` | Reject a proposal |
+
 ## Semstreams Relationship
 
 Semspec **imports semstreams as a library** and extends it with custom components.
@@ -327,9 +382,18 @@ All streams are created at startup by `config.StreamsManager`. The full subject 
 | `workflow.trigger.plan-reviewer` | WORKFLOWS | Input | Plan review |
 | `workflow.trigger.task-generator` | WORKFLOWS | Input | Task generation |
 | `workflow.trigger.task-dispatcher` | WORKFLOWS | Input | Task dispatch |
+| `workflow.trigger.change-proposal-loop` | WORKFLOWS | Input | ChangeProposal OODA loop |
 | `workflow.result.<component>.<slug>` | WORKFLOWS | Output | Component completion signals |
 | `workflow.validate.*` | WORKFLOWS | Input | Document validation |
 | `output.workflow.documents` | WORKFLOWS | Input | Document export |
+| `requirement.created` | WORKFLOWS | Output | New requirement published |
+| `requirement.updated` | WORKFLOWS | Output | Requirement mutated by ChangeProposal |
+| `scenario.created` | WORKFLOWS | Output | New scenario published |
+| `scenario.status.updated` | WORKFLOWS | Output | Scenario status changed |
+| `task.dirty` | WORKFLOWS | Output | Dirty cascade: affected task IDs |
+| `change_proposal.created` | WORKFLOWS | Output | New ChangeProposal submitted |
+| `change_proposal.accepted` | WORKFLOWS | Output | Proposal accepted; cascade complete |
+| `change_proposal.rejected` | WORKFLOWS | Output | Proposal rejected; no graph mutations |
 | `source.ingest.>` | SOURCES | Input | Document/SOP ingestion |
 | `source.status.>` | SOURCES | Output | Ingestion status |
 | `user.message.>` | USER | Input | User messages (agentic-dispatch) |

@@ -99,6 +99,7 @@ executed by the semstreams `agentic-tools` component.
 | `workflow.trigger.plan-coordinator` | JetStream | Plan coordination trigger |
 | `workflow.trigger.planner` | JetStream | Single-planner trigger |
 | `workflow.trigger.plan-reviewer` | JetStream | Plan review trigger |
+| `workflow.trigger.change-proposal-loop` | JetStream | ChangeProposal OODA loop trigger |
 | `context.build.<strategy>` | JetStream | Context build requests |
 | `context.built.<strategy>` | JetStream | Context build responses |
 | `source.ingest.>` | JetStream | Source/SOP ingestion |
@@ -108,6 +109,14 @@ executed by the semstreams `agentic-tools` component.
 | `graph.ingest.entity` | JetStream | AST/source entities |
 | `question.answer.<id>` | JetStream | Answer payloads |
 | `question.timeout.<id>` | JetStream | SLA timeout events |
+| `requirement.created` | JetStream | New requirement published |
+| `requirement.updated` | JetStream | Requirement mutated by ChangeProposal |
+| `scenario.created` | JetStream | New scenario published |
+| `scenario.status.updated` | JetStream | Scenario status changed |
+| `task.dirty` | JetStream | Dirty cascade: affected task IDs |
+| `change_proposal.created` | JetStream | New ChangeProposal submitted |
+| `change_proposal.accepted` | JetStream | Proposal accepted; cascade complete |
+| `change_proposal.rejected` | JetStream | Proposal rejected |
 | `tool.register.<name>` | Core NATS | Tool advertisement (ephemeral) |
 | `tool.heartbeat.semspec` | Core NATS | Provider health (ephemeral) |
 
@@ -118,6 +127,7 @@ See [docs/03-architecture.md](docs/03-architecture.md) for the complete NATS sub
 ```
 semspec/
 ├── cmd/semspec/main.go       # Binary entry point (15 component registrations)
+├── cmd/semspec/migrate.go    # Migration CLI (`semspec migrate extract-scenarios`)
 ├── processor/
 │   ├── plan-coordinator/     # Parallel planner orchestration
 │   ├── planner/              # Single-planner path
@@ -129,13 +139,18 @@ semspec/
 │   ├── ast-indexer/          # Go/TS AST parsing
 │   ├── question-answerer/    # LLM question answering
 │   ├── question-timeout/     # SLA monitoring and escalation
-│   ├── workflow-api/         # Workflow execution queries
+│   ├── workflow-api/         # Workflow + Requirement/Scenario/ChangeProposal HTTP API
 │   ├── trajectory-api/       # Trajectory/LLM call queries
 │   └── ast/                  # AST parsing library
 ├── workflow/
 │   ├── question.go           # Question store (KV)
 │   ├── answerer/             # Registry, router, notifier
-│   └── gap/                  # Gap detection parser
+│   ├── gap/                  # Gap detection parser
+│   ├── types.go              # Requirement, Scenario, ChangeProposal structs + statuses
+│   ├── plan.go               # SaveRequirements, LoadRequirements, SaveScenarios, etc.
+│   └── reactive/
+│       ├── change_proposal.go         # ChangeProposal OODA reactive rules
+│       └── change_proposal_actions.go # Cascade logic (graph traversal + dirty marking)
 ├── tools/
 │   ├── file/executor.go      # file_read, file_write, file_list
 │   └── git/executor.go       # git_status, git_branch, git_commit

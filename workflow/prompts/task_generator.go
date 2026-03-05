@@ -41,11 +41,17 @@ type TaskGeneratorParams struct {
 	// When non-empty, the prompt includes a section instructing the LLM to create
 	// tasks addressing each requirement.
 	SOPRequirements []string
+
+	// Scenarios provides pre-generated behavioral scenarios for pipeline mode.
+	// Used by PipelineTaskGeneratorPrompt to inject scenario IDs into the prompt.
+	// Single-shot mode (TaskGeneratorPrompt) ignores this field.
+	Scenarios []ScenarioInfo
 }
 
 // TaskGeneratorPrompt returns the system prompt for generating tasks from a plan.
-// The LLM generates tasks with BDD-style Given/When/Then acceptance criteria.
+// The LLM generates tasks with BDD-style Given/When/Then acceptance criteria (single-shot mode).
 // When phases are provided, the LLM assigns each task to a phase via phase_id.
+// For pipeline mode (pre-generated scenarios), use PipelineTaskGeneratorPrompt instead.
 func TaskGeneratorPrompt(params TaskGeneratorParams) string {
 	scopeInclude := formatScopeList(params.ScopeInclude, "*")
 	scopeExclude := formatScopeList(params.ScopeExclude, "(none)")
@@ -185,6 +191,149 @@ Use the "depends_on" field to specify which tasks must complete before this task
 		phaseSection, phaseIDField, phaseIDExample, phaseIDConstraint, FormatSOPRequirements(params.SOPRequirements))
 }
 
+// PipelineGeneratedTask represents a task generated in pipeline mode.
+// Tasks reference pre-generated scenario IDs instead of embedding acceptance criteria.
+type PipelineGeneratedTask struct {
+	Description string   `json:"description"`
+	Type        string   `json:"type"`
+	PhaseID     string   `json:"phase_id,omitempty"`
+	DependsOn   []string `json:"depends_on,omitempty"`
+	ScenarioIDs []string `json:"scenario_ids"`
+	Files       []string `json:"files,omitempty"`
+}
+
+// PipelineTaskGeneratorResponse is the expected JSON response in pipeline mode.
+type PipelineTaskGeneratorResponse struct {
+	Tasks []PipelineGeneratedTask `json:"tasks"`
+}
+
+// PipelineTaskGeneratorPrompt returns the system prompt for task generation in pipeline mode.
+// Unlike TaskGeneratorPrompt, it injects pre-generated scenarios and expects tasks to output
+// scenario_ids instead of acceptance_criteria. The params.Scenarios field must be non-empty.
+// When phases are provided, the LLM assigns each task to a phase via phase_id.
+func PipelineTaskGeneratorPrompt(params TaskGeneratorParams) string {
+	scopeInclude := formatScopeList(params.ScopeInclude, "*")
+	scopeExclude := formatScopeList(params.ScopeExclude, "(none)")
+	scopeProtected := formatScopeList(params.ScopeProtected, "(none)")
+
+	phaseSection := formatPhaseSection(params.Phases)
+	phaseIDField := ""
+	phaseIDExample := ""
+	phaseIDConstraint := ""
+	if len(params.Phases) > 0 {
+		phaseIDField = `      "phase_id": "phase.{slug}.1",
+`
+		phaseIDExample = `      "phase_id": "phase.{slug}.1",
+`
+		phaseIDConstraint = `- Every task MUST have a "phase_id" field matching one of the phases listed above
+- Tasks within a phase should only depend on other tasks in the same or earlier phases
+`
+	}
+
+	scenarioSection := FormatScenariosForTaskGenerator(params.Scenarios)
+
+	return fmt.Sprintf(`You are a task planner generating actionable development tasks from a plan.
+
+## Plan: %s
+
+**Goal:** %s
+
+**Context:** %s
+
+**Scope:**
+- Include: %s
+- Exclude: %s
+- Protected (do not touch): %s
+%s
+%s
+## CRITICAL: Stay On Goal
+
+Every task you generate MUST directly contribute to the goal stated above.
+- Do NOT invent features, endpoints, or functionality not mentioned in the goal.
+- Task descriptions must use the exact names, paths, and terms from the goal.
+
+## Your Task
+
+Generate a list of 3-8 development tasks that accomplish the goal. Each task should:
+- Be completable in a single development session
+- Reference one or more scenario IDs from the Behavioral Scenarios list above (tasks SATISFY scenarios)
+- A single task may satisfy multiple scenarios (many-to-many)
+- Reference specific files from the scope when relevant
+- Be ordered by dependency (prerequisite tasks first)
+- Use the exact feature names from the goal
+
+## Output Format
+
+Return ONLY valid JSON in this exact format:
+
+`+"```json"+`
+{
+  "tasks": [
+    {
+%s      "description": "Clear description of what to implement",
+      "type": "implement",
+      "depends_on": [],
+      "scenario_ids": ["scenario.{slug}.1.1", "scenario.{slug}.1.2"],
+      "files": ["path/to/relevant/file.go"]
+    }
+  ]
+}
+`+"```"+`
+
+## Task Types
+
+Use the appropriate type for each task:
+- **implement**: Writing new code or features
+- **test**: Writing or updating tests
+- **document**: Documentation work
+- **review**: Code review tasks
+- **refactor**: Restructuring existing code
+
+## Scenario Assignment Rules
+
+1. Each task MUST reference at least one scenario_id from the Behavioral Scenarios list above
+2. Use the exact scenario ID strings (e.g., "scenario.my-plan.1.1")
+3. A task satisfies a scenario when its implementation makes that scenario pass
+4. Integration tasks may satisfy scenarios from multiple requirements
+5. Every scenario should be covered by at least one task
+
+## Example Tasks
+
+`+"```json"+`
+{
+  "tasks": [
+    {
+%s      "description": "Implement rate limiter with sliding window algorithm",
+      "type": "implement",
+      "depends_on": [],
+      "scenario_ids": ["scenario.{slug}.1.1", "scenario.{slug}.1.2"],
+      "files": ["internal/auth/ratelimit.go"]
+    }
+  ]
+}
+`+"```"+`
+
+## Dependencies
+
+Use the "depends_on" field to specify which tasks must complete before this task can start:
+- Reference tasks by sequence number using the format: "task.{slug}.N" where N is the 1-indexed task number
+- Tasks with no dependencies should have an empty array: "depends_on": []
+- Dependencies enable parallel execution - independent tasks run concurrently
+
+## Constraints
+
+- Files in the "files" array MUST be within the scope Include paths
+- Files in "Protected" MUST NOT appear in any task's files array
+- Do not include files from the "Exclude" list
+- Keep tasks focused and atomic (one responsibility per task)
+- Order tasks so dependencies come first
+- No circular dependencies allowed
+%s
+%sGenerate tasks now. Return ONLY the JSON output, no other text.
+`, params.Title, params.Goal, params.Context, scopeInclude, scopeExclude, scopeProtected,
+		phaseSection, scenarioSection, phaseIDField, phaseIDExample, phaseIDConstraint, FormatSOPRequirements(params.SOPRequirements))
+}
+
 // FormatSOPRequirements formats SOP requirements as a prompt section.
 // Returns empty string if no requirements are present.
 // Used by task-generator to inject graph-sourced SOP requirements into prompts.
@@ -235,13 +384,13 @@ type TaskGeneratorResponse struct {
 	Tasks []GeneratedTask `json:"tasks"`
 }
 
-// GeneratedTask represents a task generated by the LLM.
+// GeneratedTask represents a task generated by the LLM in single-shot mode.
 type GeneratedTask struct {
 	Description        string               `json:"description"`
 	Type               string               `json:"type"`
 	PhaseID            string               `json:"phase_id,omitempty"`
 	DependsOn          []string             `json:"depends_on,omitempty"`
-	AcceptanceCriteria []GeneratedCriterion `json:"acceptance_criteria"`
+	AcceptanceCriteria []GeneratedCriterion `json:"acceptance_criteria,omitempty"`
 	Files              []string             `json:"files,omitempty"`
 }
 

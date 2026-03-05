@@ -420,7 +420,9 @@ to the knowledge graph.
 
 ### task-generator
 
-**Purpose**: Generates tasks with BDD acceptance criteria from plans using LLM.
+**Purpose**: Runs the multi-step planning pipeline (Requirements → Scenarios → Phases → Tasks)
+from an approved plan. See [Workflow System: Planning Pipeline](05-workflow-system.md#planning-pipeline-adr-024)
+for the full pipeline description.
 
 **Location**: `processor/task-generator/`
 
@@ -431,7 +433,8 @@ to the knowledge graph.
   "stream_name": "WORKFLOWS",
   "consumer_name": "task-generator",
   "trigger_subject": "workflow.trigger.task-generator",
-  "default_capability": "planning"
+  "default_capability": "planning",
+  "pipeline_mode": "pipeline"
 }
 ```
 
@@ -441,19 +444,30 @@ to the knowledge graph.
 | `consumer_name` | string | `task-generator` | Durable consumer name |
 | `trigger_subject` | string | `workflow.trigger.task-generator` | Subject to consume triggers from |
 | `default_capability` | string | `planning` | Default model capability |
+| `pipeline_mode` | string | `pipeline` | `pipeline` (default) or `single_shot` |
 
 #### Behavior
 
+**Pipeline mode** (default) — four focused LLM calls:
+
 1. **Subscribes**: Consumes from `workflow.trigger.task-generator` on the WORKFLOWS stream
-2. **Loads Plan**: Reads plan from `.semspec/plans/{slug}/plan.json`
-3. **Generates Tasks**: Calls LLM with task generation prompt including plan Goal/Context
-4. **Parses Response**: Extracts JSON array of tasks with acceptance criteria
-5. **Saves Tasks**: Writes to `.semspec/plans/{slug}/tasks.json`
-6. **Publishes Result**: Sends completion to `workflow.result.tasks.{slug}`
+1. **Loads Plan**: Reads plan from `.semspec/plans/{slug}/plan.json`
+1. **Generates Requirements**: LLM call with requirement-focused prompt; publishes
+   `requirement.created` events; advances plan status to `requirements_generated`
+1. **Generates Scenarios**: LLM call per Requirement producing Given/When/Then triples; publishes
+   `scenario.created` events; advances plan status to `scenarios_generated`
+1. **Generates Phases**: LLM call for scheduling containers (unchanged from pre-ADR-024)
+1. **Generates Tasks**: LLM call using Scenarios as input; tasks carry `ScenarioIDs` (many-to-many)
+   instead of embedded `AcceptanceCriteria`
+1. **Saves Tasks**: Writes to `.semspec/plans/{slug}/tasks.json`
+1. **Publishes Result**: Sends completion to `workflow.result.tasks.{slug}`
 
-#### LLM Response Format
+**Single-shot mode** — one LLM call producing all tasks directly. Use when pipeline latency is
+unacceptable (e.g., local development with small models).
 
-The component expects the LLM to return JSON, optionally wrapped in markdown code fences:
+#### Task JSON Format
+
+Tasks produced by the pipeline reference Scenarios by ID rather than embedding acceptance criteria:
 
 ```json
 {
@@ -462,9 +476,7 @@ The component expects the LLM to return JSON, optionally wrapped in markdown cod
       "id": "1",
       "title": "Task title",
       "description": "What needs to be done",
-      "acceptance_criteria": [
-        "GIVEN context WHEN action THEN result"
-      ],
+      "scenarioIDs": ["scenario.add-auth.1.1", "scenario.add-auth.1.2"],
       "dependencies": []
     }
   ]
@@ -476,6 +488,8 @@ The component expects the LLM to return JSON, optionally wrapped in markdown cod
 | Subject | Transport | Direction | Description |
 |---------|-----------|-----------|-------------|
 | `workflow.trigger.task-generator` | JetStream (WORKFLOWS) | Input | Task generation triggers |
+| `requirement.created` | JetStream (WORKFLOWS) | Output | New requirement published |
+| `scenario.created` | JetStream (WORKFLOWS) | Output | New scenario published |
 | `workflow.result.tasks.<slug>` | Core NATS | Output | Completion notifications |
 
 ---
@@ -888,6 +902,33 @@ When a question's SLA is exceeded:
 - `workflow/question.go` — Question store
 
 ---
+
+## ChangeProposal Reactive Workflow (ADR-024)
+
+The ChangeProposal lifecycle is implemented as a reactive workflow, not as a standalone processor
+component. It follows the same OODA-loop pattern as other reactive workflows (see ADR-005).
+
+### Implementation Files
+
+| File | Purpose |
+|------|---------|
+| `workflow/reactive/change_proposal.go` | Reactive rules: accept-trigger, dispatch-review, handle-accepted, handle-rejected |
+| `workflow/reactive/change_proposal_actions.go` | Cascade logic: graph traversal, dirty marking, event publishing |
+| `processor/workflow-api/http_change_proposal.go` | HTTP handlers for proposal CRUD and accept/reject actions |
+
+### Future Components
+
+Two components are planned to support automated ChangeProposal creation. Their reactive workflow
+rules are already defined in `workflow/reactive/change_proposal.go` but the components themselves
+are future work:
+
+| Component | Purpose | Status |
+|-----------|---------|--------|
+| `change-proposal-cascade` | Executes dirty cascade after proposal acceptance | Planned (Phase 5) |
+| `change-proposal-reviewer` | LLM-based review gate for incoming proposals | Planned (Phase 5) |
+
+See [Workflow System: ChangeProposal Lifecycle](05-workflow-system.md#changeproposal-lifecycle-adr-024)
+for the full lifecycle description including the OODA loop and cascade logic.
 
 ## Creating New Components
 

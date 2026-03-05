@@ -40,6 +40,8 @@ export type AcceptanceCriterion = GeneratedAcceptanceCriterion;
  * - in_progress: Currently being executed
  * - completed: Successfully completed
  * - failed: Execution failed
+ * - blocked: Blocked by an upstream dependency or ChangeProposal cascade
+ * - dirty: A parent Requirement changed; task needs re-evaluation
  */
 export type TaskStatus =
 	| 'pending'
@@ -48,7 +50,9 @@ export type TaskStatus =
 	| 'rejected'
 	| 'in_progress'
 	| 'completed'
-	| 'failed';
+	| 'failed'
+	| 'blocked'
+	| 'dirty';
 
 /**
  * Type of work a task represents.
@@ -96,6 +100,8 @@ export interface Task extends Omit<GeneratedTask, 'status' | 'type'> {
 	iteration?: number;
 	/** Maximum iterations before escalation (frontend-only) */
 	max_iterations?: number;
+	/** Scenario IDs this task satisfies (many-to-many, from ADR-024) */
+	scenario_ids?: string[];
 }
 
 // ============================================================================
@@ -163,7 +169,7 @@ export function getRejectionRouting(type: RejectionType): {
  */
 export function getTaskStatusInfo(status: TaskStatus): {
 	label: string;
-	color: 'gray' | 'yellow' | 'green' | 'red' | 'blue';
+	color: 'gray' | 'yellow' | 'green' | 'red' | 'blue' | 'orange';
 	icon: string;
 } {
 	switch (status) {
@@ -181,6 +187,10 @@ export function getTaskStatusInfo(status: TaskStatus): {
 			return { label: 'Completed', color: 'green', icon: 'check' };
 		case 'failed':
 			return { label: 'Failed', color: 'red', icon: 'x' };
+		case 'blocked':
+			return { label: 'Blocked', color: 'orange', icon: 'lock' };
+		case 'dirty':
+			return { label: 'Needs Re-evaluation', color: 'yellow', icon: 'alert-circle' };
 	}
 }
 

@@ -22,6 +22,9 @@ import type { Phase, PhaseAgentConfig } from '$lib/types/phase';
 import type { SynthesisResult } from '$lib/types/review';
 import type { ContextBuildResponse } from '$lib/types/context';
 import type { Trajectory } from '$lib/types/trajectory';
+import type { Requirement } from '$lib/types/requirement';
+import type { Scenario } from '$lib/types/scenario';
+import type { ChangeProposal } from '$lib/types/change-proposal';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
@@ -387,6 +390,122 @@ export const api = {
 				method: 'POST',
 				body: { reason, rejected_by: rejectedBy }
 			})
+	},
+
+	requirements: {
+		/** List all requirements for a plan */
+		list: (slug: string) => request<Requirement[]>(`/workflow-api/plans/${slug}/requirements`),
+
+		/** Get a single requirement by ID */
+		get: (slug: string, reqId: string) =>
+			request<Requirement>(`/workflow-api/plans/${slug}/requirements/${reqId}`),
+
+		/** Create a new requirement */
+		create: (slug: string, data: { title: string; description?: string }) =>
+			request<Requirement>(`/workflow-api/plans/${slug}/requirements`, {
+				method: 'POST',
+				body: data
+			}),
+
+		/** Update an existing requirement */
+		update: (slug: string, reqId: string, data: { title?: string; description?: string }) =>
+			request<Requirement>(`/workflow-api/plans/${slug}/requirements/${reqId}`, {
+				method: 'PATCH',
+				body: data
+			}),
+
+		/** Delete a requirement */
+		delete: (slug: string, reqId: string) =>
+			request<void>(`/workflow-api/plans/${slug}/requirements/${reqId}`, { method: 'DELETE' }),
+
+		/** Deprecate a requirement */
+		deprecate: (slug: string, reqId: string) =>
+			request<Requirement>(`/workflow-api/plans/${slug}/requirements/${reqId}/deprecate`, {
+				method: 'POST'
+			})
+	},
+
+	scenarios: {
+		/** List all scenarios for a plan */
+		list: (slug: string) => request<Scenario[]>(`/workflow-api/plans/${slug}/scenarios`),
+
+		/** List scenarios for a specific requirement */
+		listByRequirement: (slug: string, reqId: string) =>
+			request<Scenario[]>(
+				`/workflow-api/plans/${slug}/scenarios?requirement_id=${encodeURIComponent(reqId)}`
+			),
+
+		/** Get a single scenario by ID */
+		get: (slug: string, scenarioId: string) =>
+			request<Scenario>(`/workflow-api/plans/${slug}/scenarios/${scenarioId}`),
+
+		/** Create a new scenario */
+		create: (
+			slug: string,
+			data: { requirement_id: string; given: string; when: string; then: string[] }
+		) =>
+			request<Scenario>(`/workflow-api/plans/${slug}/scenarios`, { method: 'POST', body: data }),
+
+		/** Update an existing scenario */
+		update: (
+			slug: string,
+			scenarioId: string,
+			data: { given?: string; when?: string; then?: string[] }
+		) =>
+			request<Scenario>(`/workflow-api/plans/${slug}/scenarios/${scenarioId}`, {
+				method: 'PATCH',
+				body: data
+			}),
+
+		/** Delete a scenario */
+		delete: (slug: string, scenarioId: string) =>
+			request<void>(`/workflow-api/plans/${slug}/scenarios/${scenarioId}`, { method: 'DELETE' })
+	},
+
+	changeProposals: {
+		/** List all change proposals for a plan */
+		list: (slug: string) =>
+			request<ChangeProposal[]>(`/workflow-api/plans/${slug}/change-proposals`),
+
+		/** Get a single change proposal by ID */
+		get: (slug: string, proposalId: string) =>
+			request<ChangeProposal>(`/workflow-api/plans/${slug}/change-proposals/${proposalId}`),
+
+		/** Create a new change proposal */
+		create: (
+			slug: string,
+			data: {
+				title: string;
+				rationale: string;
+				proposed_by?: string;
+				affected_requirement_ids: string[];
+			}
+		) =>
+			request<ChangeProposal>(`/workflow-api/plans/${slug}/change-proposals`, {
+				method: 'POST',
+				body: data
+			}),
+
+		/** Submit a change proposal for review */
+		submit: (slug: string, proposalId: string) =>
+			request<ChangeProposal>(
+				`/workflow-api/plans/${slug}/change-proposals/${proposalId}/submit`,
+				{ method: 'POST' }
+			),
+
+		/** Accept a change proposal */
+		accept: (slug: string, proposalId: string) =>
+			request<ChangeProposal>(
+				`/workflow-api/plans/${slug}/change-proposals/${proposalId}/accept`,
+				{ method: 'POST' }
+			),
+
+		/** Reject a change proposal */
+		reject: (slug: string, proposalId: string, reason?: string) =>
+			request<ChangeProposal>(
+				`/workflow-api/plans/${slug}/change-proposals/${proposalId}/reject`,
+				{ method: 'POST', body: reason ? { reason } : {} }
+			)
 	},
 
 	context: {

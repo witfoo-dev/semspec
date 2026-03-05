@@ -247,6 +247,45 @@ const (
 	DispatchFailed = "failed"
 )
 
+// ChangeProposal workflow phases.
+//
+// Components: change-proposal-reviewer (LLM or human gate)
+//
+// Phase flow (Participant pattern):
+//
+//	reviewing -> reviewing_dispatched -> reviewed ->
+//	evaluated -> decision (accepted/rejected)
+//	  accepted -> cascading -> cascade_complete -> archived
+//	  rejected -> archived
+const (
+	// ChangeProposalReviewing indicates the proposal is ready for review.
+	ChangeProposalReviewing = "reviewing"
+
+	// ChangeProposalReviewingDispatched indicates dispatch to the reviewer.
+	ChangeProposalReviewingDispatched = "reviewing_dispatched"
+
+	// ChangeProposalReviewed is set by the reviewer when review completes.
+	ChangeProposalReviewed = "reviewed"
+
+	// ChangeProposalEvaluated indicates the review has been evaluated.
+	ChangeProposalEvaluated = "evaluated"
+
+	// ChangeProposalCascading indicates an accepted proposal is cascading dirty status.
+	ChangeProposalCascading = "cascading"
+
+	// ChangeProposalCascadeComplete indicates cascade completed successfully.
+	ChangeProposalCascadeComplete = "cascade_complete"
+
+	// ChangeProposalArchived is the terminal phase for both accepted and rejected proposals.
+	ChangeProposalArchived = "archived"
+
+	// ChangeProposalReviewerFailed indicates the reviewer component failed.
+	ChangeProposalReviewerFailed = "reviewer_failed"
+
+	// ChangeProposalCascadeFailed indicates the cascade action failed.
+	ChangeProposalCascadeFailed = "cascade_failed"
+)
+
 // Verdict constants shared across workflows.
 const (
 	VerdictApproved     = "approved"

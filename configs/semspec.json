@@ -618,7 +618,8 @@
         "tasks.request.>",
         "approve.request.>",
         "archive.request.>",
-        "github.request.>"
+        "github.request.>",
+        "change-proposal.request.>"
       ],
       "max_age": "24h",
       "storage": "memory",

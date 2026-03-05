@@ -8,9 +8,12 @@
 
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import StatusBadge from '$lib/components/shared/StatusBadge.svelte';
+	import ScenarioDetail from './ScenarioDetail.svelte';
+	import { api } from '$lib/api/client';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { Phase } from '$lib/types/phase';
-	import type { Task, TaskStatus, getTaskStatusInfo } from '$lib/types/task';
+	import type { Task, TaskStatus } from '$lib/types/task';
+	import type { Scenario } from '$lib/types/scenario';
 
 	interface Props {
 		task: Task;
@@ -28,6 +31,38 @@
 	let rejectReason = $state('');
 	let showRejectForm = $state(false);
 	let error = $state<string | null>(null);
+
+	// Linked scenarios state
+	let linkedScenarios = $state<Scenario[]>([]);
+	let loadingScenarios = $state(false);
+
+	// Load linked scenarios when task changes
+	$effect(() => {
+		const ids = task.scenario_ids;
+		const currentSlug = plan.slug;
+		if (!ids || ids.length === 0) {
+			linkedScenarios = [];
+			return;
+		}
+		let cancelled = false;
+		loadingScenarios = true;
+		api.scenarios
+			.list(currentSlug)
+			.then((all) => {
+				if (!cancelled) {
+					linkedScenarios = all.filter((s) => ids.includes(s.id));
+				}
+			})
+			.catch(() => {
+				if (!cancelled) linkedScenarios = [];
+			})
+			.finally(() => {
+				if (!cancelled) loadingScenarios = false;
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
 
 	// Workflow guidance based on task status
 	const guidance = $derived.by(() => {
@@ -98,6 +133,10 @@
 				return 'approved';
 			case 'pending_approval':
 				return 'pending_approval';
+			case 'dirty':
+				return 'dirty';
+			case 'blocked':
+				return 'blocked';
 			default:
 				return 'pending';
 		}
@@ -147,6 +186,18 @@
 			<h2 class="detail-title">{task.description}</h2>
 			<div class="header-meta">
 				<StatusBadge status={getStatusForBadge(task.status)} />
+				{#if task.status === 'dirty'}
+					<span class="status-indicator dirty" title="Requirement changed — task needs re-evaluation">
+						<Icon name="alert-circle" size={12} />
+						Needs Re-evaluation
+					</span>
+				{/if}
+				{#if task.status === 'blocked'}
+					<span class="status-indicator blocked" title="Blocked by upstream dependency or ChangeProposal cascade">
+						<Icon name="lock" size={12} />
+						Blocked
+					</span>
+				{/if}
 				{#if task.type}
 					<span class="task-type">{task.type}</span>
 				{/if}
@@ -214,6 +265,30 @@
 							{file}
 						</span>
 					{/each}
+				</dd>
+			</div>
+		{/if}
+
+		<!-- Linked Scenarios -->
+		{#if (task.scenario_ids && task.scenario_ids.length > 0) || loadingScenarios}
+			<div class="detail-section">
+				<dt class="section-label">
+					<Icon name="list-checks" size={14} />
+					Linked Scenarios
+				</dt>
+				<dd class="scenarios-dd">
+					{#if loadingScenarios}
+						<div class="scenarios-loading">
+							<Icon name="loader" size={12} />
+							<span>Loading scenarios...</span>
+						</div>
+					{:else if linkedScenarios.length === 0}
+						<p class="scenarios-empty">No matching scenarios found.</p>
+					{:else}
+						{#each linkedScenarios as scenario (scenario.id)}
+							<ScenarioDetail {scenario} />
+						{/each}
+					{/if}
 				</dd>
 			</div>
 		{/if}
@@ -366,6 +441,58 @@
 		border-radius: var(--radius-sm);
 		color: var(--color-text-muted);
 		text-transform: capitalize;
+	}
+
+	.status-indicator {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-1);
+		padding: 2px var(--space-2);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+	}
+
+	.status-indicator.dirty {
+		background: var(--color-warning-muted);
+		color: var(--color-warning);
+	}
+
+	.status-indicator.blocked {
+		background: var(--color-error-muted);
+		color: var(--color-error);
+	}
+
+	/* Linked scenarios */
+	.scenarios-dd {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		margin: 0;
+	}
+
+	.scenarios-loading {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+	}
+
+	.scenarios-loading :global(svg) {
+		animation: spin 1s linear infinite;
+	}
+
+	@keyframes spin {
+		from { transform: rotate(0deg); }
+		to { transform: rotate(360deg); }
+	}
+
+	.scenarios-empty {
+		margin: 0;
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		font-style: italic;
 	}
 
 	.error-message {

@@ -117,9 +117,18 @@
 				return 'x-circle';
 			case 'pending_approval':
 				return 'clock';
+			case 'dirty':
+				return 'alert-circle';
+			case 'blocked':
+				return 'lock';
 			default:
 				return 'circle';
 		}
+	}
+
+	// Count dirty tasks in a phase
+	function getDirtyCount(phaseId: string): number {
+		return tasksByPhase[phaseId]?.filter((t) => t.status === 'dirty').length ?? 0;
 	}
 
 	// Get task count for a phase
@@ -178,6 +187,7 @@
 						<!-- Expand/collapse button (only if phase has tasks) -->
 						{#if hasTasks}
 							<button
+								type="button"
 								class="expand-btn"
 								onclick={() => togglePhase(phase.id)}
 								aria-expanded={expanded}
@@ -208,6 +218,11 @@
 								<span class="task-count">
 									{getCompletedCount(phase.id)}/{getTaskCount(phase.id)}
 								</span>
+								{#if getDirtyCount(phase.id) > 0}
+									<span class="dirty-count-badge" title="{getDirtyCount(phase.id)} task{getDirtyCount(phase.id) !== 1 ? 's' : ''} need re-evaluation">
+										{getDirtyCount(phase.id)}
+									</span>
+								{/if}
 							{:else if hasApprovedPhase}
 								<span class="node-badge pending">No tasks</span>
 							{:else}
@@ -233,6 +248,9 @@
 										<Icon name={getTaskStatusIcon(task.status)} size={12} />
 									</span>
 									<span class="node-label">{task.description}</span>
+									{#if task.status === 'dirty'}
+										<span class="dirty-dot" aria-label="Needs re-evaluation" title="Requirement changed"></span>
+									{/if}
 								</button>
 							{/each}
 						</div>
@@ -405,6 +423,40 @@
 	.phase-status[data-status='pending'],
 	.task-status[data-status='pending'] {
 		color: var(--color-text-muted);
+	}
+
+	.task-status[data-status='dirty'] {
+		color: var(--color-warning);
+	}
+
+	.task-status[data-status='blocked'] {
+		color: var(--color-error);
+	}
+
+	/* Dirty dot indicator on task nodes */
+	.dirty-dot {
+		width: 6px;
+		height: 6px;
+		border-radius: var(--radius-full);
+		background: var(--color-warning);
+		flex-shrink: 0;
+		box-shadow: 0 0 0 2px var(--color-warning-muted);
+	}
+
+	/* Dirty count badge on phase nodes */
+	.dirty-count-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 16px;
+		height: 16px;
+		padding: 0 4px;
+		background: var(--color-warning-muted);
+		color: var(--color-warning);
+		border-radius: var(--radius-full);
+		font-size: 10px;
+		font-weight: var(--font-weight-semibold);
+		flex-shrink: 0;
 	}
 
 	/* Badges and counts */

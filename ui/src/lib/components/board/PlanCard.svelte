@@ -28,6 +28,11 @@
 		).length
 	);
 
+	// Count dirty tasks (need re-evaluation after a ChangeProposal cascade)
+	const dirtyTaskCount = $derived(
+		plansStore.getTasks(plan.slug).filter((t) => t.status === 'dirty').length
+	);
+
 	async function handlePromote(e: Event) {
 		e.preventDefault();
 		e.stopPropagation();
@@ -54,6 +59,12 @@
 				<span class="question-badge" title="{questionCount} pending question{questionCount !== 1 ? 's' : ''}">
 					<Icon name="help-circle" size={12} />
 					{questionCount}
+				</span>
+			{/if}
+			{#if dirtyTaskCount > 0}
+				<span class="dirty-badge" title="{dirtyTaskCount} task{dirtyTaskCount !== 1 ? 's' : ''} need re-evaluation">
+					<Icon name="alert-circle" size={12} />
+					{dirtyTaskCount} dirty
 				</span>
 			{/if}
 		</div>
@@ -177,6 +188,18 @@
 	}
 
 	.question-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+		padding: 2px 6px;
+		background: var(--color-warning-muted);
+		color: var(--color-warning);
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-semibold);
+	}
+
+	.dirty-badge {
 		display: inline-flex;
 		align-items: center;
 		gap: 2px;

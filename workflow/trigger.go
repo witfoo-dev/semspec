@@ -51,6 +51,9 @@ type TriggerPayload struct {
 	TaskID           string `json:"task_id,omitempty"`
 	ContextRequestID string `json:"context_request_id,omitempty"`
 
+	// ChangeProposal-specific fields
+	ProposalID string `json:"proposal_id,omitempty"`
+
 	// Data holds any additional custom fields as raw JSON (kept for extensibility)
 	Data json.RawMessage `json:"data,omitempty"`
 }
@@ -99,6 +102,7 @@ func (p *TriggerPayload) UnmarshalJSON(data []byte) error {
 			LoopID           string   `json:"loop_id,omitempty"`
 			TaskID           string   `json:"task_id,omitempty"`
 			ContextRequestID string   `json:"context_request_id,omitempty"`
+			ProposalID       string   `json:"proposal_id,omitempty"`
 		}
 		if err := json.Unmarshal(p.Data, &nested); err == nil {
 			if p.Slug == "" && nested.Slug != "" {
@@ -130,6 +134,9 @@ func (p *TriggerPayload) UnmarshalJSON(data []byte) error {
 			}
 			if p.ContextRequestID == "" && nested.ContextRequestID != "" {
 				p.ContextRequestID = nested.ContextRequestID
+			}
+			if p.ProposalID == "" && nested.ProposalID != "" {
+				p.ProposalID = nested.ProposalID
 			}
 		}
 	}

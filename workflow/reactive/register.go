@@ -64,5 +64,11 @@ func RegisterAll(engine *reactiveEngine.Engine) error {
 		return fmt.Errorf("register coordination-loop: %w", err)
 	}
 
+	// ADR-024: change-proposal-loop (OODA loop for ChangeProposal lifecycle + cascade)
+	def = BuildChangeProposalLoopWorkflow(stateBucket)
+	if err := engine.RegisterWorkflow(def); err != nil {
+		return fmt.Errorf("register change-proposal-loop: %w", err)
+	}
+
 	return nil
 }

@@ -67,7 +67,18 @@
 		layers: icons.Layers,
 		search: icons.Search,
 		list: icons.List,
-		menu: icons.Menu
+		menu: icons.Menu,
+		lock: icons.Lock,
+		archive: icons.Archive,
+		eye: icons.Eye,
+		'x-circle': icons.XCircle,
+		'play-circle': icons.PlayCircle,
+		'check-square': icons.CheckSquare,
+		lightbulb: icons.Lightbulb,
+		'arrow-left': icons.ArrowLeft,
+		scissors: icons.Scissors,
+		'skip-forward': icons.SkipForward,
+		'arrow-right-circle': icons.ArrowRightCircle
 	};
 
 	const IconComponent = $derived(iconMap[name] || icons.Circle);

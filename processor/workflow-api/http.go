@@ -453,6 +453,33 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Route requirement-by-ID endpoints (e.g. /requirements/{reqId}/deprecate).
+	if strings.HasPrefix(endpoint, "requirements/") {
+		_, requirementID, action := extractSlugRequirementAndAction(r.URL.Path)
+		if requirementID != "" {
+			c.handleRequirementByID(w, r, slug, requirementID, action)
+			return
+		}
+	}
+
+	// Route scenario-by-ID endpoints (e.g. /scenarios/{scenarioId}).
+	if strings.HasPrefix(endpoint, "scenarios/") {
+		_, scenarioID, action := extractSlugScenarioAndAction(r.URL.Path)
+		if scenarioID != "" {
+			c.handleScenarioByID(w, r, slug, scenarioID, action)
+			return
+		}
+	}
+
+	// Route change-proposal-by-ID endpoints (e.g. /change-proposals/{proposalId}/accept).
+	if strings.HasPrefix(endpoint, "change-proposals/") {
+		_, proposalID, action := extractSlugChangeProposalAndAction(r.URL.Path)
+		if proposalID != "" {
+			c.handleChangeProposalByID(w, r, slug, proposalID, action)
+			return
+		}
+	}
+
 	// Route collection and action endpoints.
 	switch endpoint {
 	case "":
@@ -466,6 +493,15 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if handled := c.handleTaskCollectionEndpoint(w, r, slug, endpoint); handled {
+			return
+		}
+		if handled := c.handleRequirementCollectionEndpoint(w, r, slug, endpoint); handled {
+			return
+		}
+		if handled := c.handleScenarioCollectionEndpoint(w, r, slug, endpoint); handled {
+			return
+		}
+		if handled := c.handleChangeProposalCollectionEndpoint(w, r, slug, endpoint); handled {
 			return
 		}
 		http.Error(w, "Unknown endpoint", http.StatusNotFound)
@@ -507,6 +543,42 @@ func (c *Component) handlePhaseCollectionEndpoint(w http.ResponseWriter, r *http
 		requireMethod(w, r, http.MethodPost, func() { c.handleApproveAllPhases(w, r, slug) })
 	case "phases/reorder":
 		requireMethod(w, r, http.MethodPut, func() { c.handleReorderPhases(w, r, slug) })
+	default:
+		return false
+	}
+	return true
+}
+
+// handleRequirementCollectionEndpoint routes requirement collection endpoints.
+// Returns true when the endpoint was recognised and handled.
+func (c *Component) handleRequirementCollectionEndpoint(w http.ResponseWriter, r *http.Request, slug, endpoint string) bool {
+	switch endpoint {
+	case "requirements":
+		c.handlePlanRequirements(w, r, slug)
+	default:
+		return false
+	}
+	return true
+}
+
+// handleScenarioCollectionEndpoint routes scenario collection endpoints.
+// Returns true when the endpoint was recognised and handled.
+func (c *Component) handleScenarioCollectionEndpoint(w http.ResponseWriter, r *http.Request, slug, endpoint string) bool {
+	switch endpoint {
+	case "scenarios":
+		c.handlePlanScenarios(w, r, slug)
+	default:
+		return false
+	}
+	return true
+}
+
+// handleChangeProposalCollectionEndpoint routes change-proposal collection endpoints.
+// Returns true when the endpoint was recognised and handled.
+func (c *Component) handleChangeProposalCollectionEndpoint(w http.ResponseWriter, r *http.Request, slug, endpoint string) bool {
+	switch endpoint {
+	case "change-proposals":
+		c.handlePlanChangeProposals(w, r, slug)
 	default:
 		return false
 	}

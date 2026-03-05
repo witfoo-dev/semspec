@@ -96,6 +96,23 @@ export type ActivityEvent = semstreamsComponents['schemas']['ActivityEvent'];
 // Question types (Knowledge Gap Resolution Protocol)
 // ============================================================================
 
+// ============================================================================
+// ADR-024 graph topology types
+// ============================================================================
+
+export type { Requirement, RequirementStatus } from './requirement';
+export { getRequirementStatusInfo } from './requirement';
+
+export type { Scenario, ScenarioStatus } from './scenario';
+export { getScenarioStatusInfo } from './scenario';
+
+export type { ChangeProposal, ChangeProposalStatus } from './change-proposal';
+export { getChangeProposalStatusInfo } from './change-proposal';
+
+// ============================================================================
+// Question types (Knowledge Gap Resolution Protocol)
+// ============================================================================
+
 export type QuestionStatus = 'pending' | 'answered' | 'timeout';
 export type QuestionUrgency = 'low' | 'normal' | 'high' | 'blocking';
 

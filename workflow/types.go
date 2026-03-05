@@ -33,6 +33,10 @@ const (
 	StatusReviewed Status = "reviewed"
 	// StatusApproved indicates the plan has been approved for execution.
 	StatusApproved Status = "approved"
+	// StatusRequirementsGenerated indicates requirements have been generated for the plan.
+	StatusRequirementsGenerated Status = "requirements_generated"
+	// StatusScenariosGenerated indicates scenarios have been generated for all requirements.
+	StatusScenariosGenerated Status = "scenarios_generated"
 	// StatusPhasesGenerated indicates phases have been generated from the plan.
 	StatusPhasesGenerated Status = "phases_generated"
 	// StatusPhasesApproved indicates generated phases have been reviewed and approved.
@@ -60,6 +64,7 @@ func (s Status) String() string {
 func (s Status) IsValid() bool {
 	switch s {
 	case StatusCreated, StatusDrafted, StatusReviewed, StatusApproved,
+		StatusRequirementsGenerated, StatusScenariosGenerated,
 		StatusPhasesGenerated, StatusPhasesApproved,
 		StatusTasksGenerated, StatusTasksApproved,
 		StatusImplementing, StatusComplete, StatusArchived, StatusRejected:
@@ -79,8 +84,13 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusReviewed:
 		return target == StatusApproved || target == StatusRejected
 	case StatusApproved:
-		// approved → phases_generated (normal flow with phases)
+		// approved → requirements_generated (new flow with requirements)
+		// approved → phases_generated (legacy direct flow)
 		// approved → rejected (review loop escalation)
+		return target == StatusRequirementsGenerated || target == StatusPhasesGenerated || target == StatusRejected
+	case StatusRequirementsGenerated:
+		return target == StatusScenariosGenerated || target == StatusRejected
+	case StatusScenariosGenerated:
 		return target == StatusPhasesGenerated || target == StatusRejected
 	case StatusPhasesGenerated:
 		// phases_generated → phases_approved (normal) or rejected (phase review escalation)
@@ -159,9 +169,12 @@ type GitHubMetadata struct {
 
 // PlanFiles tracks which files exist for a plan.
 type PlanFiles struct {
-	HasPlan   bool `json:"has_plan"`
-	HasTasks  bool `json:"has_tasks"`
-	HasPhases bool `json:"has_phases"`
+	HasPlan              bool `json:"has_plan"`
+	HasTasks             bool `json:"has_tasks"`
+	HasPhases            bool `json:"has_phases"`
+	HasRequirements      bool `json:"has_requirements"`
+	HasScenarios         bool `json:"has_scenarios"`
+	HasChangeProposals   bool `json:"has_change_proposals"`
 }
 
 // Spec represents a specification in .semspec/specs/{name}/.
@@ -579,6 +592,12 @@ const (
 
 	// TaskStatusFailed indicates the task failed
 	TaskStatusFailed TaskStatus = "failed"
+
+	// TaskStatusBlocked indicates the task is blocked by an unmet dependency
+	TaskStatusBlocked TaskStatus = "blocked"
+
+	// TaskStatusDirty indicates an upstream Scenario/Requirement was mutated by an accepted ChangeProposal
+	TaskStatusDirty TaskStatus = "dirty"
 )
 
 // String returns the string representation of the task status.
@@ -590,7 +609,8 @@ func (s TaskStatus) String() string {
 func (s TaskStatus) IsValid() bool {
 	switch s {
 	case TaskStatusPending, TaskStatusPendingApproval, TaskStatusApproved, TaskStatusRejected,
-		TaskStatusInProgress, TaskStatusCompleted, TaskStatusFailed:
+		TaskStatusInProgress, TaskStatusCompleted, TaskStatusFailed,
+		TaskStatusBlocked, TaskStatusDirty:
 		return true
 	default:
 		return false
@@ -614,19 +634,26 @@ func (s TaskStatus) IsValid() bool {
 func (s TaskStatus) CanTransitionTo(target TaskStatus) bool {
 	switch s {
 	case TaskStatusPending:
-		// Can submit for approval or start directly (legacy compatibility)
-		return target == TaskStatusPendingApproval || target == TaskStatusInProgress || target == TaskStatusFailed
+		// Can submit for approval, start directly (legacy compatibility), or become dirty
+		return target == TaskStatusPendingApproval || target == TaskStatusInProgress ||
+			target == TaskStatusFailed || target == TaskStatusDirty
 	case TaskStatusPendingApproval:
-		// Human approval decision
-		return target == TaskStatusApproved || target == TaskStatusRejected
+		// Human approval decision or upstream change
+		return target == TaskStatusApproved || target == TaskStatusRejected || target == TaskStatusDirty
 	case TaskStatusApproved:
-		// Ready for execution
-		return target == TaskStatusInProgress
+		// Ready for execution, blocked by dependency, or dirtied by upstream change
+		return target == TaskStatusInProgress || target == TaskStatusBlocked || target == TaskStatusDirty
 	case TaskStatusRejected:
-		// Can be re-edited and resubmitted
-		return target == TaskStatusPending
+		// Can be re-edited and resubmitted; or dirtied by upstream change
+		return target == TaskStatusPending || target == TaskStatusDirty
 	case TaskStatusInProgress:
 		return target == TaskStatusCompleted || target == TaskStatusFailed
+	case TaskStatusBlocked:
+		// Unblocked when dependency resolves; dirty if upstream changed while blocked
+		return target == TaskStatusInProgress || target == TaskStatusDirty
+	case TaskStatusDirty:
+		// Re-evaluate after upstream change
+		return target == TaskStatusPendingApproval
 	case TaskStatusCompleted, TaskStatusFailed:
 		return false // Terminal states
 	default:
@@ -700,6 +727,10 @@ type Task struct {
 	// AcceptanceCriteria lists BDD-style conditions for task completion
 	AcceptanceCriteria []AcceptanceCriterion `json:"acceptance_criteria"`
 
+	// ScenarioIDs lists scenario IDs this task satisfies (many-to-many SATISFIES edge).
+	// Replaces AcceptanceCriteria after migration.
+	ScenarioIDs []string `json:"scenario_ids,omitempty"`
+
 	// Files lists files in scope for this task (optional)
 	Files []string `json:"files,omitempty"`
 
@@ -747,6 +778,189 @@ type Task struct {
 
 	// LastErrorAt is when the last error occurred.
 	LastErrorAt *time.Time `json:"last_error_at,omitempty"`
+}
+
+// RequirementStatus represents the lifecycle state of a requirement.
+type RequirementStatus string
+
+const (
+	// RequirementStatusActive indicates the requirement is current and actionable.
+	RequirementStatusActive RequirementStatus = "active"
+
+	// RequirementStatusDeprecated indicates the requirement is no longer relevant.
+	RequirementStatusDeprecated RequirementStatus = "deprecated"
+
+	// RequirementStatusSuperseded indicates the requirement was replaced by another.
+	RequirementStatusSuperseded RequirementStatus = "superseded"
+)
+
+// String returns the string representation of the requirement status.
+func (s RequirementStatus) String() string {
+	return string(s)
+}
+
+// IsValid returns true if the requirement status is valid.
+func (s RequirementStatus) IsValid() bool {
+	switch s {
+	case RequirementStatusActive, RequirementStatusDeprecated, RequirementStatusSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+// CanTransitionTo returns true if this requirement status can transition to the target.
+func (s RequirementStatus) CanTransitionTo(target RequirementStatus) bool {
+	switch s {
+	case RequirementStatusActive:
+		return target == RequirementStatusDeprecated || target == RequirementStatusSuperseded
+	case RequirementStatusSuperseded:
+		// Can revert supersession if ChangeProposal is rolled back
+		return target == RequirementStatusActive
+	case RequirementStatusDeprecated:
+		return false // Terminal state
+	default:
+		return false
+	}
+}
+
+// Requirement represents a plan-level behavioral intent.
+type Requirement struct {
+	ID          string            `json:"id"`
+	PlanID      string            `json:"plan_id"`
+	Title       string            `json:"title"`
+	Description string            `json:"description"`
+	Status      RequirementStatus `json:"status"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+}
+
+// ScenarioStatus represents the verification state of a scenario.
+type ScenarioStatus string
+
+const (
+	// ScenarioStatusPending indicates the scenario has not yet been verified.
+	ScenarioStatusPending ScenarioStatus = "pending"
+
+	// ScenarioStatusPassing indicates the scenario is verified and passing.
+	ScenarioStatusPassing ScenarioStatus = "passing"
+
+	// ScenarioStatusFailing indicates the scenario is verified and failing.
+	ScenarioStatusFailing ScenarioStatus = "failing"
+
+	// ScenarioStatusSkipped indicates the scenario was intentionally skipped.
+	ScenarioStatusSkipped ScenarioStatus = "skipped"
+)
+
+// String returns the string representation of the scenario status.
+func (s ScenarioStatus) String() string {
+	return string(s)
+}
+
+// IsValid returns true if the scenario status is valid.
+func (s ScenarioStatus) IsValid() bool {
+	switch s {
+	case ScenarioStatusPending, ScenarioStatusPassing, ScenarioStatusFailing, ScenarioStatusSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
+// CanTransitionTo returns true if this scenario status can transition to the target.
+func (s ScenarioStatus) CanTransitionTo(target ScenarioStatus) bool {
+	switch s {
+	case ScenarioStatusPending:
+		return target == ScenarioStatusPassing || target == ScenarioStatusFailing || target == ScenarioStatusSkipped
+	case ScenarioStatusPassing:
+		return target == ScenarioStatusFailing
+	case ScenarioStatusFailing:
+		return target == ScenarioStatusPassing
+	case ScenarioStatusSkipped:
+		return target == ScenarioStatusPending
+	default:
+		return false
+	}
+}
+
+// Scenario represents a Given/When/Then behavioral contract derived from a Requirement.
+type Scenario struct {
+	ID            string         `json:"id"`
+	RequirementID string         `json:"requirement_id"`
+	Given         string         `json:"given"`
+	When          string         `json:"when"`
+	Then          []string       `json:"then"`
+	Status        ScenarioStatus `json:"status"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+}
+
+// ChangeProposalStatus represents the lifecycle state of a change proposal.
+type ChangeProposalStatus string
+
+const (
+	// ChangeProposalStatusProposed indicates the proposal has been submitted for review.
+	ChangeProposalStatusProposed ChangeProposalStatus = "proposed"
+
+	// ChangeProposalStatusUnderReview indicates the proposal is being reviewed.
+	ChangeProposalStatusUnderReview ChangeProposalStatus = "under_review"
+
+	// ChangeProposalStatusAccepted indicates the proposal was accepted.
+	ChangeProposalStatusAccepted ChangeProposalStatus = "accepted"
+
+	// ChangeProposalStatusRejected indicates the proposal was rejected.
+	ChangeProposalStatusRejected ChangeProposalStatus = "rejected"
+
+	// ChangeProposalStatusArchived indicates the proposal has been archived.
+	ChangeProposalStatusArchived ChangeProposalStatus = "archived"
+)
+
+// String returns the string representation of the change proposal status.
+func (s ChangeProposalStatus) String() string {
+	return string(s)
+}
+
+// IsValid returns true if the change proposal status is valid.
+func (s ChangeProposalStatus) IsValid() bool {
+	switch s {
+	case ChangeProposalStatusProposed, ChangeProposalStatusUnderReview,
+		ChangeProposalStatusAccepted, ChangeProposalStatusRejected, ChangeProposalStatusArchived:
+		return true
+	default:
+		return false
+	}
+}
+
+// CanTransitionTo returns true if this change proposal status can transition to the target.
+func (s ChangeProposalStatus) CanTransitionTo(target ChangeProposalStatus) bool {
+	switch s {
+	case ChangeProposalStatusProposed:
+		return target == ChangeProposalStatusUnderReview
+	case ChangeProposalStatusUnderReview:
+		return target == ChangeProposalStatusAccepted || target == ChangeProposalStatusRejected
+	case ChangeProposalStatusAccepted:
+		return target == ChangeProposalStatusArchived
+	case ChangeProposalStatusRejected:
+		return target == ChangeProposalStatusArchived
+	case ChangeProposalStatusArchived:
+		return false // Terminal state
+	default:
+		return false
+	}
+}
+
+// ChangeProposal represents a mid-stream proposal to mutate one or more Requirements.
+type ChangeProposal struct {
+	ID             string               `json:"id"`
+	PlanID         string               `json:"plan_id"`
+	Title          string               `json:"title"`
+	Rationale      string               `json:"rationale"`
+	Status         ChangeProposalStatus `json:"status"`
+	ProposedBy     string               `json:"proposed_by"`
+	AffectedReqIDs []string             `json:"affected_requirement_ids"`
+	CreatedAt      time.Time            `json:"created_at"`
+	ReviewedAt     *time.Time           `json:"reviewed_at,omitempty"`
+	DecidedAt      *time.Time           `json:"decided_at,omitempty"`
 }
 
 // TaskExecutionPayload carries all information needed to execute a task.

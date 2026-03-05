@@ -54,7 +54,7 @@ parse structured JSON responses.
 | `plan-coordinator` | `/plan <title>` | Multi-planner orchestration → Goal/Context/Scope | `plan.json` |
 | `planner` | (fallback path) | Single LLM → Goal/Context/Scope | `plan.json` |
 | `plan-reviewer` | `/approve <slug>` | SOP validation → Verdict | Review result |
-| `task-generator` | After approval | LLM → BDD tasks | `tasks.json` |
+| `task-generator` | After approval | LLM pipeline: Requirements → Scenarios → Tasks | `tasks.json` |
 | `task-dispatcher` | `/execute <slug>` | Dependency-aware dispatch | Agent tasks |
 | `context-builder` | (shared service) | Graph + filesystem → Context | Token-budgeted context |
 
@@ -168,6 +168,57 @@ The planning workflow uses specialized components for LLM-assisted content gener
 # User manually edits plan.json
 ```
 
+### Plan Status Flow
+
+Plans progress through a defined sequence of statuses. ADR-024 inserted the requirements and
+scenario generation steps between approval and phase generation:
+
+```
+created → drafted → reviewed → approved
+  → requirements_generated → scenarios_generated
+  → phases_generated → phases_approved
+  → tasks_generated → tasks_approved
+  → implementing → complete
+```
+
+The two new statuses (`requirements_generated`, `scenarios_generated`) represent distinct LLM
+pipeline steps. Each concern uses a separate, focused prompt so that smaller models produce
+higher-quality output than a single combined call would yield.
+
+### Planning Pipeline (ADR-024)
+
+After a plan is approved, the `task-generator` component runs a multi-step pipeline before
+producing tasks:
+
+```
+Plan approved
+  → Generate Requirements   (plan-scoped intent statements)
+    → Generate Scenarios     (Given/When/Then per requirement)
+      → Generate Phases      (scheduling containers, unchanged)
+        → Generate Tasks     (implementation work, linked to Scenarios)
+          → Assign Tasks to Phases
+```
+
+Each step is a separate LLM call with a focused prompt. The pipeline is configurable via the
+`pipeline_mode` field on `task-generator`; the default is `pipeline`. A single-shot mode is
+available for latency-sensitive environments.
+
+**Why separate steps?** Requirements describe *intent*. Scenarios describe *observable behavior*.
+Tasks describe *implementation work*. Phases describe *scheduling*. Separating concerns produces
+higher-quality output and makes each artifact independently queryable in the graph.
+
+### Task Statuses (ADR-024)
+
+Two new task statuses were added:
+
+| Status | Set By | Meaning |
+|--------|--------|---------|
+| `dirty` | ChangeProposal acceptance cascade | One or more linked Scenarios were mutated; task needs re-evaluation |
+| `blocked` | Dependency resolution | An explicit upstream dependency has not completed |
+
+`dirty` tasks are not failed — they are flagged for re-evaluation after a ChangeProposal changes
+the behavioral contracts (Scenarios) the task was written to satisfy.
+
 ## Document Validation
 
 Generated documents are validated before proceeding to the next step.
@@ -186,8 +237,9 @@ Generated documents are validated before proceeding to the next step.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| BDD scenarios | yes | GIVEN/WHEN/THEN format |
-| Acceptance criteria | yes | Per-task acceptance criteria |
+| `title` | yes | Task title |
+| `description` | yes | Implementation description |
+| `scenarioIDs` | yes | IDs of Scenarios this task satisfies (ADR-024; replaces embedded acceptance criteria) |
 
 ### Validation Warnings
 
@@ -290,9 +342,14 @@ workflow.trigger.plan-reviewer
 workflow.trigger.task-generator
     |
     v
-[task-generator]
+[task-generator]  -- ADR-024 pipeline --
     |-- Requests context from context-builder
-    |-- LLM: generates BDD tasks from plan
+    |-- LLM: generates Requirements from plan Goal/Context/Scope
+    |       Publishes requirement.created events; plan status → requirements_generated
+    |-- LLM: generates Scenarios (Given/When/Then) per Requirement
+    |       Publishes scenario.created events; plan status → scenarios_generated
+    |-- LLM: generates Phases (scheduling containers, unchanged)
+    |-- LLM: generates Tasks linked to Scenarios (ScenarioIDs, not embedded criteria)
     |-- Saves tasks.json
     |-- Publishes: workflow.result.task-generator.<slug>
 ```
@@ -345,10 +402,114 @@ Task completion or escalation to user
 | `workflow.trigger.plan-reviewer` | Plan review trigger |
 | `workflow.trigger.task-generator` | Task generation trigger |
 | `workflow.trigger.task-dispatcher` | Task dispatch trigger |
+| `workflow.trigger.change-proposal-loop` | ChangeProposal OODA loop trigger |
 | `workflow.result.<component>.<slug>` | Component completion |
 | `context.build.>` | Context build requests |
 | `context.built.<request_id>` | Context build responses |
 | `agent.task.development` | Agent task dispatch |
+| `requirement.created` | New requirement published |
+| `requirement.updated` | Requirement mutated by ChangeProposal |
+| `scenario.created` | New scenario published |
+| `scenario.status.updated` | Scenario status changed |
+| `task.dirty` | Dirty cascade: task IDs affected by ChangeProposal |
+| `change_proposal.created` | New ChangeProposal submitted |
+| `change_proposal.accepted` | Proposal accepted; cascade complete |
+| `change_proposal.rejected` | Proposal rejected; no graph mutations |
+
+## ChangeProposal Lifecycle (ADR-024)
+
+A ChangeProposal is a first-class graph node that represents a mid-stream change to one or more
+Requirements. It follows an OODA (Observe-Orient-Decide-Act) reactive workflow, consistent with
+the ADR-005 reactive engine pattern.
+
+### When a ChangeProposal Is Created
+
+Three sources can submit a proposal (all publish to `workflow.trigger.change-proposal-loop`):
+
+1. **User via UI** — manual proposal from the Requirement panel (Phase 5 scope)
+2. **Agent during execution** — developer detects a misscoped requirement and proposes a change
+   instead of escalating (future work)
+3. **Reviewer during review** — code reviewer identifies a behavioral gap that warrants a new
+   Requirement (future work)
+
+### OODA Loop
+
+```
+Observe:  Proposal created → workflow.trigger.change-proposal-loop published
+Orient:   Reviewer evaluates proposal against current graph state (LLM or human gate)
+Decide:   Accept or reject
+Act:      If accepted → cascade dirty status; if rejected → archive, no mutations
+```
+
+### Reactive Rules
+
+```
+KV key pattern:   change-proposal.*
+Trigger subject:  workflow.trigger.change-proposal-loop
+
+accept-trigger          → populate state from proposal payload
+dispatch-review         → workflow.async.change-proposal-reviewer
+review-completed        → evaluate verdict
+handle-accepted         → execute cascade (graph traversal + dirty marking)
+handle-rejected         → archive proposal, no graph mutations
+handle-escalation       → user.signal.escalate
+handle-error            → user.signal.error
+```
+
+### Cascade Logic (handle-accepted)
+
+When a proposal is accepted, the reactive engine performs a graph traversal and marks affected
+work as `dirty`:
+
+1. For each Requirement in `AffectedReqIDs`:
+   - Publish `requirement.updated` event
+   - Traverse `HAS_SCENARIO` edges to find affected Scenarios
+   - For each Scenario: traverse `SATISFIED_BY` edges to find affected Tasks
+1. For each affected Task: set status to `dirty`, persist updated task
+1. Publish `task.dirty` with all affected task IDs (batched single event)
+1. Publish `change_proposal.accepted`
+1. Set proposal status to `archived`
+
+`dirty` tasks are flagged for re-evaluation — they are not failed or cancelled. The developer
+agent can inspect which Scenarios changed and revise its implementation accordingly.
+
+### ChangeProposal Struct
+
+```go
+type ChangeProposal struct {
+    ID             string               // "change-proposal.{plan_slug}.{sequence}"
+    PlanID         string
+    Title          string
+    Rationale      string
+    Status         ChangeProposalStatus // proposed, under_review, accepted, rejected, archived
+    ProposedBy     string               // agent role or "user"
+    AffectedReqIDs []string             // one proposal can span multiple Requirements
+    CreatedAt      time.Time
+    ReviewedAt     *time.Time
+    DecidedAt      *time.Time
+}
+```
+
+### Graph Edges
+
+| Edge | From | To | Meaning |
+|------|------|----|---------|
+| `BELONGS_TO` | ChangeProposal | Plan | Scoped to plan |
+| `MUTATES` | ChangeProposal | Requirement | Requirements changed by this proposal |
+| `ADDS_SCENARIO` | ChangeProposal | Scenario | Scenarios introduced |
+| `REMOVES_SCENARIO` | ChangeProposal | Scenario | Scenarios removed |
+| `INVALIDATES` | ChangeProposal | Task | Tasks dirtied on acceptance (computed) |
+
+### Implementation Files
+
+These files are created or modified as part of the ChangeProposal lifecycle implementation:
+
+| File | Status | Purpose |
+|------|--------|---------|
+| `workflow/reactive/change_proposal.go` | New | Reactive workflow rules |
+| `workflow/reactive/change_proposal_actions.go` | New | Cascade logic |
+| `processor/workflow-api/http_change_proposal.go` | New | HTTP handlers |
+| `configs/semspec.json` | Modified | `change-proposal-loop` configuration |
 
 ## Context Building
 

@@ -610,6 +610,93 @@ const (
 
 	// TaskPlan links a task to its parent plan entity.
 	TaskPlan = "semspec.task.plan"
+
+	// TaskScenario links to scenarios this task satisfies (SATISFIES edge).
+	TaskScenario = "semspec.task.scenario"
+)
+
+// Requirement predicates define attributes for plan-level requirements.
+const (
+	// RequirementTitle is the requirement title.
+	RequirementTitle = "semspec.requirement.title"
+
+	// RequirementDescription is the requirement description.
+	RequirementDescription = "semspec.requirement.description"
+
+	// RequirementStatus is the requirement lifecycle status.
+	// Values: active, deprecated, superseded
+	RequirementStatus = "semspec.requirement.status"
+
+	// RequirementPlan links to the parent plan entity.
+	RequirementPlan = "semspec.requirement.plan"
+
+	// RequirementScenario links to child scenario entities.
+	RequirementScenario = "semspec.requirement.scenario"
+
+	// RequirementCreatedAt is the RFC3339 creation timestamp.
+	RequirementCreatedAt = "semspec.requirement.created_at"
+
+	// RequirementUpdatedAt is the RFC3339 last update timestamp.
+	RequirementUpdatedAt = "semspec.requirement.updated_at"
+
+	// RequirementSupersededBy links to the requirement that supersedes this one.
+	RequirementSupersededBy = "semspec.requirement.superseded_by"
+)
+
+// Scenario predicates define attributes for behavioral contracts.
+const (
+	// ScenarioGiven is the precondition state.
+	ScenarioGiven = "semspec.scenario.given"
+
+	// ScenarioWhen is the triggering action.
+	ScenarioWhen = "semspec.scenario.when"
+
+	// ScenarioThen is the expected outcomes (multiple assertions).
+	ScenarioThen = "semspec.scenario.then"
+
+	// ScenarioStatus is the verification status.
+	// Values: pending, passing, failing, skipped
+	ScenarioStatus = "semspec.scenario.status"
+
+	// ScenarioRequirement links to the parent requirement entity.
+	ScenarioRequirement = "semspec.scenario.requirement"
+
+	// ScenarioTask links to satisfying task entities.
+	ScenarioTask = "semspec.scenario.task"
+
+	// ScenarioCreatedAt is the RFC3339 creation timestamp.
+	ScenarioCreatedAt = "semspec.scenario.created_at"
+
+	// ScenarioUpdatedAt is the RFC3339 last update timestamp.
+	ScenarioUpdatedAt = "semspec.scenario.updated_at"
+)
+
+// ChangeProposal predicates define attributes for mid-stream change proposals.
+const (
+	// ChangeProposalTitle is the proposal title.
+	ChangeProposalTitle = "semspec.change_proposal.title"
+
+	// ChangeProposalRationale explains why the change is needed.
+	ChangeProposalRationale = "semspec.change_proposal.rationale"
+
+	// ChangeProposalStatus is the proposal lifecycle status.
+	// Values: proposed, under_review, accepted, rejected, archived
+	ChangeProposalStatus = "semspec.change_proposal.status"
+
+	// ChangeProposalProposedBy identifies who proposed the change (agent role or "user").
+	ChangeProposalProposedBy = "semspec.change_proposal.proposed_by"
+
+	// ChangeProposalPlan links to the parent plan entity.
+	ChangeProposalPlan = "semspec.change_proposal.plan"
+
+	// ChangeProposalMutates links to affected requirement entities.
+	ChangeProposalMutates = "semspec.change_proposal.mutates"
+
+	// ChangeProposalCreatedAt is the RFC3339 creation timestamp.
+	ChangeProposalCreatedAt = "semspec.change_proposal.created_at"
+
+	// ChangeProposalDecidedAt is the RFC3339 decision timestamp.
+	ChangeProposalDecidedAt = "semspec.change_proposal.decided_at"
 )
 
 // Standard metadata predicates aligned with Dublin Core.
@@ -1739,4 +1826,138 @@ func init() {
 	registerPhasePredicates()
 	registerApprovalPredicates()
 	registerQuestionPredicates()
+	registerRequirementPredicates()
+	registerScenarioPredicates()
+	registerChangeProposalPredicates()
+}
+
+func registerRequirementPredicates() {
+	vocabulary.Register(RequirementTitle,
+		vocabulary.WithDescription("Requirement title"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"requirementTitle"))
+
+	vocabulary.Register(RequirementDescription,
+		vocabulary.WithDescription("Requirement description"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"requirementDescription"))
+
+	vocabulary.Register(RequirementStatus,
+		vocabulary.WithDescription("Requirement lifecycle status (active, deprecated, superseded)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"requirementStatus"))
+
+	vocabulary.Register(RequirementPlan,
+		vocabulary.WithDescription("Link to parent plan entity"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"requirementPlan"))
+
+	vocabulary.Register(RequirementScenario,
+		vocabulary.WithDescription("Link to child scenario entities"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"requirementScenario"))
+
+	vocabulary.Register(RequirementCreatedAt,
+		vocabulary.WithDescription("Creation timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
+
+	vocabulary.Register(RequirementUpdatedAt,
+		vocabulary.WithDescription("Last update timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI("http://purl.org/dc/terms/modified"))
+
+	vocabulary.Register(RequirementSupersededBy,
+		vocabulary.WithDescription("Link to the requirement that supersedes this one"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"requirementSupersededBy"))
+
+	vocabulary.Register(TaskScenario,
+		vocabulary.WithDescription("Link to scenarios this task satisfies (SATISFIES edge)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"taskScenario"))
+}
+
+func registerScenarioPredicates() {
+	vocabulary.Register(ScenarioGiven,
+		vocabulary.WithDescription("Precondition state"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scenarioGiven"))
+
+	vocabulary.Register(ScenarioWhen,
+		vocabulary.WithDescription("Triggering action"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scenarioWhen"))
+
+	vocabulary.Register(ScenarioThen,
+		vocabulary.WithDescription("Expected outcomes (multiple assertions)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scenarioThen"))
+
+	vocabulary.Register(ScenarioStatus,
+		vocabulary.WithDescription("Verification status (pending, passing, failing, skipped)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scenarioStatus"))
+
+	vocabulary.Register(ScenarioRequirement,
+		vocabulary.WithDescription("Link to parent requirement entity"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"scenarioRequirement"))
+
+	vocabulary.Register(ScenarioTask,
+		vocabulary.WithDescription("Link to satisfying task entities"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"scenarioTask"))
+
+	vocabulary.Register(ScenarioCreatedAt,
+		vocabulary.WithDescription("Creation timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
+
+	vocabulary.Register(ScenarioUpdatedAt,
+		vocabulary.WithDescription("Last update timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI("http://purl.org/dc/terms/modified"))
+}
+
+func registerChangeProposalPredicates() {
+	vocabulary.Register(ChangeProposalTitle,
+		vocabulary.WithDescription("Change proposal title"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"changeProposalTitle"))
+
+	vocabulary.Register(ChangeProposalRationale,
+		vocabulary.WithDescription("Rationale for the change"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"changeProposalRationale"))
+
+	vocabulary.Register(ChangeProposalStatus,
+		vocabulary.WithDescription("Proposal lifecycle status (proposed, under_review, accepted, rejected, archived)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"changeProposalStatus"))
+
+	vocabulary.Register(ChangeProposalProposedBy,
+		vocabulary.WithDescription("Who proposed the change (agent role or user)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(vocabulary.ProvWasAttributedTo))
+
+	vocabulary.Register(ChangeProposalPlan,
+		vocabulary.WithDescription("Link to parent plan entity"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"changeProposalPlan"))
+
+	vocabulary.Register(ChangeProposalMutates,
+		vocabulary.WithDescription("Link to affected requirement entities"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"changeProposalMutates"))
+
+	vocabulary.Register(ChangeProposalCreatedAt,
+		vocabulary.WithDescription("Creation timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
+
+	vocabulary.Register(ChangeProposalDecidedAt,
+		vocabulary.WithDescription("Decision timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(Namespace+"changeProposalDecidedAt"))
 }
