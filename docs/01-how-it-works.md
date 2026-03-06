@@ -21,18 +21,7 @@ team's coding standards.
 Semspec supports two execution modes, selected by the `reactive_mode` flag on the `task-generator`
 component.
 
-### Static Mode (default: `reactive_mode=false`)
-
-Planning produces a fully decomposed task graph upfront:
-
-```
-Plan approved → Requirements → Scenarios → Phases → Tasks → tasks.json → dispatch
-```
-
-All tasks are known before any execution begins. Task dependencies are resolved at dispatch time
-by `task-dispatcher`.
-
-### Reactive Mode (`reactive_mode=true`)
+### Reactive Mode (default: `reactive_mode=true`)
 
 Planning produces Requirements and Scenarios only. Task decomposition happens at runtime for each
 Scenario:
@@ -63,6 +52,18 @@ Plan approved → Requirements → Scenarios → ready_for_execution
 implementation tasks depends on what the code looks like at execution time — not at planning time.
 Reactive mode lets the agent inspect the live codebase and choose the right task structure for each
 Scenario when it is ready to execute.
+
+### Static Mode (`reactive_mode=false`)
+
+Planning produces a fully decomposed task graph upfront:
+
+```
+Plan approved → Requirements → Scenarios → Phases → Tasks → tasks.json → dispatch
+```
+
+All tasks are known before any execution begins. Task dependencies are resolved at dispatch time
+by `task-dispatcher`. Use when you need deterministic task graphs or want human review of tasks
+before execution.
 
 ### New Agent Capabilities (Reactive Mode)
 

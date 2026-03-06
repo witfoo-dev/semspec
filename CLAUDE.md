@@ -269,8 +269,8 @@ Common environment variables:
 - `NATS_URL` - NATS server URL
 
 Key configuration flags (in `configs/semspec.json`):
-- `task-generator.reactive_mode` — When `true`, skip task generation and advance plan to
-  `ready_for_execution` for reactive execution via the scenario-orchestrator (default: `false`)
+- `task-generator.reactive_mode` — When `true` (default), skip task generation and advance plan to
+  `ready_for_execution` for reactive execution via the scenario-orchestrator
 
 ## Graph-First Architecture
 

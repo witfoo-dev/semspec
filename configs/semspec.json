@@ -272,7 +272,7 @@
         "default_capability": "planning",
         "context_subject_prefix": "context.build",
         "context_timeout": "60s",
-        "reactive_mode": false
+        "reactive_mode": true
       }
     },
     "task-dispatcher": {

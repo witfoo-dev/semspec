@@ -421,7 +421,7 @@ to the knowledge graph.
 ### task-generator
 
 **Purpose**: Runs the multi-step planning pipeline (Requirements → Scenarios → Phases → Tasks)
-from an approved plan when `reactive_mode=false` (default). When `reactive_mode=true`, it skips
+from an approved plan when `reactive_mode=false`. When `reactive_mode=true` (default), it skips
 task generation entirely and advances the plan status to `ready_for_execution` so the
 scenario-orchestrator can decompose work at runtime.
 
@@ -439,7 +439,7 @@ full pipeline description.
   "trigger_subject": "workflow.trigger.task-generator",
   "default_capability": "planning",
   "pipeline_mode": "pipeline",
-  "reactive_mode": false
+  "reactive_mode": true
 }
 ```
 
@@ -450,11 +450,19 @@ full pipeline description.
 | `trigger_subject` | string | `workflow.trigger.task-generator` | Subject to consume triggers from |
 | `default_capability` | string | `planning` | Default model capability |
 | `pipeline_mode` | string | `pipeline` | `pipeline` (default) or `single_shot` |
-| `reactive_mode` | bool | `false` | Skip task generation; advance plan to `ready_for_execution` |
+| `reactive_mode` | bool | `true` | Skip task generation; advance plan to `ready_for_execution` |
 
 #### Behavior
 
-**Pipeline mode** (default, `reactive_mode=false`) — four focused LLM calls:
+**Reactive mode** (default, `reactive_mode=true`) — defers task decomposition to execution time:
+
+1. After `scenarios_generated`, advances plan status directly to `ready_for_execution`
+1. Does **not** generate Phases or Tasks upfront; does **not** write `tasks.json`
+1. Publishes result to `workflow.result.tasks.{slug}` to signal completion
+1. The `scenario-orchestrator` then decomposes each Scenario into a TaskDAG via LLM
+   at execution time, when the agent can inspect the live codebase
+
+**Pipeline mode** (`reactive_mode=false`) — four focused LLM calls:
 
 1. **Subscribes**: Consumes from `workflow.trigger.task-generator` on the WORKFLOWS stream
 1. **Loads Plan**: Reads plan from `.semspec/plans/{slug}/plan.json`
@@ -470,16 +478,6 @@ full pipeline description.
 
 **Single-shot mode** (`pipeline_mode=single_shot`) — one LLM call producing all tasks directly.
 Use when pipeline latency is unacceptable (e.g., local development with small models).
-
-**Reactive mode** (`reactive_mode=true`) — skips all LLM calls after Scenario generation:
-
-1. Runs Requirements and Scenarios generation steps as normal
-1. After `scenarios_generated`, advances plan status directly to `ready_for_execution`
-1. Does **not** generate Phases or Tasks; does **not** write `tasks.json`
-1. Publishes result to `workflow.result.tasks.{slug}` to signal completion
-
-The `scenario-orchestrator` picks up plans in `ready_for_execution` status and decomposes each
-Scenario into a TaskDAG at execution time via the reactive workflows.
 
 #### Task JSON Format
 
