@@ -35,6 +35,17 @@ tasks:
     cmds:
       - go test -race ./...
 
+  test:integration:
+    desc: Run integration tests (requires Docker for testcontainers)
+    cmds:
+      - go test -race -tags integration -count=1 ./...
+
+  test:all:
+    desc: Run unit + integration tests
+    cmds:
+      - task: test
+      - task: test:integration
+
   check:
     desc: Run all checks (lint + test)
     cmds:
