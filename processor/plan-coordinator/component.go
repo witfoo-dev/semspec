@@ -36,11 +36,11 @@ import (
 	"github.com/c360studio/semspec/processor/contexthelper"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
-	"github.com/c360studio/semstreams/graph"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
@@ -80,10 +80,11 @@ type llmCompleter interface {
 
 // Component orchestrates parallel planner coordination.
 type Component struct {
-	config     Config
-	natsClient *natsclient.Client
-	logger     *slog.Logger
-	platform   component.PlatformMeta
+	config       Config
+	natsClient   *natsclient.Client
+	logger       *slog.Logger
+	platform     component.PlatformMeta
+	tripleWriter *graphutil.TripleWriter
 
 	llmClient     llmCompleter
 	contextHelper *contexthelper.Helper
@@ -146,6 +147,11 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger), llm.WithCallStore(llm.GlobalCallStore())),
 		contextHelper: ctxHelper,
 		shutdown:      make(chan struct{}),
+		tripleWriter: &graphutil.TripleWriter{
+			NATSClient:    deps.NATSClient,
+			Logger:        logger,
+			ComponentName: componentName,
+		},
 	}
 
 	for _, p := range cfg.Ports.Inputs {
@@ -209,7 +215,7 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 
 	for _, port := range c.inputPorts {
-		subject := portSubject(port)
+		subject := graphutil.PortSubject(port)
 		if subject == "" {
 			continue
 		}
@@ -356,14 +362,14 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 	}
 
 	// Write initial entity triples.
-	_ = c.writeTriple(ctx, entityID, wf.Type, "coordination")
-	if err := c.writeTriple(ctx, entityID, wf.Phase, phaseFocusing); err != nil {
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "coordination")
+	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phaseFocusing); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseFocusing, "error", err)
 	}
-	_ = c.writeTriple(ctx, entityID, wf.Slug, trigger.Slug)
-	_ = c.writeTriple(ctx, entityID, wf.Title, trigger.Title)
-	_ = c.writeTriple(ctx, entityID, "workflow.project_id", trigger.ProjectID)
-	_ = c.writeTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Slug, trigger.Slug)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Title, trigger.Title)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.ProjectID, trigger.ProjectID)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
 
 	// Publish initial entity snapshot for graph observability.
 	c.publishEntity(ctx, NewCoordinationEntity(exec).WithPhase(phaseFocusing))
@@ -398,11 +404,11 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 	c.startExecutionTimeoutLocked(exec)
 
 	exec.FocusAreas = focuses
-	if err := c.writeTriple(ctx, entityID, wf.Phase, phasePlanning); err != nil {
+	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phasePlanning); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phasePlanning, "error", err)
 	}
-	_ = c.writeTriple(ctx, entityID, "workflow.focus_areas", focusAreasJSON(focuses))
-	_ = c.writeTriple(ctx, entityID, "workflow.planner_count", fmt.Sprintf("%d", len(focuses)))
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.focus_areas", focusAreasJSON(focuses))
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.planner_count", len(focuses))
 
 	c.logger.Info("Focus areas determined, dispatching planners",
 		"entity_id", entityID,
@@ -514,7 +520,7 @@ func (c *Component) synthesizeAndCompleteLocked(ctx context.Context, exec *coord
 	}
 	exec.terminated = true
 
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, phaseSynthesizing); err != nil {
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseSynthesizing); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseSynthesizing, "error", err)
 	}
 
@@ -544,16 +550,16 @@ func (c *Component) synthesizeAndCompleteLocked(ctx context.Context, exec *coord
 	// Write synthesis result triples.
 	// Note: workflow.plan_goal, workflow.plan_context, workflow.plan_scope have no vocabulary
 	// constants yet — these are coordinator-specific predicates.
-	_ = c.writeTriple(ctx, exec.EntityID, "workflow.plan_goal", synthesized.Goal)
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.plan_goal", synthesized.Goal)
 	if synthesized.Context != "" {
-		_ = c.writeTriple(ctx, exec.EntityID, "workflow.plan_context", synthesized.Context)
+		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.plan_context", synthesized.Context)
 	}
 	if scopeJSON, err := json.Marshal(synthesized.Scope); err == nil {
-		_ = c.writeTriple(ctx, exec.EntityID, "workflow.plan_scope", string(scopeJSON))
+		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.plan_scope", string(scopeJSON))
 	}
 
 	// Mark completed — rules handle status transition.
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, phaseCompleted); err != nil {
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseCompleted); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseCompleted, "error", err)
 	}
 
@@ -581,10 +587,10 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *coordinationExecu
 	}
 	exec.terminated = true
 
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseError, "error", err)
 	}
-	_ = c.writeTriple(ctx, exec.EntityID, wf.ErrorReason, reason)
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ErrorReason, reason)
 
 	c.errors.Add(1)
 	c.coordinationsFailed.Add(1)
@@ -1034,51 +1040,6 @@ func (c *Component) loadPrompt(configPath, defaultPrompt string) string {
 // Triple and task publishing helpers
 // ---------------------------------------------------------------------------
 
-// writeTriple sends an AddTripleRequest to graph-ingest via NATS request/reply.
-func (c *Component) writeTriple(ctx context.Context, entityID, predicate string, object any) error {
-	req := graph.AddTripleRequest{
-		Triple: message.Triple{
-			Subject:    entityID,
-			Predicate:  predicate,
-			Object:     object,
-			Source:     componentName,
-			Timestamp:  time.Now(),
-			Confidence: 1.0,
-		},
-	}
-
-	data, err := json.Marshal(req)
-	if err != nil {
-		c.logger.Warn("Failed to marshal triple request", "predicate", predicate, "error", err)
-		return fmt.Errorf("marshal triple request: %w", err)
-	}
-
-	if c.natsClient == nil {
-		return nil
-	}
-
-	respData, err := c.natsClient.Request(ctx, "graph.mutation.triple.add", data, 5*time.Second)
-	if err != nil {
-		c.logger.Warn("Triple write request failed",
-			"predicate", predicate, "entity_id", entityID, "error", err)
-		return fmt.Errorf("triple write request: %w", err)
-	}
-
-	var resp graph.AddTripleResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		c.logger.Warn("Failed to unmarshal triple response", "predicate", predicate, "error", err)
-		return fmt.Errorf("unmarshal triple response: %w", err)
-	}
-
-	if !resp.Success {
-		c.logger.Warn("Triple write rejected by graph-ingest",
-			"predicate", predicate, "entity_id", entityID, "error", resp.Error)
-		return fmt.Errorf("triple write rejected: %s", resp.Error)
-	}
-
-	return nil
-}
-
 // publishBaseMessage wraps a payload in a BaseMessage and publishes to JetStream.
 func (c *Component) publishBaseMessage(ctx context.Context, subject string, payload message.Payload) error {
 	baseMsg := message.NewBaseMessage(payload.Schema(), payload, componentName)
@@ -1161,21 +1122,6 @@ func (c *Component) getLastActivity() time.Time {
 	c.lastActivityMu.RLock()
 	defer c.lastActivityMu.RUnlock()
 	return c.lastActivity
-}
-
-func portSubject(port component.Port) string {
-	if port.Config == nil {
-		return ""
-	}
-	switch cfg := port.Config.(type) {
-	case component.NATSPort:
-		return cfg.Subject
-	case component.JetStreamPort:
-		if len(cfg.Subjects) > 0 {
-			return cfg.Subjects[0]
-		}
-	}
-	return ""
 }
 
 // unique returns unique strings from a slice.

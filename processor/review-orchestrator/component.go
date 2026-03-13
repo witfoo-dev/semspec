@@ -33,11 +33,11 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
-	"github.com/c360studio/semstreams/graph"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
@@ -81,10 +81,11 @@ const (
 
 // Component orchestrates plan, phase, and task review loops.
 type Component struct {
-	config     Config
-	natsClient *natsclient.Client
-	logger     *slog.Logger
-	platform   component.PlatformMeta
+	config       Config
+	natsClient   *natsclient.Client
+	logger       *slog.Logger
+	platform     component.PlatformMeta
+	tripleWriter *graphutil.TripleWriter
 
 	inputPorts  []component.Port
 	outputPorts []component.Port
@@ -141,6 +142,11 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		logger:     logger,
 		platform:   deps.Platform,
 		shutdown:   make(chan struct{}),
+		tripleWriter: &graphutil.TripleWriter{
+			NATSClient:    deps.NATSClient,
+			Logger:        logger,
+			ComponentName: componentName,
+		},
 	}
 
 	// Build ports from config.
@@ -204,7 +210,7 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 
 	for _, port := range c.inputPorts {
-		subject := portSubject(port)
+		subject := graphutil.PortSubject(port)
 		if subject == "" {
 			continue
 		}
@@ -366,20 +372,20 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg, reviewType
 	// Write initial entity triples.
 	// NOTE: workflow.status is NOT written here — the rule processor owns status
 	// transitions. This component writes only workflow.phase.
-	_ = c.writeTriple(ctx, executionID, wf.Type, reviewType)
-	if err := c.writeTriple(ctx, executionID, wf.Phase, "generating"); err != nil {
+	_ = c.tripleWriter.WriteTriple(ctx, executionID, wf.Type, reviewType)
+	if err := c.tripleWriter.WriteTriple(ctx, executionID, wf.Phase, "generating"); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", "generating", "error", err)
 	}
-	_ = c.writeTriple(ctx, executionID, wf.Slug, trigger.Slug)
-	_ = c.writeTriple(ctx, executionID, wf.Title, trigger.Title)
-	_ = c.writeTriple(ctx, executionID, wf.Description, trigger.Description)
-	_ = c.writeTriple(ctx, executionID, "workflow.project_id", trigger.ProjectID)
-	_ = c.writeTriple(ctx, executionID, wf.Iteration, "0")
-	_ = c.writeTriple(ctx, executionID, wf.MaxIterations, fmt.Sprintf("%d", c.config.MaxIterations))
-	_ = c.writeTriple(ctx, executionID, "workflow.execution_id", executionID)
-	_ = c.writeTriple(ctx, executionID, wf.TraceID, trigger.TraceID)
+	_ = c.tripleWriter.WriteTriple(ctx, executionID, wf.Slug, trigger.Slug)
+	_ = c.tripleWriter.WriteTriple(ctx, executionID, wf.Title, trigger.Title)
+	_ = c.tripleWriter.WriteTriple(ctx, executionID, wf.Description, trigger.Description)
+	_ = c.tripleWriter.WriteTriple(ctx, executionID, wf.ProjectID, trigger.ProjectID)
+	_ = c.tripleWriter.WriteTriple(ctx, executionID, wf.Iteration, 0)
+	_ = c.tripleWriter.WriteTriple(ctx, executionID, wf.MaxIterations, c.config.MaxIterations)
+	_ = c.tripleWriter.WriteTriple(ctx, executionID, wf.ExecutionID, executionID)
+	_ = c.tripleWriter.WriteTriple(ctx, executionID, wf.TraceID, trigger.TraceID)
 	if trigger.Prompt != "" {
-		_ = c.writeTriple(ctx, executionID, wf.Prompt, trigger.Prompt)
+		_ = c.tripleWriter.WriteTriple(ctx, executionID, wf.Prompt, trigger.Prompt)
 	}
 
 	// Publish initial entity snapshot for graph observability.
@@ -446,6 +452,10 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
 
+	if exec.terminated {
+		return
+	}
+
 	c.logger.Info("Loop completion received",
 		"review_type", exec.ReviewType,
 		"slug", exec.Slug,
@@ -488,9 +498,9 @@ func (c *Component) handleGeneratorCompleteLocked(ctx context.Context, event *ag
 
 	// Write content triples.
 	if len(content) > 0 {
-		_ = c.writeTriple(ctx, exec.EntityID, wf.PlanContent, string(content))
+		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.PlanContent, string(content))
 	}
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, "planned"); err != nil {
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, "planned"); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", "planned", "error", err)
 	}
 
@@ -556,12 +566,12 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 	exec.ReviewerLLMRequestIDs = reviewerLLMRequestIDs
 
 	// Write verdict triples.
-	_ = c.writeTriple(ctx, exec.EntityID, wf.Verdict, verdict)
-	_ = c.writeTriple(ctx, exec.EntityID, wf.Summary, summary)
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Verdict, verdict)
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Summary, summary)
 	if len(findings) > 0 {
-		_ = c.writeTriple(ctx, exec.EntityID, wf.Findings, string(findings))
+		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Findings, string(findings))
 	}
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, "reviewed"); err != nil {
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, "reviewed"); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", "reviewed", "error", err)
 	}
 
@@ -593,23 +603,23 @@ func (c *Component) parseReviewerResult(result string, exec *reviewExecution) (v
 	case reviewTypePlanReview, reviewTypePhaseReview:
 		var r payloads.ReviewResult
 		if err := json.Unmarshal([]byte(result), &r); err != nil {
-			c.logger.Warn("Failed to parse review result, defaulting to approved",
+			c.logger.Warn("Failed to parse review result, defaulting to rejected for safety",
 				"slug", exec.Slug, "error", err)
-			return "approved", "", nil, "", nil
+			return "rejected", "parse failure — could not read reviewer response", nil, "", nil
 		}
 		return r.Verdict, r.Summary, r.Findings, r.FormattedFindings, r.LLMRequestIDs
 
 	case reviewTypeTaskReview:
 		var r payloads.TaskReviewResult
 		if err := json.Unmarshal([]byte(result), &r); err != nil {
-			c.logger.Warn("Failed to parse task review result, defaulting to approved",
+			c.logger.Warn("Failed to parse task review result, defaulting to rejected for safety",
 				"slug", exec.Slug, "error", err)
-			return "approved", "", nil, "", nil
+			return "rejected", "parse failure — could not read reviewer response", nil, "", nil
 		}
 		return r.Verdict, r.Summary, r.Findings, r.FormattedFindings, r.LLMRequestIDs
 
 	default:
-		return "approved", "", nil, "", nil
+		return "rejected", "unknown review type — cannot approve", nil, "", nil
 	}
 }
 
@@ -621,7 +631,12 @@ func (c *Component) parseReviewerResult(result string, exec *reviewExecution) (v
 // Only writes workflow.phase — the rule processor owns workflow.status.
 // Caller must hold exec.mu.
 func (c *Component) markApprovedLocked(ctx context.Context, exec *reviewExecution) {
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, "approved"); err != nil {
+	if exec.terminated {
+		return
+	}
+	exec.terminated = true
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, "approved"); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", "approved", "error", err)
 	}
 
@@ -642,7 +657,12 @@ func (c *Component) markApprovedLocked(ctx context.Context, exec *reviewExecutio
 // Only writes workflow.phase — the rule processor owns workflow.status.
 // Caller must hold exec.mu.
 func (c *Component) markEscalatedLocked(ctx context.Context, exec *reviewExecution) {
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, "escalated"); err != nil {
+	if exec.terminated {
+		return
+	}
+	exec.terminated = true
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, "escalated"); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", "escalated", "error", err)
 	}
 
@@ -664,10 +684,15 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *reviewExecuti
 // Only writes workflow.phase — the rule processor owns workflow.status.
 // Caller must hold exec.mu.
 func (c *Component) markErrorLocked(ctx context.Context, exec *reviewExecution, reason string) {
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, "error"); err != nil {
+	if exec.terminated {
+		return
+	}
+	exec.terminated = true
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, "error"); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", "error", "error", err)
 	}
-	_ = c.writeTriple(ctx, exec.EntityID, wf.ErrorReason, reason)
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ErrorReason, reason)
 
 	c.errors.Add(1)
 	c.reviewsCompleted.Add(1)
@@ -703,8 +728,8 @@ func (c *Component) startRevision(ctx context.Context, exec *reviewExecution) {
 	exec.ReviewerLLMRequestIDs = nil
 	// Keep Summary and FormattedFindings — the generator prompt builder uses them.
 
-	_ = c.writeTriple(ctx, exec.EntityID, wf.Iteration, fmt.Sprintf("%d", exec.Iteration))
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, "generating"); err != nil {
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Iteration, exec.Iteration)
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, "generating"); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", "generating", "error", err)
 	}
 
@@ -942,7 +967,7 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *reviewExec
 	}
 	c.publishTask(ctx, "agent.task.reviewer", task)
 
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, "reviewing"); err != nil {
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, "reviewing"); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", "reviewing", "error", err)
 	}
 
@@ -958,58 +983,6 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *reviewExec
 // ---------------------------------------------------------------------------
 // Triple and task publishing helpers
 // ---------------------------------------------------------------------------
-
-// writeTriple sends an AddTripleRequest to graph-ingest via NATS request/reply.
-// graph-ingest handles CAS writes to ENTITY_STATES KV and returns KVRevision.
-// This is the canonical way to record workflow state — no typed KV structs,
-// no reactive engine state buckets.
-func (c *Component) writeTriple(ctx context.Context, entityID, predicate string, object any) error {
-	req := graph.AddTripleRequest{
-		Triple: message.Triple{
-			Subject:    entityID,
-			Predicate:  predicate,
-			Object:     object,
-			Source:     componentName,
-			Timestamp:  time.Now(),
-			Confidence: 1.0,
-		},
-	}
-
-	data, err := json.Marshal(req)
-	if err != nil {
-		c.logger.Warn("Failed to marshal triple request", "predicate", predicate, "error", err)
-		return fmt.Errorf("marshal triple request: %w", err)
-	}
-
-	if c.natsClient == nil {
-		return nil
-	}
-
-	respData, err := c.natsClient.Request(ctx, "graph.mutation.triple.add", data, 5*time.Second)
-	if err != nil {
-		c.logger.Warn("Triple write request failed",
-			"predicate", predicate,
-			"entity_id", entityID,
-			"error", err)
-		return fmt.Errorf("triple write request: %w", err)
-	}
-
-	var resp graph.AddTripleResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		c.logger.Warn("Failed to unmarshal triple response", "predicate", predicate, "error", err)
-		return fmt.Errorf("unmarshal triple response: %w", err)
-	}
-
-	if !resp.Success {
-		c.logger.Warn("Triple write rejected by graph-ingest",
-			"predicate", predicate,
-			"entity_id", entityID,
-			"error", resp.Error)
-		return fmt.Errorf("triple write rejected: %s", resp.Error)
-	}
-
-	return nil
-}
 
 // publishBaseMessage wraps a payload in a BaseMessage and publishes it to a
 // JetStream stream via PublishToStream (delivery-acknowledged, trace-propagated).
@@ -1062,22 +1035,6 @@ func (c *Component) getLastActivity() time.Time {
 	c.lastActivityMu.RLock()
 	defer c.lastActivityMu.RUnlock()
 	return c.lastActivity
-}
-
-// portSubject extracts the subject string from a port's config.
-func portSubject(port component.Port) string {
-	if port.Config == nil {
-		return ""
-	}
-	switch cfg := port.Config.(type) {
-	case component.NATSPort:
-		return cfg.Subject
-	case component.JetStreamPort:
-		if len(cfg.Subjects) > 0 {
-			return cfg.Subjects[0]
-		}
-	}
-	return ""
 }
 
 // ---------------------------------------------------------------------------

@@ -25,10 +25,10 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/cancellation"
 	"github.com/c360studio/semspec/workflow/cascade"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semstreams/component"
-	"github.com/c360studio/semstreams/graph"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
@@ -36,11 +36,12 @@ import (
 
 // Component implements the change-proposal-handler processor.
 type Component struct {
-	name       string
-	config     Config
-	natsClient *natsclient.Client
-	logger     *slog.Logger
-	repoRoot   string
+	name         string
+	config       Config
+	natsClient   *natsclient.Client
+	logger       *slog.Logger
+	repoRoot     string
+	tripleWriter *graphutil.TripleWriter
 
 	// JetStream consumer
 	consumer jetstream.Consumer
@@ -100,12 +101,19 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		}
 	}
 
+	const name = "change-proposal-handler"
+	logger := deps.GetLogger()
 	return &Component{
-		name:       "change-proposal-handler",
+		name:       name,
 		config:     config,
 		natsClient: deps.NATSClient,
-		logger:     deps.GetLogger(),
+		logger:     logger,
 		repoRoot:   repoRoot,
+		tripleWriter: &graphutil.TripleWriter{
+			NATSClient:    deps.NATSClient,
+			Logger:        logger,
+			ComponentName: name,
+		},
 	}, nil
 }
 
@@ -301,19 +309,20 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 
 	// Write cascade result to graph as entity triples.
 	entityID := fmt.Sprintf("local.semspec.workflow.cascade.execution.%s-%s", req.Slug, req.ProposalID)
-	if err := c.writeTriple(ctx, entityID, wf.Phase, "cascaded"); err != nil {
+	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, "cascaded"); err != nil {
 		c.logger.Error("Failed to write cascade phase triple", "entity_id", entityID, "error", err)
 	}
-	_ = c.writeTriple(ctx, entityID, wf.Type, "cascade")
-	_ = c.writeTriple(ctx, entityID, wf.Slug, req.Slug)
-	_ = c.writeTriple(ctx, entityID, wf.TraceID, req.TraceID)
-	_ = c.writeTriple(ctx, entityID, wf.CascadeAffectedRequirements, len(result.AffectedRequirementIDs))
-	_ = c.writeTriple(ctx, entityID, wf.CascadeAffectedScenarios, len(result.AffectedScenarioIDs))
-	_ = c.writeTriple(ctx, entityID, wf.CascadeTasksDirtied, result.TasksDirtied)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "cascade")
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Slug, req.Slug)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, req.TraceID)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CascadeAffectedRequirements, len(result.AffectedRequirementIDs))
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CascadeAffectedScenarios, len(result.AffectedScenarioIDs))
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CascadeTasksDirtied, result.TasksDirtied)
 
 	// Publish full Graphable entity to graph-ingest for relationship tracking.
 	entity := NewCascadeEntity(req.ProposalID, req.Slug, req.TraceID,
-		len(result.AffectedRequirementIDs), len(result.AffectedScenarioIDs), result.TasksDirtied)
+		len(result.AffectedRequirementIDs), len(result.AffectedScenarioIDs), result.TasksDirtied).
+		WithPhase("cascaded")
 	c.publishEntity(ctx, entity)
 
 	// Publish the accepted event to JetStream so downstream consumers can react.
@@ -522,52 +531,3 @@ func (c *Component) getLastActivity() time.Time {
 	return c.lastActivity
 }
 
-// writeTriple writes a single triple to the graph via request/reply.
-// Returns an error on failure; callers should error-check critical triples (e.g., phase).
-func (c *Component) writeTriple(ctx context.Context, entityID, predicate string, object any) error {
-	req := graph.AddTripleRequest{
-		Triple: message.Triple{
-			Subject:    entityID,
-			Predicate:  predicate,
-			Object:     object,
-			Source:     "change-proposal-handler",
-			Timestamp:  time.Now(),
-			Confidence: 1.0,
-		},
-	}
-
-	data, err := json.Marshal(req)
-	if err != nil {
-		c.logger.Warn("Failed to marshal triple request", "predicate", predicate, "error", err)
-		return fmt.Errorf("marshal triple request: %w", err)
-	}
-
-	if c.natsClient == nil {
-		return nil
-	}
-
-	respData, err := c.natsClient.Request(ctx, "graph.mutation.triple.add", data, 5*time.Second)
-	if err != nil {
-		c.logger.Warn("Triple write request failed",
-			"predicate", predicate,
-			"entity_id", entityID,
-			"error", err)
-		return fmt.Errorf("triple write request: %w", err)
-	}
-
-	var resp graph.AddTripleResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		c.logger.Warn("Failed to unmarshal triple response", "predicate", predicate, "error", err)
-		return fmt.Errorf("unmarshal triple response: %w", err)
-	}
-
-	if !resp.Success {
-		c.logger.Warn("Triple write rejected by graph-ingest",
-			"predicate", predicate,
-			"entity_id", entityID,
-			"error", resp.Error)
-		return fmt.Errorf("triple rejected: %s", resp.Error)
-	}
-
-	return nil
-}

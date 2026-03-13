@@ -28,10 +28,10 @@ import (
 
 	"github.com/c360studio/semspec/tools/decompose"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
-	"github.com/c360studio/semstreams/graph"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
@@ -63,10 +63,11 @@ const (
 
 // Component orchestrates per-scenario execution.
 type Component struct {
-	config     Config
-	natsClient *natsclient.Client
-	logger     *slog.Logger
-	platform   component.PlatformMeta
+	config       Config
+	natsClient   *natsclient.Client
+	logger       *slog.Logger
+	platform     component.PlatformMeta
+	tripleWriter *graphutil.TripleWriter
 
 	inputPorts  []component.Port
 	outputPorts []component.Port
@@ -118,6 +119,11 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		logger:     logger,
 		platform:   deps.Platform,
 		shutdown:   make(chan struct{}),
+		tripleWriter: &graphutil.TripleWriter{
+			NATSClient:    deps.NATSClient,
+			Logger:        logger,
+			ComponentName: componentName,
+		},
 	}
 
 	for _, p := range cfg.Ports.Inputs {
@@ -176,7 +182,7 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 
 	for _, port := range c.inputPorts {
-		subject := portSubject(port)
+		subject := graphutil.PortSubject(port)
 		if subject == "" {
 			continue
 		}
@@ -318,14 +324,14 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 	}
 
 	// Write initial entity triples.
-	_ = c.writeTriple(ctx, entityID, wf.Type, "scenario-execution")
-	if err := c.writeTriple(ctx, entityID, wf.Phase, phaseDecomposing); err != nil {
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "scenario-execution")
+	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phaseDecomposing); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseDecomposing, "error", err)
 	}
-	_ = c.writeTriple(ctx, entityID, wf.Slug, trigger.Slug)
-	_ = c.writeTriple(ctx, entityID, "workflow.scenario_id", trigger.ScenarioID)
-	_ = c.writeTriple(ctx, entityID, "workflow.project_id", trigger.ProjectID)
-	_ = c.writeTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Slug, trigger.Slug)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.ScenarioID, trigger.ScenarioID)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.ProjectID, trigger.ProjectID)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
 
 	// Publish initial entity snapshot for graph observability.
 	c.publishEntity(ctx, NewScenarioExecutionEntity(exec).WithPhase(phaseDecomposing))
@@ -442,10 +448,10 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 		exec.NodeIndex[dagResponse.DAG.Nodes[i].ID] = &dagResponse.DAG.Nodes[i]
 	}
 
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, phaseExecuting); err != nil {
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseExecuting); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseExecuting, "error", err)
 	}
-	_ = c.writeTriple(ctx, exec.EntityID, wf.NodeCount, fmt.Sprintf("%d", len(sorted)))
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.NodeCount, len(sorted))
 
 	c.logger.Info("Decomposition complete, starting serial execution",
 		"entity_id", exec.EntityID,
@@ -472,7 +478,7 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 	}
 
 	// TODO: no vocabulary constant for per-node status predicates; kept as formatted string.
-	_ = c.writeTriple(ctx, exec.EntityID, fmt.Sprintf("workflow.node.%s.status", nodeID), "completed")
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, fmt.Sprintf("workflow.node.%s.status", nodeID), "completed")
 
 	c.logger.Info("Node completed",
 		"entity_id", exec.EntityID,
@@ -555,7 +561,7 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *scenarioEx
 	}
 
 	// TODO: no vocabulary constant for per-node status predicates; kept as formatted string.
-	_ = c.writeTriple(ctx, exec.EntityID, fmt.Sprintf("workflow.node.%s.status", nodeID), "running")
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, fmt.Sprintf("workflow.node.%s.status", nodeID), "running")
 
 	if err := c.publishTask(ctx, subject, task); err != nil {
 		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch node %q failed: %v", nodeID, err))
@@ -583,7 +589,7 @@ func (c *Component) markCompletedLocked(ctx context.Context, exec *scenarioExecu
 	}
 	exec.terminated = true
 
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, phaseCompleted); err != nil {
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseCompleted); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseCompleted, "error", err)
 	}
 
@@ -608,10 +614,10 @@ func (c *Component) markFailedLocked(ctx context.Context, exec *scenarioExecutio
 	}
 	exec.terminated = true
 
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, phaseFailed); err != nil {
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseFailed); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseFailed, "error", err)
 	}
-	_ = c.writeTriple(ctx, exec.EntityID, wf.FailureReason, reason)
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.FailureReason, reason)
 
 	c.scenariosFailed.Add(1)
 
@@ -634,10 +640,10 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *scenarioExecution
 	}
 	exec.terminated = true
 
-	if err := c.writeTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseError, "error", err)
 	}
-	_ = c.writeTriple(ctx, exec.EntityID, wf.ErrorReason, reason)
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ErrorReason, reason)
 
 	c.errors.Add(1)
 
@@ -694,51 +700,6 @@ func (c *Component) startExecutionTimeoutLocked(exec *scenarioExecution) {
 // Triple and task publishing helpers
 // ---------------------------------------------------------------------------
 
-// writeTriple sends an AddTripleRequest to graph-ingest via NATS request/reply.
-func (c *Component) writeTriple(ctx context.Context, entityID, predicate string, object any) error {
-	req := graph.AddTripleRequest{
-		Triple: message.Triple{
-			Subject:    entityID,
-			Predicate:  predicate,
-			Object:     object,
-			Source:     componentName,
-			Timestamp:  time.Now(),
-			Confidence: 1.0,
-		},
-	}
-
-	data, err := json.Marshal(req)
-	if err != nil {
-		c.logger.Warn("Failed to marshal triple request", "predicate", predicate, "error", err)
-		return fmt.Errorf("marshal triple request: %w", err)
-	}
-
-	if c.natsClient == nil {
-		return nil
-	}
-
-	respData, err := c.natsClient.Request(ctx, "graph.mutation.triple.add", data, 5*time.Second)
-	if err != nil {
-		c.logger.Warn("Triple write request failed",
-			"predicate", predicate, "entity_id", entityID, "error", err)
-		return fmt.Errorf("triple write request: %w", err)
-	}
-
-	var resp graph.AddTripleResponse
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		c.logger.Warn("Failed to unmarshal triple response", "predicate", predicate, "error", err)
-		return fmt.Errorf("unmarshal triple response: %w", err)
-	}
-
-	if !resp.Success {
-		c.logger.Warn("Triple write rejected by graph-ingest",
-			"predicate", predicate, "entity_id", entityID, "error", resp.Error)
-		return fmt.Errorf("triple write rejected: %s", resp.Error)
-	}
-
-	return nil
-}
-
 // publishTask wraps a TaskMessage in a BaseMessage and publishes to JetStream.
 // Returns an error for fail-fast dispatch.
 func (c *Component) publishTask(ctx context.Context, subject string, task *agentic.TaskMessage) error {
@@ -783,21 +744,6 @@ func normalizeRole(raw string) (string, string) {
 	default:
 		return agentic.RoleGeneral, "agent.task.general"
 	}
-}
-
-func portSubject(port component.Port) string {
-	if port.Config == nil {
-		return ""
-	}
-	switch cfg := port.Config.(type) {
-	case component.NATSPort:
-		return cfg.Subject
-	case component.JetStreamPort:
-		if len(cfg.Subjects) > 0 {
-			return cfg.Subjects[0]
-		}
-	}
-	return ""
 }
 
 // ---------------------------------------------------------------------------

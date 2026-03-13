@@ -10,6 +10,7 @@ import (
 
 	_ "github.com/c360studio/semspec/tools/decompose" // ensure decompose package is imported
 	"github.com/c360studio/semspec/tools/decompose"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -1683,7 +1684,7 @@ func TestStartExecutionTimeoutLocked_StopPreventsTimerFiring(t *testing.T) {
 
 func TestPortSubject_NilConfig_ReturnsEmpty(t *testing.T) {
 	port := component.Port{Config: nil}
-	got := portSubject(port)
+	got := graphutil.PortSubject(port)
 	if got != "" {
 		t.Errorf("portSubject with nil Config = %q, want empty", got)
 	}

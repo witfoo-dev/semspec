@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/component"
 )
 
@@ -620,9 +621,9 @@ func TestPortSubject_NATSPort(t *testing.T) {
 	port := component.Port{
 		Config: component.NATSPort{Subject: "some.subject"},
 	}
-	got := portSubject(port)
+	got := graphutil.PortSubject(port)
 	if got != "some.subject" {
-		t.Errorf("portSubject(NATSPort): want %q, got %q", "some.subject", got)
+		t.Errorf("graphutil.PortSubject(NATSPort): want %q, got %q", "some.subject", got)
 	}
 }
 
@@ -630,17 +631,17 @@ func TestPortSubject_JetStreamPort(t *testing.T) {
 	port := component.Port{
 		Config: component.JetStreamPort{Subjects: []string{"workflow.trigger.task-execution-loop"}},
 	}
-	got := portSubject(port)
+	got := graphutil.PortSubject(port)
 	if got != "workflow.trigger.task-execution-loop" {
-		t.Errorf("portSubject(JetStreamPort): want %q, got %q", "workflow.trigger.task-execution-loop", got)
+		t.Errorf("graphutil.PortSubject(JetStreamPort): want %q, got %q", "workflow.trigger.task-execution-loop", got)
 	}
 }
 
 func TestPortSubject_NilConfig(t *testing.T) {
 	port := component.Port{Config: nil}
-	got := portSubject(port)
+	got := graphutil.PortSubject(port)
 	if got != "" {
-		t.Errorf("portSubject(nil config): want empty string, got %q", got)
+		t.Errorf("graphutil.PortSubject(nil config): want empty string, got %q", got)
 	}
 }
 
@@ -648,9 +649,9 @@ func TestPortSubject_JetStreamPort_EmptySubjects(t *testing.T) {
 	port := component.Port{
 		Config: component.JetStreamPort{Subjects: []string{}},
 	}
-	got := portSubject(port)
+	got := graphutil.PortSubject(port)
 	if got != "" {
-		t.Errorf("portSubject(JetStreamPort, empty subjects): want empty string, got %q", got)
+		t.Errorf("graphutil.PortSubject(JetStreamPort, empty subjects): want empty string, got %q", got)
 	}
 }
 

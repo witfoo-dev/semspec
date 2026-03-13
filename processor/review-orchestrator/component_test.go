@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/component"
 	"github.com/nats-io/nats.go"
 )
@@ -951,13 +952,16 @@ func TestParseReviewerResult_PlanReview_Approved(t *testing.T) {
 	}
 }
 
-func TestParseReviewerResult_PlanReview_InvalidJSON_DefaultsToApproved(t *testing.T) {
+func TestParseReviewerResult_PlanReview_InvalidJSON_DefaultsToRejected(t *testing.T) {
 	comp := newTestComponent(t)
 	exec := newTestExecution("e", reviewTypePlanReview)
 
-	verdict, _, _, _, _ := comp.parseReviewerResult("not json", exec)
-	if verdict != "approved" {
-		t.Errorf("verdict = %q, want approved as safe default on parse failure", verdict)
+	verdict, summary, _, _, _ := comp.parseReviewerResult("not json", exec)
+	if verdict != "rejected" {
+		t.Errorf("verdict = %q, want rejected as safe default on parse failure", verdict)
+	}
+	if summary == "" {
+		t.Error("summary should contain parse failure reason")
 	}
 }
 
@@ -994,13 +998,13 @@ func TestParseReviewerResult_PhaseReview_SharesReviewResultType(t *testing.T) {
 	}
 }
 
-func TestParseReviewerResult_UnknownType_DefaultsToApproved(t *testing.T) {
+func TestParseReviewerResult_UnknownType_DefaultsToRejected(t *testing.T) {
 	comp := newTestComponent(t)
 	exec := newTestExecution("e", "unknown-type")
 
 	verdict, _, _, _, _ := comp.parseReviewerResult(`{"verdict": "needs_changes"}`, exec)
-	if verdict != "approved" {
-		t.Errorf("unknown review type: verdict = %q, want approved as default", verdict)
+	if verdict != "rejected" {
+		t.Errorf("unknown review type: verdict = %q, want rejected as safe default", verdict)
 	}
 }
 
@@ -1153,8 +1157,8 @@ func TestBuildGeneratorPayload_TaskReview_UsesTaskGeneratorAsync(t *testing.T) {
 
 func TestPortSubject_NilConfig(t *testing.T) {
 	p := component.Port{Config: nil}
-	if got := portSubject(p); got != "" {
-		t.Errorf("portSubject(nil config) = %q, want empty", got)
+	if got := graphutil.PortSubject(p); got != "" {
+		t.Errorf("graphutil.PortSubject(nil config) = %q, want empty", got)
 	}
 }
 
@@ -1162,9 +1166,9 @@ func TestPortSubject_NATSPort(t *testing.T) {
 	p := component.Port{
 		Config: component.NATSPort{Subject: "workflow.trigger.plan-review-loop"},
 	}
-	got := portSubject(p)
+	got := graphutil.PortSubject(p)
 	if got != "workflow.trigger.plan-review-loop" {
-		t.Errorf("portSubject(NATSPort) = %q, want workflow.trigger.plan-review-loop", got)
+		t.Errorf("graphutil.PortSubject(NATSPort) = %q, want workflow.trigger.plan-review-loop", got)
 	}
 }
 
@@ -1174,9 +1178,9 @@ func TestPortSubject_JetStreamPort_WithSubjects(t *testing.T) {
 			Subjects: []string{"agentic.loop_completed.v1", "other"},
 		},
 	}
-	got := portSubject(p)
+	got := graphutil.PortSubject(p)
 	if got != "agentic.loop_completed.v1" {
-		t.Errorf("portSubject(JetStreamPort) = %q, want agentic.loop_completed.v1", got)
+		t.Errorf("graphutil.PortSubject(JetStreamPort) = %q, want agentic.loop_completed.v1", got)
 	}
 }
 
@@ -1184,9 +1188,9 @@ func TestPortSubject_JetStreamPort_EmptySubjects(t *testing.T) {
 	p := component.Port{
 		Config: component.JetStreamPort{Subjects: []string{}},
 	}
-	got := portSubject(p)
+	got := graphutil.PortSubject(p)
 	if got != "" {
-		t.Errorf("portSubject(JetStreamPort empty subjects) = %q, want empty", got)
+		t.Errorf("graphutil.PortSubject(JetStreamPort empty subjects) = %q, want empty", got)
 	}
 }
 

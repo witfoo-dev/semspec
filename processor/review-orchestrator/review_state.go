@@ -18,6 +18,11 @@ import (
 type reviewExecution struct {
 	mu sync.Mutex
 
+	// terminated is set to true when the execution reaches a terminal state
+	// (approved, escalated, or error). Guards against double-terminal-writes
+	// when timeout and completion events race.
+	terminated bool
+
 	// EntityID is the canonical graph entity ID for this review:
 	// semspec.workflow.<review-type>.<slug>
 	EntityID string

@@ -10,7 +10,7 @@
   },
   "conditions": [
     {
-      "field": "workflow.phase",
+      "field": "workflow.execution.phase",
       "operator": "eq",
       "value": "approved"
     }
@@ -26,7 +26,7 @@
     },
     {
       "type": "update_triple",
-      "predicate": "workflow.status",
+      "predicate": "workflow.execution.status",
       "object": "completed"
     }
   ]

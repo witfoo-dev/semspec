@@ -29,6 +29,12 @@ const (
 
 	// Description is a longer description of this execution.
 	Description = "workflow.execution.description"
+
+	// ProjectID links the execution to its project identifier string.
+	ProjectID = "workflow.execution.project_id"
+
+	// ExecutionID is a self-referential execution identifier (same as entity ID).
+	ExecutionID = "workflow.execution.execution_id"
 )
 
 // Execution tracking predicates.
@@ -73,6 +79,9 @@ const (
 // Task-execution-specific predicates.
 // These predicates track the inputs, outputs, and feedback for task execution loops.
 const (
+	// TaskID identifies the specific task within the plan being executed.
+	TaskID = "workflow.task.task_id"
+
 	// FilesModified is a JSON array of file paths modified during task execution.
 	FilesModified = "workflow.task.files_modified"
 
@@ -91,6 +100,9 @@ const (
 // Scenario-execution-specific predicates.
 // These predicates describe the structure and outcome of scenario execution.
 const (
+	// ScenarioID identifies the specific scenario being executed.
+	ScenarioID = "workflow.scenario.scenario_id"
+
 	// NodeCount is the number of DAG nodes in this scenario's execution plan.
 	NodeCount = "workflow.scenario.node_count"
 
@@ -173,6 +185,16 @@ func registerExecutionPredicates() {
 		vocabulary.WithDescription("Longer description of this execution"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"description"))
+
+	vocabulary.Register(ProjectID,
+		vocabulary.WithDescription("Project identifier for this execution"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"projectID"))
+
+	vocabulary.Register(ExecutionID,
+		vocabulary.WithDescription("Self-referential execution identifier"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"executionID"))
 }
 
 func registerTrackingPredicates() {
@@ -230,6 +252,11 @@ func registerReviewPredicates() {
 }
 
 func registerTaskPredicates() {
+	vocabulary.Register(TaskID,
+		vocabulary.WithDescription("Task identifier within the plan"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"taskID"))
+
 	vocabulary.Register(FilesModified,
 		vocabulary.WithDescription("JSON array of file paths modified during task execution"),
 		vocabulary.WithDataType("string"),
@@ -252,6 +279,11 @@ func registerTaskPredicates() {
 }
 
 func registerScenarioPredicates() {
+	vocabulary.Register(ScenarioID,
+		vocabulary.WithDescription("Scenario identifier being executed"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scenarioID"))
+
 	vocabulary.Register(NodeCount,
 		vocabulary.WithDescription("Number of DAG nodes in this scenario's execution plan"),
 		vocabulary.WithDataType("int"),
