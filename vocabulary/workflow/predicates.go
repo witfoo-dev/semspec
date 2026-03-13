@@ -112,6 +112,30 @@ const (
 	FailureReason = "workflow.scenario.failure_reason"
 )
 
+// DAG node predicates.
+// These predicates describe individual nodes within a scenario's execution DAG.
+// DAG nodes are ephemeral graph entities (local.semspec.workflow.dag-node.node.*).
+const (
+	// DAGNodeID is the node identifier within the DAG.
+	DAGNodeID = "workflow.dag.node_id"
+
+	// DAGNodePrompt is the execution instruction for this node.
+	DAGNodePrompt = "workflow.dag.prompt"
+
+	// DAGNodeRole is the agent role assigned to execute this node.
+	DAGNodeRole = "workflow.dag.role"
+
+	// DAGNodeStatus is the execution status of this node.
+	// Values: "pending", "executing", "completed", "failed"
+	DAGNodeStatus = "workflow.dag.status"
+
+	// DAGNodeDependsOn links to a prerequisite DAG node entity.
+	DAGNodeDependsOn = "workflow.dag.depends_on"
+
+	// DAGNodeFileScope is the JSON array of file paths/globs this node may touch.
+	DAGNodeFileScope = "workflow.dag.file_scope"
+)
+
 // Cascade-specific predicates.
 // These predicates record impact metrics produced by ChangeProposal cascade logic.
 const (
@@ -153,6 +177,7 @@ func init() {
 	registerReviewPredicates()
 	registerTaskPredicates()
 	registerScenarioPredicates()
+	registerDAGNodePredicates()
 	registerCascadePredicates()
 	registerRelationPredicates()
 }
@@ -295,6 +320,38 @@ func registerScenarioPredicates() {
 		vocabulary.WithDescription("Explanation of why a scenario execution failed"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"failureReason"))
+}
+
+func registerDAGNodePredicates() {
+	vocabulary.Register(DAGNodeID,
+		vocabulary.WithDescription("Node identifier within the execution DAG"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"dagNodeID"))
+
+	vocabulary.Register(DAGNodePrompt,
+		vocabulary.WithDescription("Execution instruction for this DAG node"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"dagNodePrompt"))
+
+	vocabulary.Register(DAGNodeRole,
+		vocabulary.WithDescription("Agent role assigned to execute this DAG node"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"dagNodeRole"))
+
+	vocabulary.Register(DAGNodeStatus,
+		vocabulary.WithDescription("Execution status: pending, executing, completed, failed"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"dagNodeStatus"))
+
+	vocabulary.Register(DAGNodeDependsOn,
+		vocabulary.WithDescription("Link to prerequisite DAG node entity"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"dagNodeDependsOn"))
+
+	vocabulary.Register(DAGNodeFileScope,
+		vocabulary.WithDescription("JSON array of file paths/globs this node may touch"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"dagNodeFileScope"))
 }
 
 func registerCascadePredicates() {

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/vocabulary/semspec"
+	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/message"
 	"github.com/google/uuid"
@@ -248,6 +250,11 @@ func (c *Component) publishRequirementEntity(ctx context.Context, slug string, r
 		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.RequirementDescription, Object: req.Description})
 	}
 
+	for _, depID := range req.DependsOn {
+		depEntityID := workflow.RequirementEntityID(depID)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.RequirementDependsOn, Object: depEntityID})
+	}
+
 	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.RequirementEntityType, entityID, triples))
 }
 
@@ -306,6 +313,34 @@ func (c *Component) publishChangeProposalEntity(ctx context.Context, slug string
 	}
 
 	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.ChangeProposalEntityType, entityID, triples))
+}
+
+// publishDAGNodeEntity publishes a DAG execution node as a graph entity.
+func (c *Component) publishDAGNodeEntity(ctx context.Context, executionID string, node *decompose.TaskNode) error {
+	entityID := workflow.DAGNodeEntityID(executionID, node.ID)
+	execEntityID := fmt.Sprintf("local.semspec.workflow.scenario-execution.execution.%s", executionID)
+
+	triples := []message.Triple{
+		{Subject: entityID, Predicate: wf.DAGNodeID, Object: node.ID},
+		{Subject: entityID, Predicate: wf.DAGNodePrompt, Object: node.Prompt},
+		{Subject: entityID, Predicate: wf.DAGNodeRole, Object: node.Role},
+		{Subject: entityID, Predicate: wf.DAGNodeStatus, Object: "pending"},
+		{Subject: entityID, Predicate: wf.RelScenario, Object: execEntityID},
+	}
+
+	// File scope as JSON array
+	if len(node.FileScope) > 0 {
+		scopeJSON, _ := json.Marshal(node.FileScope)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.DAGNodeFileScope, Object: string(scopeJSON)})
+	}
+
+	// Dependency edges to sibling DAG nodes
+	for _, depID := range node.DependsOn {
+		depEntityID := workflow.DAGNodeEntityID(executionID, depID)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.DAGNodeDependsOn, Object: depEntityID})
+	}
+
+	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.DAGNodeEntityType, entityID, triples))
 }
 
 // truncateForTitle truncates a string for use as a DCTitle predicate value.

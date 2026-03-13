@@ -641,6 +641,11 @@ const (
 
 	// RequirementSupersededBy links to the requirement that supersedes this one.
 	RequirementSupersededBy = "semspec.requirement.superseded_by"
+
+	// RequirementDependsOn links to a prerequisite requirement entity.
+	// Requirements form a DAG — a requirement is only ready for execution
+	// when all of its dependencies have their scenarios passing.
+	RequirementDependsOn = "semspec.requirement.depends_on"
 )
 
 // Scenario predicates define attributes for behavioral contracts.
@@ -1872,6 +1877,11 @@ func registerRequirementPredicates() {
 		vocabulary.WithDescription("Link to the requirement that supersedes this one"),
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(Namespace+"requirementSupersededBy"))
+
+	vocabulary.Register(RequirementDependsOn,
+		vocabulary.WithDescription("Link to prerequisite requirement entity (DAG edge)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"requirementDependsOn"))
 
 	vocabulary.Register(TaskScenario,
 		vocabulary.WithDescription("Link to scenarios this task satisfies (SATISFIES edge)"),

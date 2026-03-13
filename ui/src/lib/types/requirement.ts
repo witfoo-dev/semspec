@@ -31,6 +31,7 @@ export interface Requirement {
 	title: string;
 	description: string;
 	status: RequirementStatus;
+	depends_on?: string[];
 	created_at: string;
 	updated_at: string;
 }

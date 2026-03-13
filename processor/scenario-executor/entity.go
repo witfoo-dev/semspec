@@ -1,10 +1,13 @@
 package scenarioexecutor
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/c360studio/semspec/tools/decompose"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/message"
 )
 
@@ -130,6 +133,84 @@ func (e *ScenarioExecutionEntity) Triples() []message.Triple {
 	}
 	if e.LoopEntityID != "" {
 		triples = append(triples, message.Triple{Subject: id, Predicate: wf.RelLoop, Object: e.LoopEntityID, Source: componentName, Timestamp: now, Confidence: 1.0})
+	}
+
+	return triples
+}
+
+// ---------------------------------------------------------------------------
+// DAGNodeEntity
+// ---------------------------------------------------------------------------
+
+// DAGNodeEntity converts a decompose.TaskNode to graph triples for the
+// graph.ingest.entity subject.  It implements the same interface consumed by
+// publishEntity so no separate publish path is required.
+type DAGNodeEntity struct {
+	// executionID is the "{slug}-{scenarioID}" suffix used in entity IDs.
+	executionID string
+	// node is the underlying DAG node from the decomposer.
+	node *decompose.TaskNode
+	// execEntityID is the parent scenario-execution entity ID (graph edge target).
+	execEntityID string
+	// status overrides the default "pending" status when set.
+	status string
+}
+
+// newDAGNodeEntity creates a DAGNodeEntity for initial publishing (status="pending").
+// execEntityID is the scenario-execution entity ID that owns this DAG.
+func newDAGNodeEntity(executionID string, node *decompose.TaskNode, execEntityID string) *DAGNodeEntity {
+	return &DAGNodeEntity{
+		executionID:  executionID,
+		node:         node,
+		execEntityID: execEntityID,
+		status:       "pending",
+	}
+}
+
+// withStatus returns a shallow copy with the status field overridden.
+func (e *DAGNodeEntity) withStatus(status string) *DAGNodeEntity {
+	copy := *e
+	copy.status = status
+	return &copy
+}
+
+// EntityID returns the canonical graph entity ID for this DAG node.
+// Format: local.semspec.workflow.dag-node.node.{executionID}-{nodeID}
+func (e *DAGNodeEntity) EntityID() string {
+	return workflow.DAGNodeEntityID(e.executionID, e.node.ID)
+}
+
+// Triples returns the graph triples for this DAG node.
+func (e *DAGNodeEntity) Triples() []message.Triple {
+	id := e.EntityID()
+	now := time.Now()
+
+	triples := []message.Triple{
+		{Subject: id, Predicate: wf.DAGNodeID, Object: e.node.ID, Source: componentName, Timestamp: now, Confidence: 1.0},
+		{Subject: id, Predicate: wf.DAGNodePrompt, Object: e.node.Prompt, Source: componentName, Timestamp: now, Confidence: 1.0},
+		{Subject: id, Predicate: wf.DAGNodeRole, Object: e.node.Role, Source: componentName, Timestamp: now, Confidence: 1.0},
+		{Subject: id, Predicate: wf.DAGNodeStatus, Object: e.status, Source: componentName, Timestamp: now, Confidence: 1.0},
+		{Subject: id, Predicate: wf.RelScenario, Object: e.execEntityID, Source: componentName, Timestamp: now, Confidence: 1.0},
+	}
+
+	// File scope as a JSON array string.
+	if len(e.node.FileScope) > 0 {
+		scopeJSON, err := json.Marshal(e.node.FileScope)
+		if err == nil {
+			triples = append(triples, message.Triple{
+				Subject: id, Predicate: wf.DAGNodeFileScope, Object: string(scopeJSON),
+				Source: componentName, Timestamp: now, Confidence: 1.0,
+			})
+		}
+	}
+
+	// Dependency edges to sibling DAG node entities.
+	for _, depID := range e.node.DependsOn {
+		depEntityID := workflow.DAGNodeEntityID(e.executionID, depID)
+		triples = append(triples, message.Triple{
+			Subject: id, Predicate: wf.DAGNodeDependsOn, Object: depEntityID,
+			Source: componentName, Timestamp: now, Confidence: 1.0,
+		})
 	}
 
 	return triples

@@ -843,6 +843,7 @@ type Requirement struct {
 	Title       string            `json:"title"`
 	Description string            `json:"description"`
 	Status      RequirementStatus `json:"status"`
+	DependsOn   []string          `json:"depends_on,omitempty"` // IDs of prerequisite requirements
 	CreatedAt   time.Time         `json:"created_at"`
 	UpdatedAt   time.Time         `json:"updated_at"`
 }

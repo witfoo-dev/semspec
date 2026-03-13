@@ -419,6 +419,392 @@ func TestHandleDeprecateRequirement(t *testing.T) {
 	}
 }
 
+// TestHandleCreateRequirement_DependsOn exercises the depends_on field during
+// requirement creation, covering the valid case, unknown references, and cycle
+// detection.
+func TestHandleCreateRequirement_DependsOn(t *testing.T) {
+	tests := []struct {
+		name       string
+		setup      func(t *testing.T, ctx context.Context, m *workflow.Manager, slug string)
+		reqBody    CreateRequirementHTTPRequest
+		wantStatus int
+		// checkResp is called only when wantStatus is 201.
+		checkResp func(t *testing.T, got workflow.Requirement)
+	}{
+		{
+			name: "valid depends_on persisted in response",
+			setup: func(t *testing.T, ctx context.Context, m *workflow.Manager, slug string) {
+				// Pre-create the requirement that will be referenced.
+				existing := []workflow.Requirement{
+					{
+						ID:     "requirement.dep-plan.1",
+						PlanID: workflow.PlanEntityID(slug),
+						Title:  "Pre-existing requirement",
+						Status: workflow.RequirementStatusActive,
+					},
+				}
+				if err := m.SaveRequirements(ctx, existing, slug); err != nil {
+					t.Fatalf("SaveRequirements() error = %v", err)
+				}
+			},
+			reqBody: CreateRequirementHTTPRequest{
+				Title:     "Dependent requirement",
+				DependsOn: []string{"requirement.dep-plan.1"},
+			},
+			wantStatus: http.StatusCreated,
+			checkResp: func(t *testing.T, got workflow.Requirement) {
+				if len(got.DependsOn) != 1 || got.DependsOn[0] != "requirement.dep-plan.1" {
+					t.Errorf("DependsOn = %v, want [requirement.dep-plan.1]", got.DependsOn)
+				}
+			},
+		},
+		{
+			name:  "unknown depends_on reference returns 422",
+			setup: nil,
+			reqBody: CreateRequirementHTTPRequest{
+				Title:     "Bad dependency",
+				DependsOn: []string{"requirement.dep-plan.nonexistent"},
+			},
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			tmpDir := t.TempDir()
+			t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+
+			slug := "dep-plan"
+			m := workflow.NewManager(tmpDir)
+			if _, err := m.CreatePlan(ctx, slug, "Dep Plan"); err != nil {
+				t.Fatalf("CreatePlan() error = %v", err)
+			}
+
+			if tt.setup != nil {
+				tt.setup(t, ctx, m, slug)
+			}
+
+			c := setupTestComponent(t)
+
+			body, _ := json.Marshal(tt.reqBody)
+			req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/requirements", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			c.handleCreateRequirement(w, req, slug)
+
+			if w.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d; body: %s", w.Code, tt.wantStatus, w.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusCreated {
+				var got workflow.Requirement
+				if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+					t.Fatalf("decode response: %v", err)
+				}
+				if tt.checkResp != nil {
+					tt.checkResp(t, got)
+				}
+			}
+
+			if tt.wantStatus == http.StatusUnprocessableEntity {
+				var errResp struct {
+					Error string `json:"error"`
+				}
+				if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+					t.Fatalf("decode error response: %v", err)
+				}
+				if errResp.Error == "" {
+					t.Error("expected non-empty error message in JSON error envelope")
+				}
+			}
+		})
+	}
+}
+
+// TestHandleCreateRequirement_CycleViaUpdate verifies that a cycle introduced
+// through an update (A → B, then update A to depend on B while B already
+// depends on A) is rejected with 422.
+func TestHandleCreateRequirement_CycleViaUpdate(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+
+	slug := "cycle-plan"
+	m := workflow.NewManager(tmpDir)
+	if _, err := m.CreatePlan(ctx, slug, "Cycle Plan"); err != nil {
+		t.Fatalf("CreatePlan() error = %v", err)
+	}
+
+	c := setupTestComponent(t)
+
+	// Create requirement A (no deps).
+	bodyA, _ := json.Marshal(CreateRequirementHTTPRequest{Title: "Requirement A"})
+	reqA := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/requirements", bytes.NewReader(bodyA))
+	reqA.Header.Set("Content-Type", "application/json")
+	wA := httptest.NewRecorder()
+	c.handleCreateRequirement(wA, reqA, slug)
+	if wA.Code != http.StatusCreated {
+		t.Fatalf("create A: status = %d, want %d; body: %s", wA.Code, http.StatusCreated, wA.Body.String())
+	}
+	var reqARespBody workflow.Requirement
+	if err := json.NewDecoder(wA.Body).Decode(&reqARespBody); err != nil {
+		t.Fatalf("decode A: %v", err)
+	}
+	idA := reqARespBody.ID
+
+	// Create requirement B depending on A.
+	bodyB, _ := json.Marshal(CreateRequirementHTTPRequest{
+		Title:     "Requirement B",
+		DependsOn: []string{idA},
+	})
+	reqB := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/requirements", bytes.NewReader(bodyB))
+	reqB.Header.Set("Content-Type", "application/json")
+	wB := httptest.NewRecorder()
+	c.handleCreateRequirement(wB, reqB, slug)
+	if wB.Code != http.StatusCreated {
+		t.Fatalf("create B: status = %d, want %d; body: %s", wB.Code, http.StatusCreated, wB.Body.String())
+	}
+	var reqBRespBody workflow.Requirement
+	if err := json.NewDecoder(wB.Body).Decode(&reqBRespBody); err != nil {
+		t.Fatalf("decode B: %v", err)
+	}
+	idB := reqBRespBody.ID
+
+	// Attempt to update A to depend on B — creates cycle A → B → A.
+	bodyUpdate, _ := json.Marshal(UpdateRequirementHTTPRequest{DependsOn: []string{idB}})
+	reqUpdate := httptest.NewRequest(http.MethodPatch, "/workflow-api/plans/"+slug+"/requirements/"+idA, bytes.NewReader(bodyUpdate))
+	reqUpdate.Header.Set("Content-Type", "application/json")
+	wUpdate := httptest.NewRecorder()
+	c.handleUpdateRequirement(wUpdate, reqUpdate, slug, idA)
+
+	if wUpdate.Code != http.StatusUnprocessableEntity {
+		t.Errorf("update cycle: status = %d, want %d; body: %s", wUpdate.Code, http.StatusUnprocessableEntity, wUpdate.Body.String())
+	}
+
+	var errResp struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(wUpdate.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp.Error == "" {
+		t.Error("expected non-empty error message in JSON error envelope")
+	}
+}
+
+// TestHandleUpdateRequirement_DependsOn exercises adding, clearing, and
+// rejecting invalid depends_on values via PATCH.
+func TestHandleUpdateRequirement_DependsOn(t *testing.T) {
+	tests := []struct {
+		name       string
+		// existingReqs are saved before the update is attempted.
+		existingReqs []workflow.Requirement
+		targetID     string
+		updateBody   UpdateRequirementHTTPRequest
+		wantStatus   int
+		checkResp    func(t *testing.T, got workflow.Requirement)
+	}{
+		{
+			name: "add valid depends_on succeeds",
+			existingReqs: []workflow.Requirement{
+				{ID: "requirement.upd-dep-plan.1", PlanID: "plan.upd-dep-plan", Title: "Base", Status: workflow.RequirementStatusActive},
+				{ID: "requirement.upd-dep-plan.2", PlanID: "plan.upd-dep-plan", Title: "Dependent", Status: workflow.RequirementStatusActive},
+			},
+			targetID:   "requirement.upd-dep-plan.2",
+			updateBody: UpdateRequirementHTTPRequest{DependsOn: []string{"requirement.upd-dep-plan.1"}},
+			wantStatus: http.StatusOK,
+			checkResp: func(t *testing.T, got workflow.Requirement) {
+				if len(got.DependsOn) != 1 || got.DependsOn[0] != "requirement.upd-dep-plan.1" {
+					t.Errorf("DependsOn = %v, want [requirement.upd-dep-plan.1]", got.DependsOn)
+				}
+			},
+		},
+		{
+			name: "add unknown depends_on returns 422",
+			existingReqs: []workflow.Requirement{
+				{ID: "requirement.upd-dep-plan.1", PlanID: "plan.upd-dep-plan", Title: "Only req", Status: workflow.RequirementStatusActive},
+			},
+			targetID:   "requirement.upd-dep-plan.1",
+			updateBody: UpdateRequirementHTTPRequest{DependsOn: []string{"requirement.upd-dep-plan.ghost"}},
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+		// "clear depends_on" is tested separately below as TestHandleUpdateRequirement_ClearDependsOn
+		// because it requires sending a raw JSON body to avoid omitempty dropping the empty array
+		// during struct marshalling.
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			tmpDir := t.TempDir()
+			t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+
+			slug := "upd-dep-plan"
+			m := workflow.NewManager(tmpDir)
+			if _, err := m.CreatePlan(ctx, slug, "Upd Dep Plan"); err != nil {
+				t.Fatalf("CreatePlan() error = %v", err)
+			}
+			if err := m.SaveRequirements(ctx, tt.existingReqs, slug); err != nil {
+				t.Fatalf("SaveRequirements() error = %v", err)
+			}
+
+			c := setupTestComponent(t)
+
+			body, _ := json.Marshal(tt.updateBody)
+			req := httptest.NewRequest(http.MethodPatch, "/workflow-api/plans/"+slug+"/requirements/"+tt.targetID, bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			c.handleUpdateRequirement(w, req, slug, tt.targetID)
+
+			if w.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d; body: %s", w.Code, tt.wantStatus, w.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusOK && tt.checkResp != nil {
+				var got workflow.Requirement
+				if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+					t.Fatalf("decode response: %v", err)
+				}
+				tt.checkResp(t, got)
+			}
+
+			if tt.wantStatus == http.StatusUnprocessableEntity {
+				var errResp struct {
+					Error string `json:"error"`
+				}
+				if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+					t.Fatalf("decode error response: %v", err)
+				}
+				if errResp.Error == "" {
+					t.Error("expected non-empty error message in JSON error envelope")
+				}
+			}
+		})
+	}
+}
+
+// TestHandleUpdateRequirement_ClearDependsOn verifies that sending an explicit
+// empty JSON array for depends_on clears an existing dependency list.
+//
+// Note: the UpdateRequirementHTTPRequest struct has omitempty on DependsOn, so
+// marshalling a Go []string{} would silently drop the field from the JSON body.
+// This test sends a raw JSON string instead to exercise the actual wire behavior
+// a client would use to clear dependencies.
+func TestHandleUpdateRequirement_ClearDependsOn(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+
+	slug := "clear-dep-plan"
+	m := workflow.NewManager(tmpDir)
+	if _, err := m.CreatePlan(ctx, slug, "Clear Dep Plan"); err != nil {
+		t.Fatalf("CreatePlan() error = %v", err)
+	}
+
+	// Pre-save two requirements where req.2 depends on req.1.
+	existing := []workflow.Requirement{
+		{ID: "requirement.clear-dep-plan.1", PlanID: "plan.clear-dep-plan", Title: "Base", Status: workflow.RequirementStatusActive},
+		{
+			ID:        "requirement.clear-dep-plan.2",
+			PlanID:    "plan.clear-dep-plan",
+			Title:     "Had deps",
+			Status:    workflow.RequirementStatusActive,
+			DependsOn: []string{"requirement.clear-dep-plan.1"},
+		},
+	}
+	if err := m.SaveRequirements(ctx, existing, slug); err != nil {
+		t.Fatalf("SaveRequirements() error = %v", err)
+	}
+
+	c := setupTestComponent(t)
+
+	// Send {"depends_on": []} as raw JSON — bypasses Go's omitempty marshalling.
+	rawBody := []byte(`{"depends_on": []}`)
+	req := httptest.NewRequest(http.MethodPatch, "/workflow-api/plans/"+slug+"/requirements/requirement.clear-dep-plan.2", bytes.NewReader(rawBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	c.handleUpdateRequirement(w, req, slug, "requirement.clear-dep-plan.2")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var got workflow.Requirement
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(got.DependsOn) != 0 {
+		t.Errorf("DependsOn = %v, want empty after clear", got.DependsOn)
+	}
+
+	// Confirm persistence: reload and verify the field is gone.
+	stored, err := m.LoadRequirements(ctx, slug)
+	if err != nil {
+		t.Fatalf("LoadRequirements() error = %v", err)
+	}
+	for _, r := range stored {
+		if r.ID == "requirement.clear-dep-plan.2" && len(r.DependsOn) != 0 {
+			t.Errorf("stored DependsOn = %v, want empty after clear", r.DependsOn)
+		}
+	}
+}
+
+// TestHandleCreateRequirement_IndependentRequirementsHaveNoDeps verifies that
+// two requirements created without a depends_on field have nil/empty DependsOn
+// in their responses and when reloaded from storage.
+func TestHandleCreateRequirement_IndependentRequirementsHaveNoDeps(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+
+	slug := "nodep-plan"
+	m := workflow.NewManager(tmpDir)
+	if _, err := m.CreatePlan(ctx, slug, "NoDep Plan"); err != nil {
+		t.Fatalf("CreatePlan() error = %v", err)
+	}
+
+	c := setupTestComponent(t)
+
+	for i, title := range []string{"First requirement", "Second requirement"} {
+		body, _ := json.Marshal(CreateRequirementHTTPRequest{Title: title})
+		req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/requirements", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		c.handleCreateRequirement(w, req, slug)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("req %d: status = %d, want %d; body: %s", i+1, w.Code, http.StatusCreated, w.Body.String())
+		}
+
+		var got workflow.Requirement
+		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+			t.Fatalf("req %d: decode response: %v", i+1, err)
+		}
+		if len(got.DependsOn) != 0 {
+			t.Errorf("req %d: DependsOn = %v, want empty", i+1, got.DependsOn)
+		}
+	}
+
+	// Confirm storage also shows no deps.
+	stored, err := m.LoadRequirements(ctx, slug)
+	if err != nil {
+		t.Fatalf("LoadRequirements() error = %v", err)
+	}
+	if len(stored) != 2 {
+		t.Fatalf("stored requirements count = %d, want 2", len(stored))
+	}
+	for _, r := range stored {
+		if len(r.DependsOn) != 0 {
+			t.Errorf("stored %q: DependsOn = %v, want empty", r.ID, r.DependsOn)
+		}
+	}
+}
+
 func TestHandleDeprecateRequirement_AlreadyDeprecated(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()

@@ -16,10 +16,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -33,6 +35,11 @@ type Component struct {
 	config     Config
 	natsClient *natsclient.Client
 	logger     *slog.Logger
+
+	// repoRoot is resolved once at construction from SEMSPEC_REPO_PATH or cwd.
+	// It is used to build a workflow.Manager for each dispatch cycle so that
+	// requirement and scenario data is always read fresh from disk.
+	repoRoot string
 
 	// JetStream consumer
 	consumer jetstream.Consumer
@@ -87,12 +94,31 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
+	repoRoot, err := resolveRepoRoot()
+	if err != nil {
+		return nil, fmt.Errorf("resolve repo root: %w", err)
+	}
+
 	return &Component{
 		name:       "scenario-orchestrator",
 		config:     config,
 		natsClient: deps.NATSClient,
 		logger:     deps.GetLogger(),
+		repoRoot:   repoRoot,
 	}, nil
+}
+
+// resolveRepoRoot returns the repository root path, preferring SEMSPEC_REPO_PATH
+// and falling back to the current working directory.
+func resolveRepoRoot() (string, error) {
+	if root := os.Getenv("SEMSPEC_REPO_PATH"); root != "" {
+		return root, nil
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("getwd: %w", err)
+	}
+	return root, nil
 }
 
 // Initialize prepares the component.
@@ -270,19 +296,59 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		"scenario_count", len(trigger.Scenarios))
 }
 
-// dispatchScenarios triggers a scenario-execution-loop for each Scenario reference
-// using bounded concurrency controlled by config.MaxConcurrent.
+// dispatchScenarios applies requirement-DAG gating and then triggers a
+// scenario-execution-loop for each ready ScenarioRef using bounded concurrency
+// controlled by config.MaxConcurrent.
+//
+// DAG gating logic:
+//  1. Load all requirements and scenarios for the plan from the workflow manager.
+//  2. A requirement is "complete" when every one of its scenarios is passing or skipped.
+//  3. A requirement is "ready" when all its DependsOn requirements are complete.
+//  4. Only scenarios whose owning requirement is ready are dispatched.
+//
+// If no requirements file exists for the plan (empty requirements slice), all
+// trigger scenarios are dispatched without gating — this preserves backward
+// compatibility with plans that predate the requirements DAG.
 func (c *Component) dispatchScenarios(ctx context.Context, trigger OrchestratorTrigger) error {
 	if len(trigger.Scenarios) == 0 {
 		c.logger.Info("no scenarios to dispatch", "plan_slug", trigger.PlanSlug)
 		return nil
 	}
 
+	// Load requirements and scenarios to apply DAG gating.
+	manager := workflow.NewManager(c.repoRoot)
+
+	requirements, err := manager.LoadRequirements(ctx, trigger.PlanSlug)
+	if err != nil {
+		return fmt.Errorf("load requirements for %s: %w", trigger.PlanSlug, err)
+	}
+
+	allScenarios, err := manager.LoadScenarios(ctx, trigger.PlanSlug)
+	if err != nil {
+		return fmt.Errorf("load scenarios for %s: %w", trigger.PlanSlug, err)
+	}
+
+	// Apply DAG gating — only dispatch scenarios for requirements whose
+	// upstream dependencies are all satisfied.
+	toDispatch := filterReadyScenarios(trigger.Scenarios, requirements, allScenarios)
+
+	blocked := len(trigger.Scenarios) - len(toDispatch)
+	c.logger.Info("requirement DAG gating applied",
+		"plan_slug", trigger.PlanSlug,
+		"candidate_count", len(trigger.Scenarios),
+		"ready_count", len(toDispatch),
+		"blocked_count", blocked)
+
+	if len(toDispatch) == 0 {
+		c.logger.Info("all scenarios blocked by upstream requirements", "plan_slug", trigger.PlanSlug)
+		return nil
+	}
+
 	sem := make(chan struct{}, c.config.MaxConcurrent)
 	var wg sync.WaitGroup
-	errs := make(chan error, len(trigger.Scenarios))
+	errs := make(chan error, len(toDispatch))
 
-	for _, ref := range trigger.Scenarios {
+	for _, ref := range toDispatch {
 		if ctx.Err() != nil {
 			break
 		}

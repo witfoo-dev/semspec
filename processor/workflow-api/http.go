@@ -96,6 +96,16 @@ func (t *TriggerPayload) GetSlug() string {
 	return ""
 }
 
+// writeJSONError writes a JSON-encoded {"error": msg} body with the given status code.
+// Use this instead of http.Error when the client expects a JSON error envelope.
+func writeJSONError(w http.ResponseWriter, msg string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(struct {
+		Error string `json:"error"`
+	}{Error: msg})
+}
+
 // handleGetPlanReviews handles GET /plans/{slug}/reviews
 // Returns the review synthesis result for the given plan slug.
 func (c *Component) handleGetPlanReviews(w http.ResponseWriter, r *http.Request) {

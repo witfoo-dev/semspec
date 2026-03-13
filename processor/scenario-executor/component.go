@@ -458,6 +458,10 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 		"node_count", len(sorted),
 	)
 
+	// Publish each DAG node as a graph entity so the knowledge graph captures
+	// the full execution hierarchy.  Best-effort: failure does not abort execution.
+	c.publishDAGNodes(ctx, exec)
+
 	// Dispatch the first node.
 	c.dispatchNextNodeLocked(ctx, exec)
 }
@@ -473,12 +477,18 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 	exec.VisitedNodes[nodeID] = true
 
 	if event.Outcome != agentic.OutcomeSuccess {
+		// Mark the node itself as failed in the graph before transitioning the
+		// scenario execution to failed.
+		c.publishDAGNodeStatus(ctx, exec, nodeID, "failed")
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("node %q failed: outcome=%s", nodeID, event.Outcome))
 		return
 	}
 
 	// TODO: no vocabulary constant for per-node status predicates; kept as formatted string.
 	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, fmt.Sprintf("workflow.node.%s.status", nodeID), "completed")
+
+	// Update the DAG node graph entity to reflect successful completion.
+	c.publishDAGNodeStatus(ctx, exec, nodeID, "completed")
 
 	c.logger.Info("Node completed",
 		"entity_id", exec.EntityID,
@@ -562,6 +572,9 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *scenarioEx
 
 	// TODO: no vocabulary constant for per-node status predicates; kept as formatted string.
 	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, fmt.Sprintf("workflow.node.%s.status", nodeID), "running")
+
+	// Update the DAG node graph entity to reflect that execution has started.
+	c.publishDAGNodeStatus(ctx, exec, nodeID, "executing")
 
 	if err := c.publishTask(ctx, subject, task); err != nil {
 		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch node %q failed: %v", nodeID, err))
@@ -699,6 +712,33 @@ func (c *Component) startExecutionTimeoutLocked(exec *scenarioExecution) {
 // ---------------------------------------------------------------------------
 // Triple and task publishing helpers
 // ---------------------------------------------------------------------------
+
+// publishDAGNodes publishes all nodes in the DAG as graph entities with
+// status="pending".  Publishing is best-effort: failures are logged as
+// warnings and do not abort execution.
+func (c *Component) publishDAGNodes(ctx context.Context, exec *scenarioExecution) {
+	executionID := fmt.Sprintf("%s-%s", exec.Slug, exec.ScenarioID)
+	for i := range exec.DAG.Nodes {
+		node := &exec.DAG.Nodes[i]
+		entity := newDAGNodeEntity(executionID, node, exec.EntityID)
+		c.publishEntity(ctx, entity)
+	}
+}
+
+// publishDAGNodeStatus updates the DAGNodeStatus triple for a single node by
+// re-publishing its full entity payload with the new status.  Publishing is
+// best-effort: failures are logged as warnings and do not abort execution.
+func (c *Component) publishDAGNodeStatus(ctx context.Context, exec *scenarioExecution, nodeID, status string) {
+	node, ok := exec.NodeIndex[nodeID]
+	if !ok {
+		c.logger.Warn("publishDAGNodeStatus: node not found in index",
+			"entity_id", exec.EntityID, "node_id", nodeID)
+		return
+	}
+	executionID := fmt.Sprintf("%s-%s", exec.Slug, exec.ScenarioID)
+	entity := newDAGNodeEntity(executionID, node, exec.EntityID).withStatus(status)
+	c.publishEntity(ctx, entity)
+}
 
 // publishTask wraps a TaskMessage in a BaseMessage and publishes to JetStream.
 // Returns an error for fail-fast dispatch.

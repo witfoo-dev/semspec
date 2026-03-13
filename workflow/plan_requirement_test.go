@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -110,3 +111,134 @@ func TestLoadRequirements_InvalidSlug(t *testing.T) {
 		t.Error("LoadRequirements() with invalid slug should return error")
 	}
 }
+
+func TestValidateRequirementDAG(t *testing.T) {
+	req := func(id string, deps ...string) Requirement {
+		return Requirement{ID: id, DependsOn: deps}
+	}
+
+	tests := []struct {
+		name        string
+		reqs        []Requirement
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "empty slice passes",
+			reqs:    []Requirement{},
+			wantErr: false,
+		},
+		{
+			name:    "root requirement with no dependencies passes",
+			reqs:    []Requirement{req("req-a")},
+			wantErr: false,
+		},
+		{
+			name: "valid linear chain passes",
+			reqs: []Requirement{
+				req("req-a"),
+				req("req-b", "req-a"),
+				req("req-c", "req-b"),
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid diamond dependency passes",
+			reqs: []Requirement{
+				req("req-a"),
+				req("req-b", "req-a"),
+				req("req-c", "req-a"),
+				req("req-d", "req-b", "req-c"),
+			},
+			wantErr: false,
+		},
+		{
+			name:        "self-reference returns error",
+			reqs:        []Requirement{req("req-a", "req-a")},
+			wantErr:     true,
+			errContains: "depends on itself",
+		},
+		{
+			name:        "reference to nonexistent requirement returns error",
+			reqs:        []Requirement{req("req-a", "req-missing")},
+			wantErr:     true,
+			errContains: "unknown requirement",
+		},
+		{
+			name: "simple two-node cycle returns error",
+			reqs: []Requirement{
+				req("req-a", "req-b"),
+				req("req-b", "req-a"),
+			},
+			wantErr:     true,
+			errContains: "cycle detected",
+		},
+		{
+			name: "three-node cycle returns error",
+			reqs: []Requirement{
+				req("req-a", "req-c"),
+				req("req-b", "req-a"),
+				req("req-c", "req-b"),
+			},
+			wantErr:     true,
+			errContains: "cycle detected",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRequirementDAG(tt.reqs)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateRequirementDAG() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && tt.errContains != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("ValidateRequirementDAG() error = %q, want it to contain %q", err, tt.errContains)
+				}
+			}
+		})
+	}
+}
+
+func TestSaveRequirements_RejectsInvalidDAG(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, err := m.CreatePlan(ctx, "dag-test", "DAG Test Plan")
+	if err != nil {
+		t.Fatalf("CreatePlan() error: %v", err)
+	}
+
+	cyclic := []Requirement{
+		{ID: "req-a", DependsOn: []string{"req-b"}},
+		{ID: "req-b", DependsOn: []string{"req-a"}},
+	}
+
+	if err := m.SaveRequirements(ctx, cyclic, plan.Slug); err == nil {
+		t.Error("SaveRequirements() with cyclic requirements should return error")
+	}
+}
+
+func TestSaveRequirements_AcceptsValidDAG(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, err := m.CreatePlan(ctx, "dag-valid", "DAG Valid Plan")
+	if err != nil {
+		t.Fatalf("CreatePlan() error: %v", err)
+	}
+
+	diamond := []Requirement{
+		{ID: "req-a"},
+		{ID: "req-b", DependsOn: []string{"req-a"}},
+		{ID: "req-c", DependsOn: []string{"req-a"}},
+		{ID: "req-d", DependsOn: []string{"req-b", "req-c"}},
+	}
+
+	if err := m.SaveRequirements(ctx, diamond, plan.Slug); err != nil {
+		t.Errorf("SaveRequirements() with valid diamond DAG should not error, got: %v", err)
+	}
+}
+

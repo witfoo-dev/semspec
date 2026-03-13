@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/natsclient"
@@ -303,6 +304,485 @@ func TestDispatchScenarios_EmptyList_Integration(t *testing.T) {
 	waitForCondition(t, ctx, 5*time.Second, func() bool {
 		return comp.triggersProcessed.Load() >= 1
 	}, "triggersProcessed should reach 1")
+}
+
+// ---------------------------------------------------------------------------
+// DAG-gating integration tests
+// ---------------------------------------------------------------------------
+
+// TestDAGGating_RootRequirementsDispatchImmediately verifies that two independent
+// requirements (no DependsOn) both have their pending scenarios dispatched in a
+// single orchestration cycle. Root requirements are never blocked by upstream.
+func TestDAGGating_RootRequirementsDispatchImmediately(t *testing.T) {
+	repoRoot := t.TempDir()
+	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
+
+	tc := natsclient.NewTestClient(t,
+		natsclient.WithJetStream(),
+		natsclient.WithStreams(natsclient.TestStreamConfig{
+			Name:     "WORKFLOW",
+			Subjects: workflowStreamSubjects,
+		}),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	comp := newIntegrationComponent(t, tc)
+	if err := comp.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
+
+	// Persist plan data: two independent requirements, one scenario each.
+	const planSlug = "dag-root-test"
+	m := workflow.NewManager(repoRoot)
+	if _, err := m.CreatePlan(ctx, planSlug, "DAG Root Test"); err != nil {
+		t.Fatalf("CreatePlan() error: %v", err)
+	}
+
+	requirements := []workflow.Requirement{
+		makeReq("req-alpha"),
+		makeReq("req-beta"),
+	}
+	if err := m.SaveRequirements(ctx, requirements, planSlug); err != nil {
+		t.Fatalf("SaveRequirements() error: %v", err)
+	}
+
+	scenarios := []workflow.Scenario{
+		makeScenario("sc-alpha-1", "req-alpha", workflow.ScenarioStatusPending),
+		makeScenario("sc-beta-1", "req-beta", workflow.ScenarioStatusPending),
+	}
+	if err := m.SaveScenarios(ctx, scenarios, planSlug); err != nil {
+		t.Fatalf("SaveScenarios() error: %v", err)
+	}
+
+	received := make(chan []byte, 10)
+	sub := subscribeExecLoop(t, tc, received)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	trigger := OrchestratorTrigger{
+		PlanSlug: planSlug,
+		TraceID:  "trace-dag-root-001",
+		Scenarios: []ScenarioRef{
+			makeRef("sc-alpha-1"),
+			makeRef("sc-beta-1"),
+		},
+	}
+	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, trigger)
+
+	// Both root scenarios must be dispatched.
+	msgs := collectMessages(ctx, t, received, 2, 20*time.Second)
+	if len(msgs) != 2 {
+		t.Fatalf("got %d dispatched scenarios, want 2", len(msgs))
+	}
+
+	seenIDs := parsedScenarioIDs(t, msgs)
+	if !seenIDs["sc-alpha-1"] {
+		t.Error("sc-alpha-1 was not dispatched")
+	}
+	if !seenIDs["sc-beta-1"] {
+		t.Error("sc-beta-1 was not dispatched")
+	}
+}
+
+// TestDAGGating_DependentRequirementBlocked verifies that a requirement with an
+// unsatisfied upstream dependency blocks its scenario from dispatch until the
+// upstream requirement is complete (all its scenarios passing).
+func TestDAGGating_DependentRequirementBlocked(t *testing.T) {
+	repoRoot := t.TempDir()
+	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
+
+	tc := natsclient.NewTestClient(t,
+		natsclient.WithJetStream(),
+		natsclient.WithStreams(natsclient.TestStreamConfig{
+			Name:     "WORKFLOW",
+			Subjects: workflowStreamSubjects,
+		}),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	comp := newIntegrationComponent(t, tc)
+	if err := comp.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
+
+	// Req-A (root) → Req-B (depends on A).
+	const planSlug = "dag-blocked-test"
+	m := workflow.NewManager(repoRoot)
+	if _, err := m.CreatePlan(ctx, planSlug, "DAG Blocked Test"); err != nil {
+		t.Fatalf("CreatePlan() error: %v", err)
+	}
+
+	requirements := []workflow.Requirement{
+		makeReq("req-a"),
+		makeReq("req-b", "req-a"),
+	}
+	if err := m.SaveRequirements(ctx, requirements, planSlug); err != nil {
+		t.Fatalf("SaveRequirements() error: %v", err)
+	}
+
+	// Phase 1: both scenarios pending — req-b must be blocked.
+	scenarios := []workflow.Scenario{
+		makeScenario("sc-a-1", "req-a", workflow.ScenarioStatusPending),
+		makeScenario("sc-b-1", "req-b", workflow.ScenarioStatusPending),
+	}
+	if err := m.SaveScenarios(ctx, scenarios, planSlug); err != nil {
+		t.Fatalf("SaveScenarios() error: %v", err)
+	}
+
+	received := make(chan []byte, 10)
+	sub := subscribeExecLoop(t, tc, received)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	trigger := OrchestratorTrigger{
+		PlanSlug: planSlug,
+		TraceID:  "trace-dag-blocked-001",
+		Scenarios: []ScenarioRef{
+			makeRef("sc-a-1"),
+			makeRef("sc-b-1"),
+		},
+	}
+	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, trigger)
+
+	// Only req-a's scenario should be dispatched.
+	msgs := collectMessages(ctx, t, received, 1, 10*time.Second)
+	if len(msgs) != 1 {
+		t.Fatalf("phase 1: got %d dispatched scenarios, want 1", len(msgs))
+	}
+	seenIDs := parsedScenarioIDs(t, msgs)
+	if !seenIDs["sc-a-1"] {
+		t.Errorf("phase 1: expected sc-a-1 dispatched, got %v", seenIDs)
+	}
+	if seenIDs["sc-b-1"] {
+		t.Error("phase 1: sc-b-1 should be blocked but was dispatched")
+	}
+
+	// Drain the channel before the second trigger.
+	drainChannel(received)
+
+	// Phase 2: mark req-a's scenario as passing so req-b becomes unblocked.
+	scenarios[0].Status = workflow.ScenarioStatusPassing
+	if err := m.SaveScenarios(ctx, scenarios, planSlug); err != nil {
+		t.Fatalf("SaveScenarios() phase 2 error: %v", err)
+	}
+
+	trigger2 := OrchestratorTrigger{
+		PlanSlug: planSlug,
+		TraceID:  "trace-dag-blocked-002",
+		Scenarios: []ScenarioRef{
+			makeRef("sc-b-1"),
+		},
+	}
+	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, trigger2)
+
+	// Now req-b's scenario should be dispatched.
+	msgs2 := collectMessages(ctx, t, received, 1, 20*time.Second)
+	if len(msgs2) != 1 {
+		t.Fatalf("phase 2: got %d dispatched scenarios, want 1", len(msgs2))
+	}
+	seenIDs2 := parsedScenarioIDs(t, msgs2)
+	if !seenIDs2["sc-b-1"] {
+		t.Errorf("phase 2: expected sc-b-1 dispatched after req-a complete, got %v", seenIDs2)
+	}
+}
+
+// TestDAGGating_FailingScenarioBlocksDownstream verifies that a requirement whose
+// scenario is failing is treated as incomplete, blocking any dependent requirement.
+func TestDAGGating_FailingScenarioBlocksDownstream(t *testing.T) {
+	repoRoot := t.TempDir()
+	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
+
+	tc := natsclient.NewTestClient(t,
+		natsclient.WithJetStream(),
+		natsclient.WithStreams(natsclient.TestStreamConfig{
+			Name:     "WORKFLOW",
+			Subjects: workflowStreamSubjects,
+		}),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	comp := newIntegrationComponent(t, tc)
+	if err := comp.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
+
+	const planSlug = "dag-fail-block-test"
+	m := workflow.NewManager(repoRoot)
+	if _, err := m.CreatePlan(ctx, planSlug, "DAG Fail Block Test"); err != nil {
+		t.Fatalf("CreatePlan() error: %v", err)
+	}
+
+	requirements := []workflow.Requirement{
+		makeReq("req-a"),
+		makeReq("req-b", "req-a"),
+	}
+	if err := m.SaveRequirements(ctx, requirements, planSlug); err != nil {
+		t.Fatalf("SaveRequirements() error: %v", err)
+	}
+
+	// Req-A's scenario is failing — req-a is incomplete, req-b is blocked.
+	scenarios := []workflow.Scenario{
+		makeScenario("sc-a-1", "req-a", workflow.ScenarioStatusFailing),
+		makeScenario("sc-b-1", "req-b", workflow.ScenarioStatusPending),
+	}
+	if err := m.SaveScenarios(ctx, scenarios, planSlug); err != nil {
+		t.Fatalf("SaveScenarios() error: %v", err)
+	}
+
+	received := make(chan []byte, 5)
+	sub := subscribeExecLoop(t, tc, received)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	trigger := OrchestratorTrigger{
+		PlanSlug: planSlug,
+		TraceID:  "trace-dag-fail-001",
+		Scenarios: []ScenarioRef{
+			makeRef("sc-b-1"),
+		},
+	}
+	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, trigger)
+
+	// No scenarios should be dispatched: req-a is failing so req-b stays blocked.
+	assertNoMessages(t, ctx, received, 3*time.Second,
+		"no scenarios should be dispatched when upstream requirement is failing")
+
+	// The trigger should still be counted as processed.
+	waitForCondition(t, ctx, 5*time.Second, func() bool {
+		return comp.triggersProcessed.Load() >= 1
+	}, "triggersProcessed should reach 1")
+}
+
+// TestDAGGating_DiamondDependency exercises the four-node diamond pattern:
+//
+//	A → B → D
+//	A → C → D
+//
+// Only A can run first; B and C unblock once A passes; D unblocks only when
+// both B and C pass.
+func TestDAGGating_DiamondDependency(t *testing.T) {
+	repoRoot := t.TempDir()
+	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
+
+	tc := natsclient.NewTestClient(t,
+		natsclient.WithJetStream(),
+		natsclient.WithStreams(natsclient.TestStreamConfig{
+			Name:     "WORKFLOW",
+			Subjects: workflowStreamSubjects,
+		}),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	comp := newIntegrationComponent(t, tc)
+	if err := comp.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
+
+	const planSlug = "dag-diamond-test"
+	m := workflow.NewManager(repoRoot)
+	if _, err := m.CreatePlan(ctx, planSlug, "DAG Diamond Test"); err != nil {
+		t.Fatalf("CreatePlan() error: %v", err)
+	}
+
+	requirements := []workflow.Requirement{
+		makeReq("req-a"),
+		makeReq("req-b", "req-a"),
+		makeReq("req-c", "req-a"),
+		makeReq("req-d", "req-b", "req-c"),
+	}
+	if err := m.SaveRequirements(ctx, requirements, planSlug); err != nil {
+		t.Fatalf("SaveRequirements() error: %v", err)
+	}
+
+	// All scenarios start pending.
+	scenarios := []workflow.Scenario{
+		makeScenario("sc-a-1", "req-a", workflow.ScenarioStatusPending),
+		makeScenario("sc-b-1", "req-b", workflow.ScenarioStatusPending),
+		makeScenario("sc-c-1", "req-c", workflow.ScenarioStatusPending),
+		makeScenario("sc-d-1", "req-d", workflow.ScenarioStatusPending),
+	}
+	saveScenariosHelper(t, ctx, m, scenarios, planSlug)
+
+	received := make(chan []byte, 20)
+	sub := subscribeExecLoop(t, tc, received)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	allRefs := []ScenarioRef{
+		makeRef("sc-a-1"),
+		makeRef("sc-b-1"),
+		makeRef("sc-c-1"),
+		makeRef("sc-d-1"),
+	}
+
+	// --- Step 1: all pending, only A should dispatch. ---
+	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, OrchestratorTrigger{
+		PlanSlug:  planSlug,
+		TraceID:   "trace-diamond-step1",
+		Scenarios: allRefs,
+	})
+	msgs := collectMessages(ctx, t, received, 1, 15*time.Second)
+	if len(msgs) != 1 {
+		t.Fatalf("step 1: got %d dispatched, want 1 (only A)", len(msgs))
+	}
+	if ids := parsedScenarioIDs(t, msgs); !ids["sc-a-1"] {
+		t.Errorf("step 1: expected sc-a-1, got %v", ids)
+	}
+	drainChannel(received)
+
+	// --- Step 2: mark A passing — B and C should both dispatch. ---
+	scenarios[0].Status = workflow.ScenarioStatusPassing
+	saveScenariosHelper(t, ctx, m, scenarios, planSlug)
+
+	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, OrchestratorTrigger{
+		PlanSlug:  planSlug,
+		TraceID:   "trace-diamond-step2",
+		Scenarios: allRefs[1:], // B, C, D still pending as candidates
+	})
+	msgs = collectMessages(ctx, t, received, 2, 20*time.Second)
+	if len(msgs) != 2 {
+		t.Fatalf("step 2: got %d dispatched, want 2 (B and C)", len(msgs))
+	}
+	ids := parsedScenarioIDs(t, msgs)
+	if !ids["sc-b-1"] {
+		t.Errorf("step 2: sc-b-1 not dispatched after A passed, got %v", ids)
+	}
+	if !ids["sc-c-1"] {
+		t.Errorf("step 2: sc-c-1 not dispatched after A passed, got %v", ids)
+	}
+	if ids["sc-d-1"] {
+		t.Error("step 2: sc-d-1 should still be blocked (C not yet passing)")
+	}
+	drainChannel(received)
+
+	// --- Step 3: mark B passing only — D still blocked because C is pending. ---
+	scenarios[1].Status = workflow.ScenarioStatusPassing
+	saveScenariosHelper(t, ctx, m, scenarios, planSlug)
+
+	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, OrchestratorTrigger{
+		PlanSlug:  planSlug,
+		TraceID:   "trace-diamond-step3",
+		Scenarios: []ScenarioRef{makeRef("sc-d-1")},
+	})
+	assertNoMessages(t, ctx, received, 3*time.Second,
+		"step 3: sc-d-1 should remain blocked until C also passes")
+	drainChannel(received)
+
+	// --- Step 4: mark C passing — D should now dispatch. ---
+	scenarios[2].Status = workflow.ScenarioStatusPassing
+	saveScenariosHelper(t, ctx, m, scenarios, planSlug)
+
+	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, OrchestratorTrigger{
+		PlanSlug:  planSlug,
+		TraceID:   "trace-diamond-step4",
+		Scenarios: []ScenarioRef{makeRef("sc-d-1")},
+	})
+	msgs = collectMessages(ctx, t, received, 1, 20*time.Second)
+	if len(msgs) != 1 {
+		t.Fatalf("step 4: got %d dispatched, want 1 (only D)", len(msgs))
+	}
+	if ids := parsedScenarioIDs(t, msgs); !ids["sc-d-1"] {
+		t.Errorf("step 4: expected sc-d-1 dispatched after B and C passed, got %v", ids)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DAG-gating test helpers
+// ---------------------------------------------------------------------------
+
+// newIntegrationComponentWithRoot builds a component wired to the test NATS
+// client. The caller is responsible for setting SEMSPEC_REPO_PATH before
+// calling NewComponent (done via t.Setenv in each test).
+func newIntegrationComponentWithRoot(t *testing.T, tc *natsclient.TestClient) *Component {
+	t.Helper()
+
+	rawCfg, err := json.Marshal(DefaultConfig())
+	if err != nil {
+		t.Fatalf("marshal default config: %v", err)
+	}
+
+	deps := component.Dependencies{NATSClient: tc.Client}
+	compI, err := NewComponent(rawCfg, deps)
+	if err != nil {
+		t.Fatalf("NewComponent() error: %v", err)
+	}
+	return compI.(*Component)
+}
+
+// subscribeExecLoop registers a Core NATS subscription on the scenario
+// execution-loop subject, forwarding raw message bytes into ch.
+func subscribeExecLoop(t *testing.T, tc *natsclient.TestClient, ch chan<- []byte) *nats.Subscription {
+	t.Helper()
+	sub, err := tc.GetNativeConnection().Subscribe(
+		"workflow.trigger.scenario-execution-loop",
+		func(msg *nats.Msg) {
+			data := make([]byte, len(msg.Data))
+			copy(data, msg.Data)
+			ch <- data
+		},
+	)
+	if err != nil {
+		t.Fatalf("Subscribe() error: %v", err)
+	}
+	return sub
+}
+
+// parsedScenarioIDs parses a slice of raw BaseMessage bytes and returns the
+// set of ScenarioIDs contained in the ScenarioExecutionRequest payloads.
+func parsedScenarioIDs(t *testing.T, msgs [][]byte) map[string]bool {
+	t.Helper()
+	ids := make(map[string]bool, len(msgs))
+	for _, raw := range msgs {
+		req, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest](raw)
+		if err != nil {
+			t.Fatalf("ParseReactivePayload() error: %v", err)
+		}
+		ids[req.ScenarioID] = true
+	}
+	return ids
+}
+
+// assertNoMessages waits for duration and fails the test if any message
+// arrives on ch within that window.
+func assertNoMessages(t *testing.T, ctx context.Context, ch <-chan []byte, duration time.Duration, msg string) {
+	t.Helper()
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ch:
+		t.Errorf("assertNoMessages: unexpected message received — %s", msg)
+	case <-timer.C:
+		// Correct: no messages arrived within the window.
+	case <-ctx.Done():
+		t.Fatalf("assertNoMessages: context cancelled — %s", msg)
+	}
+}
+
+// drainChannel discards all messages currently buffered in ch without blocking.
+func drainChannel(ch <-chan []byte) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
+// saveScenariosHelper calls SaveScenarios and fails the test on error.
+func saveScenariosHelper(t *testing.T, ctx context.Context, m *workflow.Manager, scenarios []workflow.Scenario, slug string) {
+	t.Helper()
+	if err := m.SaveScenarios(ctx, scenarios, slug); err != nil {
+		t.Fatalf("SaveScenarios() error: %v", err)
+	}
 }
 
 // ---------------------------------------------------------------------------

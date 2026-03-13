@@ -119,6 +119,12 @@ func ChangeProposalEntityID(id string) string {
 	return fmt.Sprintf("c360.semspec.workflow.change-proposal.change-proposal.%s", id)
 }
 
+// DAGNodeEntityID returns the entity ID for a DAG execution node.
+// Format: local.semspec.workflow.dag-node.node.{executionID}-{nodeID}
+func DAGNodeEntityID(executionID, nodeID string) string {
+	return fmt.Sprintf("local.semspec.workflow.dag-node.node.%s-%s", executionID, nodeID)
+}
+
 // EntityType is the message type for plan entity payloads.
 var EntityType = message.Type{
 	Domain:   "plan",
@@ -171,6 +177,13 @@ var ScenarioEntityType = message.Type{
 // ChangeProposalEntityType is the message type for change proposal entity payloads.
 var ChangeProposalEntityType = message.Type{
 	Domain:   "change-proposal",
+	Category: "entity",
+	Version:  "v1",
+}
+
+// DAGNodeEntityType is the message type for DAG execution node entity payloads.
+var DAGNodeEntityType = message.Type{
+	Domain:   "dag-node",
 	Category: "entity",
 	Version:  "v1",
 }
@@ -247,6 +260,7 @@ var workflowEntityTypes = []struct {
 	{"requirement", "Requirement entity payload for graph ingestion", RequirementEntityType},
 	{"scenario", "Scenario entity payload for graph ingestion", ScenarioEntityType},
 	{"change-proposal", "ChangeProposal entity payload for graph ingestion", ChangeProposalEntityType},
+	{"dag-node", "DAG execution node entity payload for graph ingestion", DAGNodeEntityType},
 }
 
 func init() {

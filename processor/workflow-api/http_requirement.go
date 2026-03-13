@@ -14,14 +14,16 @@ import (
 
 // CreateRequirementHTTPRequest is the HTTP request body for POST /plans/{slug}/requirements.
 type CreateRequirementHTTPRequest struct {
-	Title       string `json:"title"`
-	Description string `json:"description,omitempty"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	DependsOn   []string `json:"depends_on,omitempty"`
 }
 
 // UpdateRequirementHTTPRequest is the HTTP request body for PATCH /plans/{slug}/requirements/{reqId}.
 type UpdateRequirementHTTPRequest struct {
-	Title       *string `json:"title,omitempty"`
-	Description *string `json:"description,omitempty"`
+	Title       *string  `json:"title,omitempty"`
+	Description *string  `json:"description,omitempty"`
+	DependsOn   []string `json:"depends_on,omitempty"`
 }
 
 // extractSlugRequirementAndAction extracts slug, requirementID, and action from paths like:
@@ -177,11 +179,17 @@ func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Reque
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      workflow.RequirementStatusActive,
+		DependsOn:   req.DependsOn,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
 
 	requirements = append(requirements, newReq)
+
+	if err := workflow.ValidateRequirementDAG(requirements); err != nil {
+		writeJSONError(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
 
 	if err := manager.SaveRequirements(r.Context(), requirements, slug); err != nil {
 		c.logger.Error("Failed to save requirements", "slug", slug, "error", err)
@@ -243,7 +251,15 @@ func (c *Component) handleUpdateRequirement(w http.ResponseWriter, r *http.Reque
 	if req.Description != nil {
 		requirements[idx].Description = *req.Description
 	}
+	if req.DependsOn != nil {
+		requirements[idx].DependsOn = req.DependsOn
+	}
 	requirements[idx].UpdatedAt = time.Now()
+
+	if err := workflow.ValidateRequirementDAG(requirements); err != nil {
+		writeJSONError(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
 
 	if err := manager.SaveRequirements(r.Context(), requirements, slug); err != nil {
 		c.logger.Error("Failed to save requirements", "slug", slug, "error", err)
