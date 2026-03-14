@@ -40,6 +40,18 @@ const (
 	QuestionStatusTimeout QuestionStatus = "timeout"
 )
 
+// QuestionCategory classifies the nature of the question.
+type QuestionCategory string
+
+const (
+	// QuestionCategoryKnowledge is a knowledge gap — agent lacks information.
+	QuestionCategoryKnowledge QuestionCategory = "knowledge"
+	// QuestionCategoryEnvironment is an environment issue — missing tool, wrong version, missing config.
+	QuestionCategoryEnvironment QuestionCategory = "environment"
+	// QuestionCategoryApproval is a human approval gate — agent needs sign-off before proceeding.
+	QuestionCategoryApproval QuestionCategory = "approval"
+)
+
 // QuestionUrgency represents the urgency level of a question.
 type QuestionUrgency string
 
@@ -71,8 +83,16 @@ type Question struct {
 	// Question is the actual question text
 	Question string `json:"question"`
 
+	// Category classifies the nature of the question (knowledge, environment, approval).
+	// Empty string is treated as "knowledge" for backward compatibility.
+	Category QuestionCategory `json:"category,omitempty"`
+
 	// Context provides background information for the answerer
 	Context string `json:"context,omitempty"`
+
+	// Metadata carries structured key-value pairs for machine-readable context.
+	// For environment questions: command, exit_code, missing_tool, suggested_packages.
+	Metadata map[string]string `json:"metadata,omitempty"`
 
 	// BlockedLoopID is the loop waiting for this answer (if any)
 	BlockedLoopID string `json:"blocked_loop_id,omitempty"`
@@ -126,9 +146,45 @@ type Question struct {
 
 	// Sources describes where the answer came from
 	Sources string `json:"sources,omitempty"`
+
+	// Action is the machine-executable action attached to the answer (if any).
+	// For example, an "install_package" action triggers a sandbox install.
+	Action *AnswerAction `json:"action,omitempty"`
+}
+
+// AnswerAction represents a machine-executable action attached to an answer.
+type AnswerAction struct {
+	// Type identifies the action (e.g., "install_package", "suggest_alternative").
+	Type string `json:"type"`
+
+	// Parameters are action-specific key-value pairs.
+	// For install_package: {"packages": "cargo,rustfmt"}
+	Parameters map[string]string `json:"parameters,omitempty"`
+}
+
+// Known answer action types.
+const (
+	ActionInstallPackage    = "install_package"
+	ActionSuggestAlternative = "suggest_alternative"
+	ActionNone              = "none"
+)
+
+// Validate checks that the action type is known and non-empty.
+func (a *AnswerAction) Validate() error {
+	if a.Type == "" {
+		return fmt.Errorf("action type is required")
+	}
+	switch a.Type {
+	case ActionInstallPackage, ActionSuggestAlternative, ActionNone:
+		return nil
+	default:
+		return fmt.Errorf("unknown action type %q; valid types: %s, %s, %s",
+			a.Type, ActionInstallPackage, ActionSuggestAlternative, ActionNone)
+	}
 }
 
 // NewQuestion creates a new question with a generated ID.
+// Category defaults to "knowledge" for backward compatibility.
 func NewQuestion(fromAgent, topic, question, context string) *Question {
 	return &Question{
 		ID:        fmt.Sprintf("q-%s", uuid.New().String()[:8]),
@@ -136,10 +192,19 @@ func NewQuestion(fromAgent, topic, question, context string) *Question {
 		Topic:     topic,
 		Question:  question,
 		Context:   context,
+		Category:  QuestionCategoryKnowledge,
 		Urgency:   QuestionUrgencyNormal,
 		Status:    QuestionStatusPending,
 		CreatedAt: time.Now().UTC(),
 	}
+}
+
+// NewCategorizedQuestion creates a question with explicit category and metadata.
+func NewCategorizedQuestion(fromAgent, topic, question, ctx string, category QuestionCategory, metadata map[string]string) *Question {
+	q := NewQuestion(fromAgent, topic, question, ctx)
+	q.Category = category
+	q.Metadata = metadata
+	return q
 }
 
 // QuestionStore provides operations for storing and retrieving questions.
@@ -288,6 +353,9 @@ type AnswerPayload struct {
 
 	// Sources describes where the answer came from.
 	Sources string `json:"sources,omitempty"`
+
+	// Action is an optional machine-executable action (e.g., install_package).
+	Action *AnswerAction `json:"action,omitempty"`
 }
 
 // AnswerType is the message type for answer payloads.

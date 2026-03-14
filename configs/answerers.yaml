@@ -40,6 +40,21 @@ routes:
     capability: fast
     sla: 5m
 
+  # Environment/sandbox issues → human (missing tools, permissions, config)
+  - pattern: "environment.**"
+    answerer: human/requester
+    sla: 1h
+
+  # Sandbox-specific issues → human
+  - pattern: "sandbox.**"
+    answerer: human/requester
+    sla: 1h
+
+  # Approval gates → human
+  - pattern: "approval.**"
+    answerer: human/requester
+    sla: 4h
+
 # Default: ask the human who started the workflow
 default:
   answerer: human/requester

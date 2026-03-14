@@ -15,10 +15,12 @@ import (
 	"github.com/c360studio/semspec/tools/file"
 	"github.com/c360studio/semspec/tools/git"
 	"github.com/c360studio/semspec/tools/github"
+	"github.com/c360studio/semspec/tools/question"
 	"github.com/c360studio/semspec/tools/review"
 	"github.com/c360studio/semspec/tools/spawn"
 	"github.com/c360studio/semspec/tools/tree"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/answerer"
 	// Register workflow tools via init()
 	_ "github.com/c360studio/semspec/tools/workflow"
 	// Register web search tool via init() — only active when BRAVE_SEARCH_API_KEY is set.
@@ -51,6 +53,14 @@ type AgenticToolDeps struct {
 	// ErrorCategoryRegistry is required by review_scenario for category validation.
 	// If nil, the review tool is not registered.
 	ErrorCategoryRegistry *workflow.ErrorCategoryRegistry
+
+	// QuestionStore is required by raise_question for storing questions.
+	// If nil, the raise_question tool is not registered.
+	QuestionStore *workflow.QuestionStore
+
+	// QuestionRouter is optional — if provided, raise_question routes questions
+	// after storing them.
+	QuestionRouter *answerer.Router
 }
 
 // RegisterAgenticTools registers the three agentic tool executors that require
@@ -110,6 +120,14 @@ func RegisterAgenticTools(deps AgenticToolDeps) {
 		reviewExec := review.NewExecutor(rg, deps.ErrorCategoryRegistry)
 		for _, tool := range reviewExec.ListTools() {
 			_ = agentictools.RegisterTool(tool.Name, NewRecordingExecutor(reviewExec))
+		}
+	}
+
+	// raise_question — requires question store.
+	if deps.QuestionStore != nil {
+		questionExec := question.NewExecutor(deps.QuestionStore, deps.QuestionRouter)
+		for _, tool := range questionExec.ListTools() {
+			_ = agentictools.RegisterTool(tool.Name, NewRecordingExecutor(questionExec))
 		}
 	}
 }

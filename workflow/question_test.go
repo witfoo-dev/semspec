@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -74,6 +75,114 @@ func TestAnswerPayload_Validation(t *testing.T) {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestNewQuestion_DefaultsCategory(t *testing.T) {
+	q := NewQuestion("agent", "api.test", "question?", "ctx")
+	if q.Category != QuestionCategoryKnowledge {
+		t.Errorf("Category = %q, want %q", q.Category, QuestionCategoryKnowledge)
+	}
+}
+
+func TestNewCategorizedQuestion(t *testing.T) {
+	meta := map[string]string{
+		"command":      "cargo build",
+		"exit_code":    "127",
+		"missing_tool": "cargo",
+	}
+	q := NewCategorizedQuestion("developer", "environment.sandbox.missing-tool",
+		"cargo is not installed", "tried to build rust project",
+		QuestionCategoryEnvironment, meta)
+
+	if q.Category != QuestionCategoryEnvironment {
+		t.Errorf("Category = %q, want %q", q.Category, QuestionCategoryEnvironment)
+	}
+	if q.Metadata["command"] != "cargo build" {
+		t.Errorf("Metadata[command] = %q, want %q", q.Metadata["command"], "cargo build")
+	}
+	if q.Metadata["exit_code"] != "127" {
+		t.Errorf("Metadata[exit_code] = %q, want %q", q.Metadata["exit_code"], "127")
+	}
+	if q.Metadata["missing_tool"] != "cargo" {
+		t.Errorf("Metadata[missing_tool] = %q, want %q", q.Metadata["missing_tool"], "cargo")
+	}
+	// Verify it inherits defaults from NewQuestion
+	if q.Status != QuestionStatusPending {
+		t.Errorf("Status = %q, want %q", q.Status, QuestionStatusPending)
+	}
+	if q.Urgency != QuestionUrgencyNormal {
+		t.Errorf("Urgency = %q, want %q", q.Urgency, QuestionUrgencyNormal)
+	}
+}
+
+func TestAnswerAction_JSONRoundTrip(t *testing.T) {
+	action := &AnswerAction{
+		Type:       "install_package",
+		Parameters: map[string]string{"packages": "cargo,rustfmt"},
+	}
+
+	data, err := json.Marshal(action)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var decoded AnswerAction
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if decoded.Type != "install_package" {
+		t.Errorf("Type = %q, want %q", decoded.Type, "install_package")
+	}
+	if decoded.Parameters["packages"] != "cargo,rustfmt" {
+		t.Errorf("Parameters[packages] = %q, want %q", decoded.Parameters["packages"], "cargo,rustfmt")
+	}
+}
+
+func TestQuestion_ActionInJSON(t *testing.T) {
+	q := NewCategorizedQuestion("agent", "env.sandbox", "need cargo", "",
+		QuestionCategoryEnvironment, nil)
+	q.Action = &AnswerAction{
+		Type:       "install_package",
+		Parameters: map[string]string{"packages": "cargo"},
+	}
+
+	data, err := json.Marshal(q)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var decoded Question
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if decoded.Action == nil {
+		t.Fatal("Action should not be nil after round-trip")
+	}
+	if decoded.Action.Type != "install_package" {
+		t.Errorf("Action.Type = %q, want %q", decoded.Action.Type, "install_package")
+	}
+}
+
+func TestQuestion_BackwardCompatible_NoCategory(t *testing.T) {
+	// Simulate deserializing an old question without category/metadata/action
+	old := `{"id":"q-abc","from_agent":"planner","topic":"api.test","question":"what?","urgency":"normal","status":"pending","created_at":"2026-01-01T00:00:00Z"}`
+
+	var q Question
+	if err := json.Unmarshal([]byte(old), &q); err != nil {
+		t.Fatalf("Unmarshal old question: %v", err)
+	}
+
+	if q.Category != "" {
+		t.Errorf("Category should be empty for old questions, got %q", q.Category)
+	}
+	if q.Metadata != nil {
+		t.Errorf("Metadata should be nil for old questions, got %v", q.Metadata)
+	}
+	if q.Action != nil {
+		t.Errorf("Action should be nil for old questions")
 	}
 }
 

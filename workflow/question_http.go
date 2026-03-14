@@ -121,15 +121,17 @@ type ListQuestionsResponse struct {
 
 // AnswerRequest is the request body for POST /questions/{id}/answer.
 type AnswerRequest struct {
-	Answer     string `json:"answer"`
-	Confidence string `json:"confidence,omitempty"`
-	Sources    string `json:"sources,omitempty"`
+	Answer     string        `json:"answer"`
+	Confidence string        `json:"confidence,omitempty"`
+	Sources    string        `json:"sources,omitempty"`
+	Action     *AnswerAction `json:"action,omitempty"`
 }
 
 // handleList handles GET /questions with optional query parameters.
 // Query parameters:
 //   - status: pending, answered, timeout, all (default: pending)
 //   - topic: filter by topic pattern (e.g., "requirements.*")
+//   - category: filter by question category (knowledge, environment, approval)
 //   - limit: max results (default: 50)
 func (h *QuestionHTTPHandler) handleList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -137,6 +139,7 @@ func (h *QuestionHTTPHandler) handleList(w http.ResponseWriter, r *http.Request)
 	// Parse query parameters
 	statusParam := r.URL.Query().Get("status")
 	topicParam := r.URL.Query().Get("topic")
+	categoryParam := r.URL.Query().Get("category")
 	limitParam := r.URL.Query().Get("limit")
 
 	// Parse status filter
@@ -179,6 +182,22 @@ func (h *QuestionHTTPHandler) handleList(w http.ResponseWriter, r *http.Request)
 		filtered := make([]*Question, 0)
 		for _, q := range questions {
 			if matchTopic(q.Topic, topicParam) {
+				filtered = append(filtered, q)
+			}
+		}
+		questions = filtered
+	}
+
+	// Filter by category if specified.
+	// Treat empty category (old questions) as "knowledge" for backward compat.
+	if categoryParam != "" {
+		filtered := make([]*Question, 0)
+		for _, q := range questions {
+			qCat := string(q.Category)
+			if qCat == "" {
+				qCat = string(QuestionCategoryKnowledge)
+			}
+			if qCat == categoryParam {
 				filtered = append(filtered, q)
 			}
 		}
@@ -292,13 +311,28 @@ func (h *QuestionHTTPHandler) handleAnswerWithID(w http.ResponseWriter, r *http.
 		answeredBy = "anonymous"
 	}
 
-	// Answer the question
-	if err := h.store.Answer(ctx, id, req.Answer, answeredBy, "human", req.Confidence, req.Sources); err != nil {
-		// Check for concurrent modification (optimistic locking failure)
-		if strings.Contains(err.Error(), "concurrent modification") || strings.Contains(err.Error(), "wrong last sequence") {
-			h.writeError(w, http.StatusConflict, "question was modified by another request")
+	// Validate action if provided.
+	if req.Action != nil {
+		if err := req.Action.Validate(); err != nil {
+			h.writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid action: %v", err))
 			return
 		}
+	}
+
+	// Answer the question — do get-modify-store inline to include action.
+	// Note: Store uses KV Put (unconditional write), not CAS. Two concurrent
+	// answers can race. Proper CAS requires Get revision + bucket.Update.
+	now := time.Now().UTC()
+	question.Status = QuestionStatusAnswered
+	question.Answer = req.Answer
+	question.AnsweredBy = answeredBy
+	question.AnswererType = "human"
+	question.Confidence = req.Confidence
+	question.Sources = req.Sources
+	question.AnsweredAt = &now
+	question.Action = req.Action
+
+	if err := h.store.Store(ctx, question); err != nil {
 		h.log().Error("Failed to answer question", "id", id, "error", err)
 		h.writeError(w, http.StatusInternalServerError, "failed to answer question")
 		return
@@ -313,6 +347,7 @@ func (h *QuestionHTTPHandler) handleAnswerWithID(w http.ResponseWriter, r *http.
 		Answer:       req.Answer,
 		Confidence:   req.Confidence,
 		Sources:      req.Sources,
+		Action:       req.Action,
 	}
 	baseMsg := message.NewBaseMessage(AnswerType, payload, "question-http")
 	answerData, err := json.Marshal(baseMsg)
@@ -328,8 +363,7 @@ func (h *QuestionHTTPHandler) handleAnswerWithID(w http.ResponseWriter, r *http.
 		"answered_by", answeredBy,
 	)
 
-	// Return the updated question
-	question, _ = h.store.Get(ctx, id)
+	// Return the updated question (already modified in place above).
 	h.writeJSON(w, http.StatusOK, question)
 }
 
@@ -400,8 +434,9 @@ func (h *QuestionHTTPHandler) handleStream(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Parse status filter
+	// Parse filters
 	statusFilter := r.URL.Query().Get("status")
+	categoryFilter := r.URL.Query().Get("category")
 
 	// Track seen questions to detect changes
 	seenQuestions := make(map[string]*Question)
@@ -458,6 +493,18 @@ func (h *QuestionHTTPHandler) handleStream(w http.ResponseWriter, r *http.Reques
 			// Apply status filter
 			if statusFilter != "" && string(question.Status) != statusFilter && statusFilter != "all" {
 				continue
+			}
+
+			// Apply category filter.
+			// Treat empty category (old questions) as "knowledge" for backward compat.
+			if categoryFilter != "" {
+				qCat := string(question.Category)
+				if qCat == "" {
+					qCat = string(QuestionCategoryKnowledge)
+				}
+				if qCat != categoryFilter {
+					continue
+				}
 			}
 
 			// Determine event type
