@@ -856,6 +856,132 @@ func TestSearch(t *testing.T) {
 	}
 }
 
+func TestInstall(t *testing.T) {
+	_, ts := newTestServer(t)
+	createWorktree(t, ts, "test-install")
+
+	// Install "true" (a command that exists everywhere) via a command that will succeed.
+	// We use /bin/sh echo to test the plumbing without needing apt/npm.
+	resp := doRequest(t, ts, http.MethodPost, "/install", InstallRequest{
+		TaskID:         "test-install",
+		PackageManager: "apt",
+		Packages:       []string{"coreutils"}, // Already installed, apt-get install -y is idempotent
+	})
+
+	var result InstallResponse
+	decodeJSON(t, resp, &result)
+
+	// On macOS / CI without apt, this will fail — that's expected.
+	// The test verifies the API plumbing, not that apt works.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if result.Status != "installed" && result.Status != "failed" {
+		t.Errorf("unexpected status: %s", result.Status)
+	}
+}
+
+func TestInstallValidation(t *testing.T) {
+	_, ts := newTestServer(t)
+	createWorktree(t, ts, "test-install-val")
+
+	tests := []struct {
+		name     string
+		body     InstallRequest
+		wantCode int
+		wantErr  string
+	}{
+		{
+			name:     "empty packages",
+			body:     InstallRequest{TaskID: "test-install-val", PackageManager: "apt", Packages: []string{}},
+			wantCode: http.StatusBadRequest,
+			wantErr:  "packages is required",
+		},
+		{
+			name:     "invalid package manager",
+			body:     InstallRequest{TaskID: "test-install-val", PackageManager: "yum", Packages: []string{"foo"}},
+			wantCode: http.StatusBadRequest,
+			wantErr:  "unsupported package_manager",
+		},
+		{
+			name:     "invalid task_id",
+			body:     InstallRequest{TaskID: "../escape", PackageManager: "apt", Packages: []string{"foo"}},
+			wantCode: http.StatusBadRequest,
+			wantErr:  "invalid task_id",
+		},
+		{
+			name:     "invalid package name with shell injection",
+			body:     InstallRequest{TaskID: "test-install-val", PackageManager: "apt", Packages: []string{"foo; rm -rf /"}},
+			wantCode: http.StatusBadRequest,
+			wantErr:  "invalid package name",
+		},
+		{
+			name:     "too many packages",
+			body:     InstallRequest{TaskID: "test-install-val", PackageManager: "apt", Packages: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u"}},
+			wantCode: http.StatusBadRequest,
+			wantErr:  "too many packages",
+		},
+		{
+			name:     "flag injection",
+			body:     InstallRequest{TaskID: "test-install-val", PackageManager: "apt", Packages: []string{"--pre-invoke=malicious"}},
+			wantCode: http.StatusBadRequest,
+			wantErr:  "invalid package name",
+		},
+		{
+			name:     "nonexistent worktree",
+			body:     InstallRequest{TaskID: "no-such-task", PackageManager: "apt", Packages: []string{"foo"}},
+			wantCode: http.StatusNotFound,
+			wantErr:  "worktree not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := doRequest(t, ts, http.MethodPost, "/install", tt.body)
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tt.wantCode {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tt.wantCode)
+			}
+
+			var errResp map[string]string
+			json.NewDecoder(resp.Body).Decode(&errResp)
+			if !strings.Contains(errResp["error"], tt.wantErr) {
+				t.Errorf("error = %q, want containing %q", errResp["error"], tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestInstallValidPackageName(t *testing.T) {
+	tests := []struct {
+		name  string
+		pkg   string
+		valid bool
+	}{
+		{"simple", "cargo", true},
+		{"hyphenated", "build-essential", true},
+		{"go module", "golang.org/x/tools/cmd/goimports@latest", true},
+		{"npm scoped", "@types/node", true},
+		{"version constraint", "flask==2.3.0", true},
+		{"flag injection", "--pre-invoke=cmd", false},
+		{"flag short", "-y", false},
+		{"shell injection semicolon", "foo;rm -rf /", false},
+		{"shell injection backtick", "foo`whoami`", false},
+		{"shell injection dollar", "foo$(whoami)", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isValidPackageName(tt.pkg)
+			if got != tt.valid {
+				t.Errorf("isValidPackageName(%q) = %v, want %v", tt.pkg, got, tt.valid)
+			}
+		})
+	}
+}
+
 func TestCleanupStaleWorktrees(t *testing.T) {
 	srv, ts := newTestServer(t)
 

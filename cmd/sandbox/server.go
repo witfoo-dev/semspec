@@ -49,6 +49,9 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 
 	// Command execution (scoped to worktree).
 	mux.HandleFunc("POST /exec", s.handleExec)
+
+	// Package installation.
+	mux.HandleFunc("POST /install", s.handleInstall)
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +92,20 @@ type ExecResponse struct {
 	TimedOut       bool   `json:"timed_out"`
 	Classification string `json:"classification,omitempty"`
 	MissingCommand string `json:"missing_command,omitempty"`
+}
+
+type InstallRequest struct {
+	TaskID         string   `json:"task_id"`
+	PackageManager string   `json:"package_manager"` // apt, npm, pip, go
+	Packages       []string `json:"packages"`
+}
+
+type InstallResponse struct {
+	Status   string `json:"status"` // installed, failed
+	Stdout   string `json:"stdout,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
+	ExitCode int    `json:"exit_code"`
+	TimedOut bool   `json:"timed_out"`
 }
 
 type ListRequest struct {
@@ -665,6 +682,98 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 		Classification: string(classification),
 		MissingCommand: missingCmd,
 	})
+}
+
+// handleInstall installs packages inside the sandbox container.
+// POST /install  {"task_id": "abc", "package_manager": "apt", "packages": ["cargo"]}
+//
+// Supported package managers:
+//   - apt: runs apt-get install -y <packages>
+//   - npm: runs npm install -g <packages>
+//   - pip: runs pip3 install <packages>
+//   - go:  runs go install <packages> (each must end in @version)
+//
+// The task_id scopes the working directory. For "go install", the command runs
+// in the worktree directory so GOPATH is correct.
+func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
+	var req InstallRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	if !isValidID(req.TaskID) {
+		writeError(w, http.StatusBadRequest, "invalid task_id")
+		return
+	}
+	if len(req.Packages) == 0 {
+		writeError(w, http.StatusBadRequest, "packages is required")
+		return
+	}
+	if len(req.Packages) > 20 {
+		writeError(w, http.StatusBadRequest, "too many packages (max 20)")
+		return
+	}
+
+	// Validate package names to prevent command injection.
+	for _, pkg := range req.Packages {
+		if !isValidPackageName(pkg) {
+			writeError(w, http.StatusBadRequest, "invalid package name: "+pkg)
+			return
+		}
+	}
+
+	worktreePath := filepath.Join(s.worktreeRoot, req.TaskID)
+	if _, err := os.Stat(worktreePath); err != nil {
+		writeError(w, http.StatusNotFound, "worktree not found for task_id: "+req.TaskID)
+		return
+	}
+
+	// Build the install command.
+	var cmd string
+	switch req.PackageManager {
+	case "apt":
+		cmd = "apt-get install -y " + strings.Join(req.Packages, " ")
+	case "npm":
+		cmd = "npm install -g " + strings.Join(req.Packages, " ")
+	case "pip":
+		cmd = "pip3 install " + strings.Join(req.Packages, " ")
+	case "go":
+		cmd = "go install " + strings.Join(req.Packages, " ")
+	default:
+		writeError(w, http.StatusBadRequest,
+			"unsupported package_manager: "+req.PackageManager+"; valid: apt, npm, pip, go")
+		return
+	}
+
+	// Use a generous timeout for installs (3 min).
+	timeout := 3 * time.Minute
+
+	stdout, stderr, exitCode, timedOut := execCommand(r.Context(), worktreePath, cmd, timeout, s.maxOutputBytes)
+
+	status := "installed"
+	if exitCode != 0 {
+		status = "failed"
+	}
+
+	writeJSON(w, http.StatusOK, InstallResponse{
+		Status:   status,
+		Stdout:   stdout,
+		Stderr:   stderr,
+		ExitCode: exitCode,
+		TimedOut: timedOut,
+	})
+}
+
+// isValidPackageName checks that a package name is safe for shell use.
+// Allows alphanumeric, hyphens, underscores, dots, slashes, @, =, and colons
+// (for Go module paths like golang.org/x/tools/cmd/goimports@latest).
+var validPackageRe = regexp.MustCompile(`^[a-zA-Z0-9._/@:=+~-]{1,256}$`)
+
+func isValidPackageName(name string) bool {
+	if strings.HasPrefix(name, "-") {
+		return false // prevent flag injection (e.g., --pre-invoke=cmd)
+	}
+	return validPackageRe.MatchString(name)
 }
 
 // ---------------------------------------------------------------------------

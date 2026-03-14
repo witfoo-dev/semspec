@@ -22,10 +22,11 @@ const maxAnswerBodySize = 1 << 20 // 1 MB
 // Implements REST endpoints for listing, viewing, and answering questions,
 // plus an SSE stream for real-time question events.
 type QuestionHTTPHandler struct {
-	store  *QuestionStore
-	nc     *natsclient.Client
-	logger *slog.Logger
-	prefix string // URL prefix for path extraction
+	store    *QuestionStore
+	nc       *natsclient.Client
+	logger   *slog.Logger
+	prefix   string // URL prefix for path extraction
+	actions  *ActionDispatcher
 }
 
 // NewQuestionHTTPHandler creates a new HTTP handler for questions.
@@ -45,6 +46,12 @@ func NewQuestionHTTPHandler(nc *natsclient.Client, logger *slog.Logger) (*Questi
 		nc:     nc,
 		logger: logger,
 	}, nil
+}
+
+// SetActionDispatcher configures the handler to execute answer actions.
+// When set, answering a question with an action triggers execution via the dispatcher.
+func (h *QuestionHTTPHandler) SetActionDispatcher(d *ActionDispatcher) {
+	h.actions = d
 }
 
 // log returns the logger, defaulting to slog.Default if nil.
@@ -363,7 +370,23 @@ func (h *QuestionHTTPHandler) handleAnswerWithID(w http.ResponseWriter, r *http.
 		"answered_by", answeredBy,
 	)
 
-	// Return the updated question (already modified in place above).
+	// Execute action if present and dispatcher is configured.
+	if req.Action != nil && req.Action.Type != ActionNone && h.actions != nil {
+		// Use the question's TaskID for scoping (e.g., sandbox worktree).
+		result, err := h.actions.Execute(ctx, question.TaskID, req.Action)
+		if err != nil {
+			h.log().Warn("Action execution failed",
+				"question_id", id,
+				"action_type", req.Action.Type,
+				"error", err,
+			)
+			question.ActionResult = fmt.Sprintf("action failed: %v", err)
+		} else if result != "" {
+			question.ActionResult = result
+		}
+	}
+
+	// Return the updated question (backward-compatible — ActionResult uses omitempty).
 	h.writeJSON(w, http.StatusOK, question)
 }
 

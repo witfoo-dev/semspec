@@ -150,6 +150,10 @@ type Question struct {
 	// Action is the machine-executable action attached to the answer (if any).
 	// For example, an "install_package" action triggers a sandbox install.
 	Action *AnswerAction `json:"action,omitempty"`
+
+	// ActionResult holds the outcome of executing the answer action (if any).
+	// Populated server-side after action execution; not set by callers.
+	ActionResult string `json:"action_result,omitempty"`
 }
 
 // AnswerAction represents a machine-executable action attached to an answer.

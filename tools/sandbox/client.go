@@ -302,6 +302,34 @@ func (c *Client) Exec(ctx context.Context, taskID, command string, timeoutMs int
 }
 
 // ---------------------------------------------------------------------------
+// Package installation
+// ---------------------------------------------------------------------------
+
+// InstallResult holds the outcome of a package install inside the sandbox.
+type InstallResult struct {
+	Status   string `json:"status"` // installed, failed
+	Stdout   string `json:"stdout,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
+	ExitCode int    `json:"exit_code"`
+}
+
+// Install installs packages inside the sandbox container using the specified
+// package manager (apt, npm, pip, go).
+// Server route: POST /install  body: {"task_id", "package_manager", "packages"}
+func (c *Client) Install(ctx context.Context, taskID, packageManager string, packages []string) (*InstallResult, error) {
+	body := struct {
+		TaskID         string   `json:"task_id"`
+		PackageManager string   `json:"package_manager"`
+		Packages       []string `json:"packages"`
+	}{TaskID: taskID, PackageManager: packageManager, Packages: packages}
+	var result InstallResult
+	if err := c.doJSON(ctx, http.MethodPost, "/install", body, &result); err != nil {
+		return nil, fmt.Errorf("install: %w", err)
+	}
+	return &result, nil
+}
+
+// ---------------------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------------------
 
