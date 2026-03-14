@@ -80,6 +80,46 @@ The files_modified and tool_calls arrays MUST reflect actual tool calls you made
 		},
 
 		// =====================================================================
+		// Developer behavioral gates (exploration, anti-description, checklist, budget)
+		// =====================================================================
+		{
+			ID:       "software.developer.behavioral-gates",
+			Category: prompt.CategoryBehavioralGate,
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				var sb strings.Builder
+
+				// Tool-use budget (only when configured).
+				if ctx.TaskContext.MaxIterations > 0 {
+					sb.WriteString(fmt.Sprintf(
+						"BUDGET: You have %d tool-use rounds (currently on round %d). "+
+							"Plan your work to finish well within this budget. Do NOT explore open-endedly.\n\n",
+						ctx.TaskContext.MaxIterations, ctx.TaskContext.Iteration))
+				}
+
+				// Mandatory workspace exploration.
+				sb.WriteString(`BEFORE writing code, you MUST use at least one workspace tool (file_read, file_list) to understand the existing codebase. Do not write code based on assumptions alone — read the relevant files first.
+
+`)
+				// Anti-description directive.
+				sb.WriteString(`Your deliverable MUST be finished code written via file_write — not a description of what you would do, not a plan, not a summary. If you complete a task without calling file_write, the task has FAILED.
+
+`)
+				// Structural checklist.
+				sb.WriteString(`STRUCTURAL CHECKLIST — You will be auto-rejected if ANY item fails:
+- All code changes must include corresponding tests. No untested code.
+- No hardcoded API keys, passwords, or secrets in source code.
+- All errors must be handled or explicitly propagated. No silently swallowed errors.
+- No debug prints, TODO hacks, or commented-out code left in the submission.`)
+
+				return sb.String()
+			},
+		},
+
+		// =====================================================================
 		// Developer retry fragment
 		// =====================================================================
 		{
@@ -95,6 +135,8 @@ The files_modified and tool_calls arrays MUST reflect actual tool calls you made
 
 You MUST call file_write to fix the issues. Do NOT just describe fixes — you must EXECUTE them.
 If you do not call file_write, the retry has FAILED.
+
+DO NOT repeat these mistakes. Build on your previous work — do not start from scratch.
 
 Previous Feedback:
 The reviewer rejected your implementation with this feedback:
@@ -426,6 +468,43 @@ Note: You have READ-ONLY access. You cannot modify files.`,
 		},
 
 		// =====================================================================
+		// Code Reviewer structural checklist (dual injection — same as developer)
+		// =====================================================================
+		{
+			ID:       "software.reviewer.structural-checklist",
+			Category: prompt.CategoryBehavioralGate,
+			Roles:    []prompt.Role{prompt.RoleReviewer},
+			Content: `STRUCTURAL CHECKLIST — Any failure is an automatic rejection:
+- All code changes must include corresponding tests. No untested code.
+- No hardcoded API keys, passwords, or secrets in source code.
+- All errors must be handled or explicitly propagated. No silently swallowed errors.
+- No debug prints, TODO hacks, or commented-out code left in the submission.
+
+Check each item. If ANY item fails, the verdict MUST be "rejected" with rejection_type "fixable".`,
+		},
+
+		// =====================================================================
+		// Code Reviewer rating calibration
+		// =====================================================================
+		{
+			ID:       "software.reviewer.rating-calibration",
+			Category: prompt.CategoryRoleContext,
+			Priority: 1,
+			Roles:    []prompt.Role{prompt.RoleReviewer},
+			Content: `RATING CALIBRATION:
+Rate honestly. These ratings determine the agent's future assignments.
+If you inflate scores, underperforming agents get trusted with harder work — and when they fail, it costs everyone.
+
+  1 = Unacceptable — fundamentally wrong, missing, or unusable
+  2 = Below expectations — significant gaps, errors, or missing requirements
+  3 = Meets expectations — correct, complete, does what was asked (baseline for competent work)
+  4 = Exceeds expectations — well-structured, thorough, handles edge cases
+  5 = Exceptional — production-quality, elegant, rare
+
+Most good work is a 3 or 4, not a 5. A 3 for solid work is correct — not a 5.`,
+		},
+
+		// =====================================================================
 		// Requirement Generator fragments
 		// =====================================================================
 		{
@@ -664,9 +743,9 @@ Guidelines:
 			},
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
 				var sb strings.Builder
-				sb.WriteString("RECURRING ISSUES — Your recent reviews flagged these patterns. Pay special attention:\n\n")
+				sb.WriteString("RECURRING ISSUES — Your recent reviews flagged these patterns. You MUST address ALL of the following:\n\n")
 				for _, trend := range ctx.TaskContext.ErrorTrends {
-					sb.WriteString(fmt.Sprintf("⚠ %s (%d occurrences):\n%s\n\n", trend.Label, trend.Count, trend.Guidance))
+					fmt.Fprintf(&sb, "- %s (%d occurrences): %s\n", trend.Label, trend.Count, trend.Guidance)
 				}
 				return sb.String()
 			},

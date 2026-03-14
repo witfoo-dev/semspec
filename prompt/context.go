@@ -55,6 +55,12 @@ type TaskContext struct {
 	// Feedback is reviewer feedback for retry prompts.
 	Feedback string
 
+	// Iteration is the current attempt number (1-based).
+	Iteration int
+
+	// MaxIterations is the total tool-use budget for this task.
+	MaxIterations int
+
 	// ErrorTrends carries resolved error categories with occurrence counts
 	// for trend-based prompt injection (Phase A persistent agent roster).
 	ErrorTrends []ErrorTrend

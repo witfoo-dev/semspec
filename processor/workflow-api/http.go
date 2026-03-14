@@ -498,6 +498,10 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		requireMethod(w, r, http.MethodPost, func() { c.handlePromotePlan(w, r, slug) })
 	case "reviews":
 		c.handleGetPlanReviews(w, r)
+	case "export-specs":
+		requireMethod(w, r, http.MethodPost, func() { c.handleExportSpecs(w, r, slug) })
+	case "archive":
+		requireMethod(w, r, http.MethodPost, func() { c.handleGenerateArchive(w, r, slug) })
 	default:
 		if handled := c.handlePhaseCollectionEndpoint(w, r, slug, endpoint); handled {
 			return

@@ -113,6 +113,8 @@ func categoryLabel(cat Category) string {
 		return "Tool Directives"
 	case CategoryProviderHints:
 		return "Provider"
+	case CategoryBehavioralGate:
+		return "Behavioral Gates"
 	case CategoryRoleContext:
 		return "Role"
 	case CategoryPeerFeedback:

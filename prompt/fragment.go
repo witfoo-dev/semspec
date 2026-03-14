@@ -14,6 +14,9 @@ const (
 	CategoryToolDirective Category = 100
 	// CategoryProviderHints contains provider-specific formatting instructions.
 	CategoryProviderHints Category = 200
+	// CategoryBehavioralGate contains mandatory behavioral rules injected early
+	// (exploration gates, anti-description directives, structural checklist, tool budget).
+	CategoryBehavioralGate Category = 275
 	// CategoryRoleContext contains role-specific behavioral instructions.
 	CategoryRoleContext Category = 300
 	// CategoryPeerFeedback contains error trend warnings from peer reviews.
