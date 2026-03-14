@@ -11,10 +11,8 @@
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import { ReviewDashboard } from '$lib/components/review';
 	import TrajectoryPanel from '$lib/components/trajectory/TrajectoryPanel.svelte';
-	import QuestionQueue from '$lib/components/activity/QuestionQueue.svelte';
 	import { chatBarStore } from '$lib/stores/chatDrawer.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
-	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { planSelectionStore, type PlanSelection } from '$lib/stores/planSelection.svelte';
 	import { api } from '$lib/api/client';
 	import { derivePlanPipeline, type PlanStage } from '$lib/types/plan';
@@ -114,10 +112,7 @@
 				});
 			}
 		});
-		// Fetch questions for QuestionQueue
-		questionsStore.fetch('pending');
 		const interval = setInterval(() => {
-			questionsStore.fetch('pending');
 			// Periodically refresh requirements during cascade
 			if (plan && ['approved', 'requirements_generated', 'scenarios_generated'].includes(plan.stage)) {
 				fetchRequirements();
@@ -148,23 +143,6 @@
 		} catch {
 			scenariosByReq = { ...scenariosByReq, [reqId]: [] };
 		}
-	}
-
-	// Get plan's loop IDs for filtering questions
-	const planLoopIds = $derived.by(() => {
-		if (!plan) return [];
-		return (plan.active_loops ?? []).map((l) => l.loop_id);
-	});
-
-	// Filter questions to this plan's loops
-	const planQuestions = $derived(
-		questionsStore.pending.filter(
-			(q) => q.blocked_loop_id && planLoopIds.includes(q.blocked_loop_id)
-		)
-	);
-
-	function handleAnswerQuestion(questionId: string): void {
-		chatBarStore.open({ type: 'question', questionId, planSlug: slug });
 	}
 
 	// Inform the bottom chat bar which plan is currently active
@@ -439,12 +417,6 @@
 							/>
 						{/if}
 
-						{#if planQuestions.length > 0}
-							<div class="questions-container">
-								<QuestionQueue questions={planQuestions} onAnswer={handleAnswerQuestion} />
-							</div>
-						{/if}
-
 						<ActionBar
 							{plan}
 							onPromote={handlePromote}
@@ -701,11 +673,6 @@
 		margin-top: var(--space-4);
 		padding-top: var(--space-4);
 		border-top: 1px solid var(--color-border);
-	}
-
-	.questions-container {
-		margin-bottom: var(--space-4);
-		flex-shrink: 0;
 	}
 
 	.detail-panel {

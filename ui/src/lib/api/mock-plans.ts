@@ -524,7 +524,7 @@ export const mockPhases: Record<string, Phase[]> = {
  * Attention items derived from plans.
  */
 export interface AttentionItem {
-	type: 'approval_needed' | 'question_pending' | 'task_failed' | 'task_blocked' | 'rejection';
+	type: 'approval_needed' | 'task_failed' | 'task_blocked' | 'rejection';
 	plan_slug?: string;
 	loop_id?: string;
 	title: string;

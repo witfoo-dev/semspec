@@ -93,10 +93,6 @@ export type SignalResponse = semstreamsComponents['schemas']['SignalResponse'];
 export type ActivityEvent = semstreamsComponents['schemas']['ActivityEvent'];
 
 // ============================================================================
-// Question types (Knowledge Gap Resolution Protocol)
-// ============================================================================
-
-// ============================================================================
 // ADR-024 graph topology types
 // ============================================================================
 
@@ -116,13 +112,21 @@ export { getChangeProposalStatusInfo } from './change-proposal';
 export type QuestionStatus = 'pending' | 'answered' | 'timeout';
 export type QuestionUrgency = 'low' | 'normal' | 'high' | 'blocking';
 
+export interface AnswerAction {
+	type: 'install_package' | 'suggest_alternative' | 'none';
+	parameters: Record<string, string>;
+}
+
 export interface Question {
 	id: string;
 	from_agent: string;
 	topic: string;
 	question: string;
+	category?: 'knowledge' | 'environment' | 'approval';
 	context?: string;
+	metadata?: Record<string, string>;
 	blocked_loop_id?: string;
+	plan_slug?: string;
 	urgency: QuestionUrgency;
 	status: QuestionStatus;
 	created_at: string;
@@ -133,4 +137,5 @@ export interface Question {
 	answerer_type?: 'agent' | 'team' | 'human';
 	confidence?: 'high' | 'medium' | 'low';
 	sources?: string;
+	action?: AnswerAction;
 }

@@ -1,6 +1,5 @@
 <script lang="ts">
 	import ActivityFeed from '$lib/components/activity/ActivityFeed.svelte';
-	import QuestionQueue from '$lib/components/activity/QuestionQueue.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import CollapsiblePanel from '$lib/components/shared/CollapsiblePanel.svelte';
 	import LoopCard from '$lib/components/loops/LoopCard.svelte';
@@ -8,8 +7,6 @@
 	import { AgentTimeline } from '$lib/components/timeline';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
-	import { questionsStore } from '$lib/stores/questions.svelte';
-	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
 
@@ -24,15 +21,7 @@
 	onMount(() => {
 		mounted = true;
 		plansStore.fetch();
-		questionsStore.fetch('pending');
-		const interval = setInterval(() => questionsStore.fetch('pending'), 10000);
-		return () => clearInterval(interval);
 	});
-
-	// Handle "Answer" click from QuestionQueue - opens drawer with question context
-	function handleAnswerQuestion(questionId: string): void {
-		chatDrawerStore.open({ type: 'question', questionId });
-	}
 
 	const activeLoops = $derived(loopsStore.active);
 	const pausedLoops = $derived(loopsStore.paused);
@@ -127,13 +116,6 @@
 		{/snippet}
 
 		<div class="panel-body">
-			<!-- Questions inline at top of panel -->
-			{#if questionsStore.pending.length > 0}
-				<div class="questions-section">
-					<QuestionQueue onAnswer={handleAnswerQuestion} />
-				</div>
-			{/if}
-
 			{#if activeLoops.length === 0 && pausedLoops.length === 0}
 				<div class="loops-empty">
 					<p>No active loops</p>
@@ -255,10 +237,6 @@
 		flex: 1;
 		height: 1px;
 		background: var(--color-border);
-	}
-
-	.questions-section {
-		margin-bottom: var(--space-4);
 	}
 
 	/* Responsive: mobile - stack panels vertically */

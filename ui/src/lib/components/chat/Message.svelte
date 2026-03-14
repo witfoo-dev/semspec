@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
-	import StatusBadge from '$lib/components/shared/StatusBadge.svelte';
+	import QuestionMessage from './QuestionMessage.svelte';
 	import { formatTime } from '$lib/utils/format';
 	import type { Message } from '$lib/types';
 
@@ -10,16 +10,20 @@
 
 	let { message }: Props = $props();
 
-	const typeConfig = {
+	const typeConfig: Record<string, { icon: string; label: string }> = {
 		user: { icon: 'user', label: 'You' },
 		assistant: { icon: 'bot', label: 'Assistant' },
 		status: { icon: 'activity', label: 'Status' },
-		error: { icon: 'alert-circle', label: 'Error' }
+		error: { icon: 'alert-circle', label: 'Error' },
+		question: { icon: 'help-circle', label: 'Question' }
 	};
 
 	const config = $derived(typeConfig[message.type] || typeConfig.assistant);
 </script>
 
+{#if message.type === 'question' && message.question}
+	<QuestionMessage question={message.question} />
+{:else}
 <div class="message" class:user={message.type === 'user'} class:error={message.type === 'error'}>
 	<div class="message-avatar">
 		<Icon name={config.icon} size={18} />
@@ -41,6 +45,7 @@
 		</div>
 	</div>
 </div>
+{/if}
 
 <style>
 	.message {

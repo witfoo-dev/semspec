@@ -1,4 +1,6 @@
 import { questionsApi, type QuestionEvent } from '$lib/api/questions';
+import { messagesStore } from './messages.svelte';
+import { toastStore } from './toast.svelte';
 import type { Question, QuestionStatus } from '$lib/types';
 
 /**
@@ -15,6 +17,7 @@ class QuestionsStore {
 	connected = $state(false);
 
 	private unsubscribe: (() => void) | null = null;
+	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 	get pending(): Question[] {
 		return (this.all ?? []).filter((q) => q.status === 'pending');
@@ -49,7 +52,7 @@ class QuestionsStore {
 					console.error('Questions stream error:', error);
 					this.connected = false;
 					// Attempt reconnect after delay
-					setTimeout(() => this.reconnect(), 10000);
+					this.reconnectTimer = setTimeout(() => this.reconnect(), 10000);
 				}
 			);
 			this.connected = true;
@@ -68,6 +71,10 @@ class QuestionsStore {
 	 * Disconnect from the SSE stream.
 	 */
 	disconnect(): void {
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
 		if (this.unsubscribe) {
 			this.unsubscribe();
 			this.unsubscribe = null;
@@ -88,17 +95,30 @@ class QuestionsStore {
 	 */
 	private handleEvent(event: QuestionEvent): void {
 		switch (event.type) {
-			case 'question_created':
-				this.addQuestion(event.data as Question);
+			case 'question_created': {
+				const question = event.data as Question;
+				this.addQuestion(question);
+				messagesStore.addQuestion(question);
+				toastStore.show({
+					message: `${question.from_agent || 'Agent'} needs help`,
+					questionId: question.id,
+					urgency: question.urgency
+				});
 				break;
-			case 'question_answered':
-				this.updateQuestion((event.data as Question).id, event.data as Partial<Question>);
+			}
+			case 'question_answered': {
+				const answered = event.data as Question;
+				this.updateQuestion(answered.id, event.data as Partial<Question>);
+				messagesStore.updateQuestionInPlace(answered.id, event.data as Partial<Question>);
 				break;
-			case 'question_timeout':
-				this.updateQuestion((event.data as Question).id, { status: 'timeout' });
+			}
+			case 'question_timeout': {
+				const timedOut = event.data as Question;
+				this.updateQuestion(timedOut.id, { status: 'timeout' });
+				messagesStore.updateQuestionInPlace(timedOut.id, { status: 'timeout' });
 				break;
+			}
 			case 'heartbeat':
-				// Heartbeat - connection is alive
 				break;
 		}
 	}
@@ -131,6 +151,10 @@ class QuestionsStore {
 		try {
 			this.all = await questionsApi.list({ status });
 			this.lastRefresh = new Date();
+			// Inject pending questions into chat messages
+			for (const q of this.all.filter((q) => q.status === 'pending')) {
+				messagesStore.addQuestion(q);
+			}
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to fetch questions';
 		} finally {

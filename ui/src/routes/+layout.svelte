@@ -4,6 +4,7 @@
 	import Sidebar from '$lib/components/shared/Sidebar.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
 	import BottomChatBar from '$lib/components/chat/BottomChatBar.svelte';
+	import Toast from '$lib/components/shared/Toast.svelte';
 	import SetupWizard from '$lib/components/setup/SetupWizard.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
@@ -142,6 +143,7 @@
 
 			<!-- Persistent bottom chat bar (replaces ChatDrawer overlay) -->
 			<BottomChatBar />
+			<Toast />
 		</div>
 	</div>
 {/if}

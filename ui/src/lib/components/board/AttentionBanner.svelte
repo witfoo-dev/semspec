@@ -11,8 +11,6 @@
 		switch (type) {
 			case 'approval_needed':
 				return 'check-circle';
-			case 'question_pending':
-				return 'help-circle';
 			case 'task_failed':
 				return 'alert-circle';
 			case 'task_blocked':

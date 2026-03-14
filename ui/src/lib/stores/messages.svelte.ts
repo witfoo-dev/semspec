@@ -1,5 +1,5 @@
 import { api } from '$lib/api/client';
-import type { Message, ActivityEvent } from '$lib/types';
+import type { Message, ActivityEvent, Question } from '$lib/types';
 
 class MessagesStore {
 	messages = $state<Message[]>([]);
@@ -123,6 +123,32 @@ class MessagesStore {
 		} finally {
 			this.sending = false;
 		}
+	}
+
+	addQuestion(question: Question): void {
+		if (this.messages.some((m) => m.type === 'question' && m.question?.id === question.id)) {
+			return;
+		}
+
+		const questionMessage: Message = {
+			id: `question-${question.id}`,
+			type: 'question',
+			content: question.question,
+			timestamp: question.created_at,
+			loopId: question.blocked_loop_id,
+			question
+		};
+
+		this.messages = [...this.messages, questionMessage];
+	}
+
+	updateQuestionInPlace(questionId: string, updates: Partial<Question>): void {
+		this.messages = this.messages.map((m) => {
+			if (m.type === 'question' && m.question?.id === questionId) {
+				return { ...m, question: { ...m.question!, ...updates } };
+			}
+			return m;
+		});
 	}
 
 	clear(): void {

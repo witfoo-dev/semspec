@@ -23,12 +23,13 @@ export interface MessageContext {
 // UI-only message type for chat display (not from API)
 export interface Message {
 	id: string;
-	type: 'user' | 'assistant' | 'status' | 'error';
+	type: 'user' | 'assistant' | 'status' | 'error' | 'question';
 	content: string;
 	timestamp: string;
 	loopId?: string;
 	taskId?: string; // For workflow commands, task_id is the correlation key
 	context?: MessageContext; // Context for plan nav tree chat
+	question?: import('./types/index').Question; // Present when type === 'question'
 }
 
 // Stricter typing for loop states (generated type uses string)
@@ -152,6 +153,7 @@ export type {
 	StatusStreamEnvelope,
 	SubscribeCommand,
 	// Question types
+	AnswerAction,
 	Question,
 	QuestionStatus,
 	QuestionUrgency,

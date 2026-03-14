@@ -1,6 +1,5 @@
 import { plansStore } from './plans.svelte';
 import { loopsStore } from './loops.svelte';
-import { questionsStore } from './questions.svelte';
 import type { AttentionItem } from '$lib/api/mock-plans';
 
 /**
@@ -8,7 +7,6 @@ import type { AttentionItem } from '$lib/api/mock-plans';
  */
 export type AttentionType =
 	| 'approval_needed'
-	| 'question_pending'
 	| 'task_failed'
 	| 'task_blocked'
 	| 'rejection';
@@ -20,8 +18,9 @@ export type AttentionType =
  * Attention sources:
  * - Plans with stage 'tasks' → ready to execute
  * - Plans with active rejections → rejection
- * - Questions with status 'pending' → question_pending
  * - Loops in 'failed' state → task_failed
+ *
+ * Note: Questions are surfaced via toasts and inline chat messages, not attention items.
  */
 class AttentionStore {
 	/**
@@ -56,18 +55,6 @@ class AttentionStore {
 					created_at: rejectedTask.rejection.rejected_at
 				});
 			}
-		}
-
-		// Pending questions
-		for (const question of questionsStore.pending) {
-			items.push({
-				type: 'question_pending',
-				loop_id: question.blocked_loop_id,
-				title: `Answer question from ${question.from_agent}`,
-				description: question.question,
-				action_url: '/activity',
-				created_at: question.created_at
-			});
 		}
 
 		// Failed loops
@@ -107,7 +94,6 @@ class AttentionStore {
 	get byType(): Record<AttentionType, AttentionItem[]> {
 		const grouped: Record<AttentionType, AttentionItem[]> = {
 			approval_needed: [],
-			question_pending: [],
 			task_failed: [],
 			task_blocked: [],
 			rejection: []
