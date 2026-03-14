@@ -175,12 +175,7 @@
         "loops_bucket": "AGENT_LOOPS",
         "trajectories_bucket": "AGENT_TRAJECTORIES",
         "context": {
-          "enabled": false,
-          "compact_threshold": 0.6,
-          "tool_result_max_age": 3,
-          "headroom_tokens": 6400,
-          "summarization_model": "fast",
-          "model_limits": {"default": 128000}
+          "summarization_model": "fast"
         }
       }
     },
@@ -355,7 +350,6 @@
         "input_subject_pattern": "context.build.>",
         "output_subject_prefix": "context.built",
         "default_token_budget": 32000,
-        "headroom_tokens": 6400,
         "graph_gateway_url": "http://localhost:8082",
         "default_capability": "reviewing",
         "sop_entity_prefix": "c360.semspec.source.doc",

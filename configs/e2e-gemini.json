@@ -6,7 +6,9 @@
     "environment": "test"
   },
   "nats": {
-    "urls": ["nats://nats:4222"],
+    "urls": [
+      "nats://nats:4222"
+    ],
     "max_reconnects": -1,
     "reconnect_wait": "2s",
     "jetstream": {
@@ -17,28 +19,48 @@
     "capabilities": {
       "planning": {
         "description": "High-level reasoning, architecture decisions",
-        "preferred": ["gemini-flash"],
-        "fallback": ["gemini-flash"]
+        "preferred": [
+          "gemini-flash"
+        ],
+        "fallback": [
+          "gemini-flash"
+        ]
       },
       "writing": {
         "description": "Documentation, plans, specifications",
-        "preferred": ["gemini-flash"],
-        "fallback": ["gemini-flash"]
+        "preferred": [
+          "gemini-flash"
+        ],
+        "fallback": [
+          "gemini-flash"
+        ]
       },
       "coding": {
         "description": "Code generation, implementation",
-        "preferred": ["gemini-flash"],
-        "fallback": ["gemini-flash"]
+        "preferred": [
+          "gemini-flash"
+        ],
+        "fallback": [
+          "gemini-flash"
+        ]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
-        "preferred": ["gemini-flash"],
-        "fallback": ["gemini-flash"]
+        "preferred": [
+          "gemini-flash"
+        ],
+        "fallback": [
+          "gemini-flash"
+        ]
       },
       "fast": {
         "description": "Quick responses, simple tasks",
-        "preferred": ["gemini-flash"],
-        "fallback": ["gemini-flash"]
+        "preferred": [
+          "gemini-flash"
+        ],
+        "fallback": [
+          "gemini-flash"
+        ]
       }
     },
     "endpoints": {
@@ -76,7 +98,15 @@
       "enabled": true,
       "config": {
         "buffer_size": 10000,
-        "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>", "workflow.>", "source.>", "context.>"]
+        "monitor_subjects": [
+          "user.>",
+          "agent.>",
+          "tool.>",
+          "graph.>",
+          "workflow.>",
+          "source.>",
+          "context.>"
+        ]
       }
     }
   },
@@ -91,11 +121,19 @@
         "auto_continue": false,
         "stream_name": "USER",
         "permissions": {
-          "view": ["*"],
-          "submit_task": ["*"],
+          "view": [
+            "*"
+          ],
+          "submit_task": [
+            "*"
+          ],
           "cancel_own": true,
-          "cancel_any": ["admin"],
-          "approve": ["*"]
+          "cancel_any": [
+            "admin"
+          ],
+          "approve": [
+            "*"
+          ]
         }
       }
     },
@@ -108,10 +146,7 @@
         "timeout": "120s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
-        "trajectories_bucket": "AGENT_TRAJECTORIES",
-        "context": {
-          "enabled": false
-        }
+        "trajectories_bucket": "AGENT_TRAJECTORIES"
       }
     },
     "agentic-model": {
@@ -153,8 +188,15 @@
             "path": "/workspace",
             "org": "e2e",
             "project": "test",
-            "languages": ["go"],
-            "excludes": ["node_modules", ".git", ".semspec", "vendor"]
+            "languages": [
+              "go"
+            ],
+            "excludes": [
+              "node_modules",
+              ".git",
+              ".semspec",
+              "vendor"
+            ]
           }
         ],
         "watch_enabled": true,
@@ -168,17 +210,21 @@
       "enabled": true,
       "config": {
         "ports": {
-          "inputs": [{
-            "name": "entities_in",
-            "subject": "graph.ingest.entity",
-            "type": "jetstream",
-            "stream_name": "GRAPH"
-          }],
-          "outputs": [{
-            "name": "rdf_out",
-            "subject": "graph.export.rdf",
-            "type": "nats"
-          }]
+          "inputs": [
+            {
+              "name": "entities_in",
+              "subject": "graph.ingest.entity",
+              "type": "jetstream",
+              "stream_name": "GRAPH"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "rdf_out",
+              "subject": "graph.export.rdf",
+              "type": "nats"
+            }
+          ]
         },
         "format": "turtle",
         "profile": "minimal",
@@ -191,17 +237,21 @@
       "enabled": true,
       "config": {
         "ports": {
-          "inputs": [{
-            "name": "entities_in",
-            "subject": "graph.ingest.entity",
-            "type": "jetstream",
-            "stream_name": "GRAPH"
-          }],
-          "outputs": [{
-            "name": "entity_states",
-            "subject": "ENTITY_STATES",
-            "type": "kv-write"
-          }]
+          "inputs": [
+            {
+              "name": "entities_in",
+              "subject": "graph.ingest.entity",
+              "type": "jetstream",
+              "stream_name": "GRAPH"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES",
+              "type": "kv-write"
+            }
+          ]
         },
         "enable_hierarchy": true
       }
@@ -212,16 +262,34 @@
       "enabled": true,
       "config": {
         "ports": {
-          "inputs": [{
-            "name": "entity_watch",
-            "subject": "ENTITY_STATES",
-            "type": "kv-watch"
-          }],
+          "inputs": [
+            {
+              "name": "entity_watch",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
           "outputs": [
-            {"name": "outgoing_index", "subject": "OUTGOING_INDEX", "type": "kv"},
-            {"name": "incoming_index", "subject": "INCOMING_INDEX", "type": "kv"},
-            {"name": "alias_index", "subject": "ALIAS_INDEX", "type": "kv"},
-            {"name": "predicate_index", "subject": "PREDICATE_INDEX", "type": "kv"}
+            {
+              "name": "outgoing_index",
+              "subject": "OUTGOING_INDEX",
+              "type": "kv"
+            },
+            {
+              "name": "incoming_index",
+              "subject": "INCOMING_INDEX",
+              "type": "kv"
+            },
+            {
+              "name": "alias_index",
+              "subject": "ALIAS_INDEX",
+              "type": "kv"
+            },
+            {
+              "name": "predicate_index",
+              "subject": "PREDICATE_INDEX",
+              "type": "kv"
+            }
           ]
         },
         "workers": 2,
@@ -234,11 +302,13 @@
       "enabled": true,
       "config": {
         "ports": {
-          "inputs": [{
-            "name": "query_requests",
-            "subject": "graph.query.>",
-            "type": "nats-request"
-          }],
+          "inputs": [
+            {
+              "name": "query_requests",
+              "subject": "graph.query.>",
+              "type": "nats-request"
+            }
+          ],
           "outputs": []
         },
         "request_timeout": "5s",
@@ -252,8 +322,20 @@
       "enabled": true,
       "config": {
         "ports": {
-          "inputs": [{"name": "http", "subject": ":8082", "type": "http"}],
-          "outputs": [{"name": "mutations", "subject": "graph.mutation.*", "type": "nats-request"}]
+          "inputs": [
+            {
+              "name": "http",
+              "subject": ":8082",
+              "type": "http"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mutations",
+              "subject": "graph.mutation.*",
+              "type": "nats-request"
+            }
+          ]
         },
         "graphql_path": "/graphql",
         "mcp_path": "/mcp",
@@ -272,7 +354,9 @@
         "default_timeout": "30m",
         "default_max_iterations": 10,
         "request_timeout": "5m",
-        "workflow_files": ["configs/workflows/*.json"]
+        "workflow_files": [
+          "configs/workflows/*.json"
+        ]
       }
     },
     "reactive-workflow": {
@@ -364,8 +448,16 @@
         "watch_config": {
           "enabled": true,
           "debounce_delay": "500ms",
-          "file_extensions": [".md", ".txt", ".rst", ".adoc"],
-          "exclude_dirs": [".git", "node_modules"]
+          "file_extensions": [
+            ".md",
+            ".txt",
+            ".rst",
+            ".adoc"
+          ],
+          "exclude_dirs": [
+            ".git",
+            "node_modules"
+          ]
         }
       }
     },
@@ -467,7 +559,11 @@
   },
   "streams": {
     "USER": {
-      "subjects": ["user.message.>", "user.response.>", "user.signal.>"],
+      "subjects": [
+        "user.message.>",
+        "user.response.>",
+        "user.signal.>"
+      ],
       "max_age": "1h",
       "storage": "memory",
       "replicas": 1
@@ -506,7 +602,10 @@
       "replicas": 1
     },
     "SOURCES": {
-      "subjects": ["source.ingest.>", "source.status.>"],
+      "subjects": [
+        "source.ingest.>",
+        "source.status.>"
+      ],
       "max_age": "24h",
       "storage": "memory",
       "replicas": 1

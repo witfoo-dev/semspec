@@ -28,7 +28,7 @@ type Config struct {
 	DefaultTokenBudget int `json:"default_token_budget" schema:"type:int,description:Default token budget when no model specified,category:advanced,default:32000,min:1000,max:200000"`
 
 	// HeadroomTokens is the safety buffer subtracted from model context window.
-	HeadroomTokens int `json:"headroom_tokens" schema:"type:int,description:Safety buffer tokens for model response,category:advanced,default:6400,min:1000,max:32000"`
+	HeadroomTokens int `json:"headroom_tokens" schema:"type:int,description:Safety buffer tokens for model response,category:advanced,default:4000,min:1000,max:32000"`
 
 	// GraphGatewayURL is the URL of the graph gateway for queries.
 	GraphGatewayURL string `json:"graph_gateway_url" schema:"type:string,description:Graph gateway URL for entity queries,category:basic,default:http://localhost:8082"`
@@ -84,7 +84,7 @@ func DefaultConfig() Config {
 		InputSubjectPattern:    "context.build.>",
 		OutputSubjectPrefix:    "context.built",
 		DefaultTokenBudget:     32000,
-		HeadroomTokens:         6400,
+		HeadroomTokens:         4000,
 		GraphGatewayURL:        "http://localhost:8082",
 		DefaultCapability:      "reviewing",
 		SOPEntityPrefix:        "c360.semspec.source.doc",
