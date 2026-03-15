@@ -192,32 +192,6 @@
         "consumer_name_suffix": "semspec-e2e"
       }
     },
-    "ast-indexer": {
-      "name": "ast-indexer",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "watch_paths": [
-          {
-            "path": "/workspace",
-            "org": "e2e",
-            "project": "test",
-            "languages": [
-              "go"
-            ],
-            "excludes": [
-              "node_modules",
-              ".git",
-              ".semspec",
-              "vendor"
-            ]
-          }
-        ],
-        "watch_enabled": true,
-        "index_interval": "",
-        "stream_name": "GRAPH"
-      }
-    },
     "rdf-export": {
       "name": "rdf-export",
       "type": "output",
@@ -470,38 +444,6 @@
       "enabled": true,
       "config": {
         "execution_bucket_name": "WORKFLOW_EXECUTIONS"
-      }
-    },
-    "source-ingester": {
-      "name": "source-ingester",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "SOURCES",
-        "consumer_name": "source-ingester-e2e",
-        "sources_dir": "/workspace/sources",
-        "semspec_dir": "/workspace/.semspec",
-        "repo_root": "/workspace",
-        "analysis_timeout": "30s",
-        "chunk_config": {
-          "target_tokens": 500,
-          "max_tokens": 800,
-          "min_tokens": 100
-        },
-        "watch_config": {
-          "enabled": true,
-          "debounce_delay": "500ms",
-          "file_extensions": [
-            ".md",
-            ".txt",
-            ".rst",
-            ".adoc"
-          ],
-          "exclude_dirs": [
-            ".git",
-            "node_modules"
-          ]
-        }
       }
     },
     "context-builder": {

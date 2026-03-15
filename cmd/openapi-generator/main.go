@@ -20,7 +20,6 @@ import (
 
 	// Import all semspec component packages to register their schemas
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
-	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
 	"github.com/c360studio/semspec/processor/constitution"
 	projectapi "github.com/c360studio/semspec/processor/project-api"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
@@ -43,11 +42,6 @@ var componentRegistry = map[string]struct {
 	Description string
 	Domain      string
 }{
-	"ast-indexer": {
-		ConfigType:  reflect.TypeOf(astindexer.Config{}),
-		Description: "Indexes source code AST and publishes entities to the graph",
-		Domain:      "semspec",
-	},
 	"constitution": {
 		ConfigType:  reflect.TypeOf(constitution.Config{}),
 		Description: "Manages project constitution rules and enforcement",

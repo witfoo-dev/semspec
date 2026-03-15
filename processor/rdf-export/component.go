@@ -13,7 +13,6 @@ import (
 
 	"github.com/c360studio/semspec/export"
 	// Import processor packages to trigger init() registration of payloads
-	_ "github.com/c360studio/semspec/processor/ast-indexer"
 	_ "github.com/c360studio/semspec/processor/constitution"
 	_ "github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"

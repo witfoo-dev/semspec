@@ -7,67 +7,9 @@
 
 ## Indexing
 
-### ast-indexer
-
-**Purpose**: Extracts code entities from Go source files and publishes them to the graph.
-
-**Location**: `processor/ast-indexer/`
-
-#### Configuration
-
-```json
-{
-  "repo_path": ".",
-  "org": "semspec",
-  "project": "myproject",
-  "watch_enabled": true,
-  "index_interval": "5m"
-}
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `repo_path` | string | `.` | Repository path to index |
-| `org` | string | required | Organization for entity IDs |
-| `project` | string | required | Project name for entity IDs |
-| `watch_enabled` | bool | `true` | Enable file watcher for real-time updates |
-| `index_interval` | string | `5m` | Periodic full reindex interval |
-
-#### Behavior
-
-1. **Startup**: Performs full index of all `.go` files in `repo_path`
-2. **Watch mode**: If enabled, watches for file changes via fsnotify
-3. **Periodic reindex**: If interval set, performs full reindex on schedule
-4. **Output**: Publishes entities to `graph.ingest.entity` subject
-
-#### Entity Types Extracted
-
-| Type | Description |
-|------|-------------|
-| `file` | Go source files |
-| `function` | Standalone functions |
-| `method` | Methods with receivers |
-| `struct` | Struct types |
-| `interface` | Interface types |
-| `const` | Constants |
-| `var` | Variables |
-
-#### Entity ID Format
-
-```
-{org}.semspec.code.{type}.{project}.{instance}
-```
-
-Example: `acme.semspec.code.function.myproject.cmd-main-go-main`
-
-#### Dependencies
-
-Uses `processor/ast/` package:
-
-- `parser.go` - Go AST parsing
-- `entities.go` - CodeEntity type and serialization
-- `watcher.go` - File system watcher with debouncing
-- `predicates.go` - Vocabulary predicate constants
+> **Note**: Code indexing (AST parsing, source ingestion) is now handled by **semsource**, an
+> external service that watches per-scenario branches and publishes `code.artifact.*` entities
+> to the graph. The `processor/ast/` parsing library remains for local tool use.
 
 ---
 
@@ -351,68 +293,9 @@ Each strategy prioritizes a different content mix:
 
 ## Sources
 
-### source-ingester
-
-**Purpose**: Ingests documents (SOPs, specs, references) with YAML frontmatter parsing and publishes
-to the knowledge graph.
-
-**Location**: `processor/source-ingester/`
-
-#### Configuration
-
-```json
-{
-  "stream_name": "SOURCES",
-  "consumer_name": "source-ingester",
-  "sources_dir": ".semspec/sources/docs",
-  "analysis_timeout": "30s",
-  "chunk_config": {
-    "target_tokens": 1000,
-    "max_tokens": 1500,
-    "min_tokens": 200
-  }
-}
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `stream_name` | string | `SOURCES` | JetStream stream name |
-| `consumer_name` | string | `source-ingester` | Durable consumer name |
-| `sources_dir` | string | `.semspec/sources/docs` | Base directory for document sources |
-| `analysis_timeout` | string | `30s` | LLM analysis timeout |
-| `chunk_config.target_tokens` | int | `1000` | Ideal chunk size in tokens |
-| `chunk_config.max_tokens` | int | `1500` | Maximum chunk size in tokens |
-| `chunk_config.min_tokens` | int | `200` | Minimum chunk size (smaller chunks are merged) |
-
-#### Behavior
-
-1. **Reads file**: Retrieves document from disk at the path specified in the ingest message.
-2. **Parses frontmatter**: If the file has a YAML frontmatter block with a `category` field,
-   extracts metadata directly (fast path — no LLM call).
-3. **LLM fallback**: If no frontmatter is present, calls the LLM to classify and summarize the
-   document.
-4. **Chunks document**: Splits content into token-bounded chunks for graph storage.
-5. **Builds graph entities**: Applies `source.doc.*` vocabulary predicates.
-6. **Publishes to graph**: Publishes chunk entities first, then the parent document entity to
-   `graph.ingest.entity`.
-
-#### Key Vocabularies
-
-- `source.doc.category` — Document category (SOP, spec, reference, etc.)
-- `source.doc.scope` — Applicable scope or subsystem
-- `source.doc.severity` — Severity level for SOP findings
-- `source.doc.applies_to` — Target components or paths
-- `source.doc.requirements` — Extracted requirements text
-- `source.doc.content` — Full document content
-- `source.meta.name` — Human-readable document name
-- `source.meta.status` — Ingestion status
-
-#### NATS Subjects
-
-| Subject | Transport | Direction | Description |
-|---------|-----------|-----------|-------------|
-| `source.ingest.>` | JetStream (SOURCES) | Input | Document ingestion requests |
-| `graph.ingest.entity` | JetStream (GRAPH) | Output | Entity state updates |
+> **Note**: Source/document ingestion is now handled by **semsource**. The `vocabulary/source/`
+> predicate namespace is shared between semspec and semsource. Context-builder strategies
+> discover semsource-published entities via `QueryEntitiesByPredicate("source.doc")`.
 
 ---
 

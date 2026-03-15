@@ -13,40 +13,7 @@
       "enabled": true
     }
   },
-  "components": {
-    "ast-indexer": {
-      "name": "ast-indexer",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "watch_paths": [
-          {
-            "path": "./backend/services/*",
-            "org": "mycompany",
-            "project": "backend",
-            "languages": ["go"],
-            "excludes": ["vendor", "testdata"]
-          },
-          {
-            "path": "./frontend",
-            "org": "mycompany",
-            "project": "frontend",
-            "languages": ["typescript", "javascript"],
-            "excludes": ["node_modules", "dist", ".next"]
-          },
-          {
-            "path": "./shared/lib",
-            "org": "mycompany",
-            "project": "shared",
-            "languages": ["go", "typescript"],
-            "excludes": ["vendor", "node_modules"]
-          }
-        ],
-        "watch_enabled": true,
-        "index_interval": "60s"
-      }
-    }
-  },
+  "components": {},
   "streams": {
     "AGENT": {
       "subjects": [

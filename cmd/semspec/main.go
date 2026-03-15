@@ -29,7 +29,6 @@ import (
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
-	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
 	changeproposalhandler "github.com/c360studio/semspec/processor/change-proposal-handler"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/developer"
@@ -47,7 +46,6 @@ import (
 	scenarioexecutor "github.com/c360studio/semspec/processor/scenario-executor"
 	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
 	scenarioorchestrator "github.com/c360studio/semspec/processor/scenario-orchestrator"
-	sourceingester "github.com/c360studio/semspec/processor/source-ingester"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	taskcodereview "github.com/c360studio/semspec/processor/task-code-reviewer"
 	taskdispatcher "github.com/c360studio/semspec/processor/task-dispatcher"
@@ -269,13 +267,11 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 	slog.Debug("Registering semspec component factories")
 	type registerFn func() error
 	steps := []registerFn{
-		func() error { return astindexer.Register(componentRegistry) },
 		func() error { return rdfexport.Register(componentRegistry) },
 		func() error { return workflowvalidator.Register(componentRegistry) },
 		func() error { return workflowdocuments.Register(componentRegistry) },
 		func() error { return questionanswerer.Register(componentRegistry) },
 		func() error { return questiontimeout.Register(componentRegistry) },
-		func() error { return sourceingester.Register(componentRegistry) },
 		func() error { return phasegenerator.Register(componentRegistry) },
 		func() error { return requirementgenerator.Register(componentRegistry) },
 		func() error { return scenariogenerator.Register(componentRegistry) },
@@ -455,20 +451,7 @@ func initModelRegistryFromConfig(data []byte) error {
 	return nil
 }
 
-func buildDefaultConfig(repoPath string) (*config.Config, error) {
-	// Extract project name from repo path
-	projectName := filepath.Base(repoPath)
-
-	// Build component configs
-	astIndexerConfig := map[string]any{
-		"repo_path":      repoPath,
-		"org":            "semspec",
-		"project":        projectName,
-		"watch_enabled":  true,
-		"index_interval": "5m",
-	}
-	astIndexerJSON, _ := json.Marshal(astIndexerConfig)
-
+func buildDefaultConfig(_ string) (*config.Config, error) {
 	// Note: Tools are registered globally via _ "github.com/c360studio/semspec/tools"
 	// and executed by agentic-tools component from semstreams
 
@@ -487,15 +470,8 @@ func buildDefaultConfig(repoPath string) (*config.Config, error) {
 				Enabled: true,
 			},
 		},
-		Services: types.ServiceConfigs{},
-		Components: config.ComponentConfigs{
-			"ast-indexer": types.ComponentConfig{
-				Name:    "ast-indexer",
-				Type:    types.ComponentTypeProcessor,
-				Enabled: true,
-				Config:  astIndexerJSON,
-			},
-		},
+		Services:   types.ServiceConfigs{},
+		Components: config.ComponentConfigs{},
 		Streams: config.StreamConfigs{
 			"AGENT": config.StreamConfig{
 				Subjects: []string{
