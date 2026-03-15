@@ -67,6 +67,13 @@ type scenarioExecution struct {
 	// VisitedNodes tracks which nodes have finished successfully.
 	VisitedNodes map[string]bool
 
+	// --- Branch strategy ---
+
+	// ScenarioBranch is the branch created for this scenario execution
+	// (e.g. "semspec/scenario-auth-refresh"). Task worktrees branch from
+	// and merge back into this branch.
+	ScenarioBranch string
+
 	// --- Timeout ---
 
 	timeoutTimer *timeoutHandle

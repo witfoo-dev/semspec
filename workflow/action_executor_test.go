@@ -11,12 +11,12 @@ import (
 
 // mockInstaller implements SandboxInstaller for testing.
 type mockInstaller struct {
-	calls      []installCall
-	status     string
-	stdout     string
-	stderr     string
-	exitCode   int
-	err        error
+	calls    []installCall
+	status   string
+	stdout   string
+	stderr   string
+	exitCode int
+	err      error
 }
 
 type installCall struct {

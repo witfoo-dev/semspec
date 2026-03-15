@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/tools/decompose"
+	"github.com/c360studio/semspec/tools/sandbox"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
@@ -68,6 +69,7 @@ type Component struct {
 	logger       *slog.Logger
 	platform     component.PlatformMeta
 	tripleWriter *graphutil.TripleWriter
+	sandbox      *sandbox.Client // nil when sandbox is disabled
 
 	inputPorts  []component.Port
 	outputPorts []component.Port
@@ -118,6 +120,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient: deps.NATSClient,
 		logger:     logger,
 		platform:   deps.Platform,
+		sandbox:    sandbox.NewClient(cfg.SandboxURL),
 		shutdown:   make(chan struct{}),
 		tripleWriter: &graphutil.TripleWriter{
 			NATSClient:    deps.NATSClient,
@@ -321,6 +324,18 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 	if _, loaded := c.activeExecutions.LoadOrStore(entityID, exec); loaded {
 		c.logger.Debug("Duplicate trigger for active scenario, skipping", "entity_id", entityID)
 		return
+	}
+
+	// Create per-scenario branch for worktree isolation.
+	if c.sandbox != nil {
+		branchName := "semspec/scenario-" + trigger.ScenarioID
+		if err := c.sandbox.CreateBranch(ctx, branchName, "HEAD"); err != nil {
+			c.logger.Warn("Failed to create scenario branch; worktrees will branch from HEAD",
+				"branch", branchName, "error", err)
+		} else {
+			exec.ScenarioBranch = branchName
+			c.logger.Info("Scenario branch created", "branch", branchName)
+		}
 	}
 
 	// Write initial entity triples.
@@ -569,6 +584,10 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *scenarioEx
 		WorkflowStep: nodeID,
 		Prompt:       node.Prompt,
 	}
+	// TODO(sandbox): ScenarioBranch needs to propagate to execution-orchestrator
+	// so worktrees branch from the scenario branch and merge back into it.
+	// agentic.TaskMessage currently has no metadata field; requires semstreams
+	// change to add TaskMessage.Metadata map[string]string or similar.
 
 	// TODO: no vocabulary constant for per-node status predicates; kept as formatted string.
 	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, fmt.Sprintf("workflow.node.%s.status", nodeID), "running")

@@ -110,14 +110,32 @@ type ExecResult struct {
 // Worktree lifecycle
 // ---------------------------------------------------------------------------
 
+// WorktreeOption configures optional parameters for CreateWorktree.
+type WorktreeOption func(*worktreeOptions)
+
+type worktreeOptions struct {
+	baseBranch string
+}
+
+// WithBaseBranch sets the base branch for the worktree (default: HEAD).
+func WithBaseBranch(branch string) WorktreeOption {
+	return func(o *worktreeOptions) { o.baseBranch = branch }
+}
+
 // CreateWorktree asks the sandbox server to create an isolated git worktree
 // for the given task. The server checks out a detached HEAD from the repo and
 // returns the worktree path and branch name.
-// Server route: POST /worktree  body: {"task_id": taskID}
-func (c *Client) CreateWorktree(ctx context.Context, taskID string) (*WorktreeInfo, error) {
+// Server route: POST /worktree  body: {"task_id": taskID, "base_branch": "..."}
+func (c *Client) CreateWorktree(ctx context.Context, taskID string, opts ...WorktreeOption) (*WorktreeInfo, error) {
+	var o worktreeOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	body := struct {
-		TaskID string `json:"task_id"`
-	}{TaskID: taskID}
+		TaskID     string `json:"task_id"`
+		BaseBranch string `json:"base_branch,omitempty"`
+	}{TaskID: taskID, BaseBranch: o.baseBranch}
 	var info WorktreeInfo
 	if err := c.doJSON(ctx, http.MethodPost, "/worktree", body, &info); err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
@@ -135,12 +153,79 @@ func (c *Client) DeleteWorktree(ctx context.Context, taskID string) error {
 	return nil
 }
 
+// MergeResult holds the outcome of a worktree merge.
+type MergeResult struct {
+	Status       string           `json:"status"`
+	Commit       string           `json:"commit,omitempty"`
+	Note         string           `json:"note,omitempty"`
+	FilesChanged []FileChangeInfo `json:"files_changed,omitempty"`
+}
+
+// MergeOption configures optional parameters for MergeWorktree.
+type MergeOption func(*mergeOptions)
+
+type mergeOptions struct {
+	targetBranch  string
+	commitMessage string
+	trailers      map[string]string
+}
+
+// WithTargetBranch sets the branch to merge into (default: current HEAD branch).
+func WithTargetBranch(branch string) MergeOption {
+	return func(o *mergeOptions) { o.targetBranch = branch }
+}
+
+// WithCommitMessage sets the commit message for the worktree commit.
+func WithCommitMessage(msg string) MergeOption {
+	return func(o *mergeOptions) { o.commitMessage = msg }
+}
+
+// WithTrailer appends a git trailer to the commit message.
+func WithTrailer(key, value string) MergeOption {
+	return func(o *mergeOptions) {
+		if o.trailers == nil {
+			o.trailers = make(map[string]string)
+		}
+		o.trailers[key] = value
+	}
+}
+
 // MergeWorktree commits all staged and unstaged changes inside the worktree,
-// then merges them back into the main repository.
-// Server route: POST /worktree/{taskID}/merge
-func (c *Client) MergeWorktree(ctx context.Context, taskID string) error {
-	if err := c.doJSON(ctx, http.MethodPost, "/worktree/"+taskID+"/merge", nil, nil); err != nil {
-		return fmt.Errorf("merge worktree: %w", err)
+// then merges them back into the target branch (or the main repository's current branch).
+// Server route: POST /worktree/{taskID}/merge  body: {"target_branch": "...", "commit_message": "...", "trailers": {...}}
+func (c *Client) MergeWorktree(ctx context.Context, taskID string, opts ...MergeOption) (*MergeResult, error) {
+	var o mergeOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
+	body := struct {
+		TargetBranch  string            `json:"target_branch,omitempty"`
+		CommitMessage string            `json:"commit_message,omitempty"`
+		Trailers      map[string]string `json:"trailers,omitempty"`
+	}{
+		TargetBranch:  o.targetBranch,
+		CommitMessage: o.commitMessage,
+		Trailers:      o.trailers,
+	}
+
+	var result MergeResult
+	if err := c.doJSON(ctx, http.MethodPost, "/worktree/"+taskID+"/merge", body, &result); err != nil {
+		return nil, fmt.Errorf("merge worktree: %w", err)
+	}
+	return &result, nil
+}
+
+// CreateBranch creates a git branch in the main repository.
+// Returns nil if the branch already exists.
+// Server route: POST /branch  body: {"name": branchName, "base": baseRef}
+func (c *Client) CreateBranch(ctx context.Context, name, base string) error {
+	body := struct {
+		Name string `json:"name"`
+		Base string `json:"base,omitempty"`
+	}{Name: name, Base: base}
+	if err := c.doJSON(ctx, http.MethodPost, "/branch", body, nil); err != nil {
+		return fmt.Errorf("create branch: %w", err)
 	}
 	return nil
 }

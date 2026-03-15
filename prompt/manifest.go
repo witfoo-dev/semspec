@@ -8,10 +8,10 @@ func GraphManifestFragment(fetchFn func() string) *Fragment {
 		ID:       "core.knowledge-manifest",
 		Category: CategoryKnowledgeManifest,
 		Priority: 0,
-		Condition: func(ctx *AssemblyContext) bool {
+		Condition: func(_ *AssemblyContext) bool {
 			return fetchFn() != ""
 		},
-		ContentFunc: func(ctx *AssemblyContext) string {
+		ContentFunc: func(_ *AssemblyContext) string {
 			return fetchFn()
 		},
 	}

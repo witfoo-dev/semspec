@@ -72,6 +72,50 @@ func TestCreateWorktree(t *testing.T) {
 	assert.Equal(t, "task-123", gotBody.TaskID)
 }
 
+func TestCreateWorktree_WithBaseBranch(t *testing.T) {
+	var gotBody struct {
+		TaskID     string `json:"task_id"`
+		BaseBranch string `json:"base_branch"`
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		respond(t, w, http.StatusCreated, WorktreeInfo{
+			Status: "created",
+			Path:   "/repo/.semspec/worktrees/task-br",
+			Branch: "agent/task-br",
+		})
+	}))
+	defer srv.Close()
+
+	_, err := newTestClient(t, srv).CreateWorktree(context.Background(), "task-br",
+		WithBaseBranch("semspec/scenario-auth"),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "task-br", gotBody.TaskID)
+	assert.Equal(t, "semspec/scenario-auth", gotBody.BaseBranch)
+}
+
+func TestCreateBranch(t *testing.T) {
+	var gotBody struct {
+		Name string `json:"name"`
+		Base string `json:"base"`
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/branch", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		respond(t, w, http.StatusCreated, map[string]string{"status": "created", "branch": gotBody.Name})
+	}))
+	defer srv.Close()
+
+	err := newTestClient(t, srv).CreateBranch(context.Background(), "semspec/scenario-auth", "HEAD")
+	require.NoError(t, err)
+	assert.Equal(t, "semspec/scenario-auth", gotBody.Name)
+	assert.Equal(t, "HEAD", gotBody.Base)
+}
+
 func TestDeleteWorktree(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodDelete, r.Method)
@@ -85,15 +129,50 @@ func TestDeleteWorktree(t *testing.T) {
 }
 
 func TestMergeWorktree(t *testing.T) {
+	var gotBody struct {
+		TargetBranch  string            `json:"target_branch"`
+		CommitMessage string            `json:"commit_message"`
+		Trailers      map[string]string `json:"trailers"`
+	}
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/worktree/task-789/merge", r.URL.Path)
-		respond(t, w, http.StatusOK, map[string]string{"status": "merged"})
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		respond(t, w, http.StatusOK, MergeResult{
+			Status: "merged",
+			Commit: "abc123",
+			FilesChanged: []FileChangeInfo{
+				{Path: "main.go", Operation: "modify"},
+			},
+		})
 	}))
 	defer srv.Close()
 
-	err := newTestClient(t, srv).MergeWorktree(context.Background(), "task-789")
+	result, err := newTestClient(t, srv).MergeWorktree(context.Background(), "task-789",
+		WithTargetBranch("semspec/scenario-auth"),
+		WithCommitMessage("feat(auth): task-789"),
+		WithTrailer("Task-ID", "task-789"),
+	)
 	require.NoError(t, err)
+	assert.Equal(t, "merged", result.Status)
+	assert.Equal(t, "abc123", result.Commit)
+	require.Len(t, result.FilesChanged, 1)
+	assert.Equal(t, "main.go", result.FilesChanged[0].Path)
+	assert.Equal(t, "semspec/scenario-auth", gotBody.TargetBranch)
+	assert.Equal(t, "feat(auth): task-789", gotBody.CommitMessage)
+	assert.Equal(t, "task-789", gotBody.Trailers["Task-ID"])
+}
+
+func TestMergeWorktree_NoOptions(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		respond(t, w, http.StatusOK, MergeResult{Status: "merged"})
+	}))
+	defer srv.Close()
+
+	result, err := newTestClient(t, srv).MergeWorktree(context.Background(), "task-simple")
+	require.NoError(t, err)
+	assert.Equal(t, "merged", result.Status)
 }
 
 func TestListWorktreeFiles(t *testing.T) {
@@ -268,7 +347,7 @@ func TestGitCommit(t *testing.T) {
 }
 
 func TestGitCommit_NothingToCommit(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		respond(t, w, http.StatusOK, map[string]string{"status": "nothing_to_commit"})
 	}))
 	defer srv.Close()
@@ -330,7 +409,7 @@ func TestExec(t *testing.T) {
 }
 
 func TestExec_TimedOut(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		respond(t, w, http.StatusOK, ExecResult{
 			Stdout:   "",
 			Stderr:   "signal: killed",
@@ -359,7 +438,7 @@ func TestHealth(t *testing.T) {
 }
 
 func TestServerError_StructuredBody(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		respond(t, w, http.StatusInternalServerError, map[string]string{"error": "disk full"})
 	}))
 	defer srv.Close()
@@ -371,7 +450,7 @@ func TestServerError_StructuredBody(t *testing.T) {
 }
 
 func TestServerError_PlainStatus(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Return a non-JSON body so the client falls back to the status code message.
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte("service unavailable"))
@@ -384,7 +463,7 @@ func TestServerError_PlainStatus(t *testing.T) {
 }
 
 func TestServerError_NotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		respond(t, w, http.StatusNotFound, map[string]string{"error": "worktree not found"})
 	}))
 	defer srv.Close()
@@ -396,7 +475,7 @@ func TestServerError_NotFound(t *testing.T) {
 
 func TestContextCancellation(t *testing.T) {
 	// Server that blocks indefinitely — cancelled context should abort the request.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	}))
 	defer srv.Close()

@@ -8,6 +8,7 @@ import (
 // ExecClassification categorizes command execution outcomes.
 type ExecClassification string
 
+// ExecClassification constants for command execution outcomes.
 const (
 	ClassSuccess          ExecClassification = "success"
 	ClassFailure          ExecClassification = "failure"

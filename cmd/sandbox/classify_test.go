@@ -6,12 +6,12 @@ import (
 
 func TestClassifyExec(t *testing.T) {
 	tests := []struct {
-		name           string
-		stderr         string
-		exitCode       int
-		timedOut       bool
-		wantClass      ExecClassification
-		wantMissing    string
+		name        string
+		stderr      string
+		exitCode    int
+		timedOut    bool
+		wantClass   ExecClassification
+		wantMissing string
 	}{
 		{
 			name:      "success",

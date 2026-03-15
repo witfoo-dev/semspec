@@ -168,9 +168,9 @@ type AnswerAction struct {
 
 // Known answer action types.
 const (
-	ActionInstallPackage    = "install_package"
+	ActionInstallPackage     = "install_package"
 	ActionSuggestAlternative = "suggest_alternative"
-	ActionNone              = "none"
+	ActionNone               = "none"
 )
 
 // Validate checks that the action type is known and non-empty.

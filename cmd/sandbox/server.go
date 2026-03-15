@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,6 +26,11 @@ type Server struct {
 	maxOutputBytes int
 	maxFileSize    int64
 	logger         *slog.Logger
+
+	// repoMu serializes operations that mutate the main repo's HEAD or branch
+	// state (checkout, merge, branch create). Without this, concurrent merges
+	// targeting different branches would race on the working directory.
+	repoMu sync.Mutex
 }
 
 // RegisterRoutes binds all HTTP handlers to the mux.
@@ -35,6 +42,9 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /worktree/{taskID}", s.handleDeleteWorktree)
 	mux.HandleFunc("POST /worktree/{taskID}/merge", s.handleMergeWorktree)
 	mux.HandleFunc("GET /worktree/{taskID}/files", s.handleListWorktreeFiles)
+
+	// Branch management.
+	mux.HandleFunc("POST /branch", s.handleCreateBranch)
 
 	// File operations (scoped to worktree).
 	mux.HandleFunc("PUT /file", s.handleWriteFile)
@@ -55,37 +65,39 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 }
 
 // ---------------------------------------------------------------------------
-// Request / Response types
+// Request / Response types — unexported because this is package main.
+// Tests in the same package can still reference them directly.
 // ---------------------------------------------------------------------------
 
-type WorktreeCreateRequest struct {
-	TaskID string `json:"task_id"`
+type worktreeCreateRequest struct {
+	TaskID     string `json:"task_id"`
+	BaseBranch string `json:"base_branch,omitempty"` // default: HEAD
 }
 
-type WorktreeCreateResponse struct {
+type worktreeCreateResponse struct {
 	Status string `json:"status"`
 	Path   string `json:"path"`
 	Branch string `json:"branch"`
 }
 
-type FileWriteRequest struct {
+type fileWriteRequest struct {
 	TaskID  string `json:"task_id"`
 	Path    string `json:"path"`
 	Content string `json:"content"`
 }
 
-type FileResponse struct {
+type fileResponse struct {
 	Content string `json:"content"`
 	Size    int    `json:"size"`
 }
 
-type ExecRequest struct {
+type execRequest struct {
 	TaskID    string `json:"task_id"`
 	Command   string `json:"command"`
 	TimeoutMs int    `json:"timeout_ms,omitempty"`
 }
 
-type ExecResponse struct {
+type execResponse struct {
 	Stdout         string `json:"stdout"`
 	Stderr         string `json:"stderr"`
 	ExitCode       int    `json:"exit_code"`
@@ -94,13 +106,13 @@ type ExecResponse struct {
 	MissingCommand string `json:"missing_command,omitempty"`
 }
 
-type InstallRequest struct {
+type installRequest struct {
 	TaskID         string   `json:"task_id"`
 	PackageManager string   `json:"package_manager"` // apt, npm, pip, go
 	Packages       []string `json:"packages"`
 }
 
-type InstallResponse struct {
+type installResponse struct {
 	Status   string `json:"status"` // installed, failed
 	Stdout   string `json:"stdout,omitempty"`
 	Stderr   string `json:"stderr,omitempty"`
@@ -108,59 +120,59 @@ type InstallResponse struct {
 	TimedOut bool   `json:"timed_out"`
 }
 
-type ListRequest struct {
+type listRequest struct {
 	TaskID string `json:"task_id"`
 	Path   string `json:"path"`
 }
 
-type ListEntry struct {
+type listEntry struct {
 	Name  string `json:"name"`
 	IsDir bool   `json:"is_dir"`
 	Size  int64  `json:"size"`
 }
 
-type ListResponse struct {
-	Entries []ListEntry `json:"entries"`
+type listResponse struct {
+	Entries []listEntry `json:"entries"`
 }
 
-type SearchRequest struct {
+type searchRequest struct {
 	TaskID   string `json:"task_id"`
 	Pattern  string `json:"pattern"`
 	FileGlob string `json:"file_glob,omitempty"`
 }
 
-type SearchMatch struct {
+type searchMatch struct {
 	File string `json:"file"`
 	Line int    `json:"line"`
 	Text string `json:"text"`
 }
 
-type SearchResponse struct {
-	Matches []SearchMatch `json:"matches"`
+type searchResponse struct {
+	Matches []searchMatch `json:"matches"`
 }
 
-type GitCommitRequest struct {
+type gitCommitRequest struct {
 	TaskID  string `json:"task_id"`
 	Message string `json:"message"`
 }
 
-type GitCommitResponse struct {
+type gitCommitResponse struct {
 	Status       string           `json:"status"`
 	Hash         string           `json:"hash,omitempty"`
-	FilesChanged []FileChangeInfo `json:"files_changed,omitempty"`
+	FilesChanged []fileChangeInfo `json:"files_changed,omitempty"`
 }
 
-// FileChangeInfo describes a file changed in a commit.
-type FileChangeInfo struct {
+// fileChangeInfo describes a file changed in a commit.
+type fileChangeInfo struct {
 	Path      string `json:"path"`      // relative to worktree root
 	Operation string `json:"operation"` // add, modify, delete, rename
 }
 
-type GitStatusResponse struct {
+type gitStatusResponse struct {
 	Output string `json:"output"`
 }
 
-type GitDiffResponse struct {
+type gitDiffResponse struct {
 	Output string `json:"output"`
 }
 
@@ -175,7 +187,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 // handleCreateWorktree creates a new git worktree for a task.
 // POST /worktree  {"task_id": "abc123"}
 func (s *Server) handleCreateWorktree(w http.ResponseWriter, r *http.Request) {
-	var req WorktreeCreateRequest
+	var req worktreeCreateRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
@@ -195,7 +207,16 @@ func (s *Server) handleCreateWorktree(w http.ResponseWriter, r *http.Request) {
 	branch := "agent/" + req.TaskID
 	ctx := r.Context()
 
-	if err := runGit(ctx, s.repoPath, "worktree", "add", "-b", branch, worktreePath, "HEAD"); err != nil {
+	base := "HEAD"
+	if req.BaseBranch != "" {
+		if !isValidBranchName(req.BaseBranch) {
+			writeError(w, http.StatusBadRequest, "invalid base_branch")
+			return
+		}
+		base = req.BaseBranch
+	}
+
+	if err := runGit(ctx, s.repoPath, "worktree", "add", "-b", branch, worktreePath, base); err != nil {
 		s.logger.Error("git worktree add failed", "task_id", req.TaskID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to create worktree: "+err.Error())
 		return
@@ -204,7 +225,7 @@ func (s *Server) handleCreateWorktree(w http.ResponseWriter, r *http.Request) {
 	// Copy git user config into worktree for proper commit attribution.
 	s.copyGitConfig(ctx, worktreePath)
 
-	writeJSON(w, http.StatusCreated, WorktreeCreateResponse{
+	writeJSON(w, http.StatusCreated, worktreeCreateResponse{
 		Status: "created",
 		Path:   worktreePath,
 		Branch: branch,
@@ -234,9 +255,24 @@ func (s *Server) handleDeleteWorktree(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// mergeRequest is the optional JSON body for POST /worktree/{taskID}/merge.
+type mergeRequest struct {
+	TargetBranch  string            `json:"target_branch,omitempty"`  // default: current HEAD branch
+	CommitMessage string            `json:"commit_message,omitempty"` // default: "agent: {taskID} task completion"
+	Trailers      map[string]string `json:"trailers,omitempty"`       // appended as git trailers
+}
+
+// mergeResponse is the JSON response from POST /worktree/{taskID}/merge.
+type mergeResponse struct {
+	Status       string           `json:"status"`
+	Commit       string           `json:"commit,omitempty"`
+	Note         string           `json:"note,omitempty"`
+	FilesChanged []fileChangeInfo `json:"files_changed,omitempty"`
+}
+
 // handleMergeWorktree commits any pending changes in the worktree and merges
-// them into the main repository's HEAD via --no-ff.
-// POST /worktree/{taskID}/merge
+// them into the target branch (or the main repository's current branch) via --no-ff.
+// POST /worktree/{taskID}/merge  body (optional): {"target_branch": "...", "commit_message": "...", "trailers": {...}}
 func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskID")
 	if !isValidID(taskID) {
@@ -244,18 +280,38 @@ func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse optional request body.
+	var req mergeRequest
+	if r.ContentLength > 0 {
+		if err := readJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+			return
+		}
+	}
+
+	if req.TargetBranch != "" && !isValidBranchName(req.TargetBranch) {
+		writeError(w, http.StatusBadRequest, "invalid target_branch")
+		return
+	}
+
 	worktreePath := filepath.Join(s.worktreeRoot, taskID)
 	ctx := r.Context()
 
 	// Stage all changes.
-	if err := runGit(ctx, worktreePath, "-C", worktreePath, "add", "-A"); err != nil {
+	if err := runGit(ctx, worktreePath, "add", "-A"); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to stage changes: "+err.Error())
 		return
 	}
 
+	// Build commit message with optional trailers.
+	commitMsg := req.CommitMessage
+	if commitMsg == "" {
+		commitMsg = fmt.Sprintf("agent: %s task completion", taskID)
+	}
+	commitMsg = appendTrailers(commitMsg, req.Trailers)
+
 	// Commit — skip if nothing to commit.
-	commitMsg := fmt.Sprintf("agent: %s task completion", taskID)
-	commitErr := runGit(ctx, worktreePath, "-C", worktreePath, "commit", "-m", commitMsg)
+	commitErr := runGit(ctx, worktreePath, "commit", "-m", commitMsg)
 	nothingToCommit := commitErr != nil && strings.Contains(commitErr.Error(), "nothing to commit")
 
 	if commitErr != nil && !nothingToCommit {
@@ -270,23 +326,26 @@ func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = runGit(ctx, s.repoPath, "branch", "-D", "agent/"+taskID)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "merged", "note": "nothing_to_commit"})
+		writeJSON(w, http.StatusOK, mergeResponse{Status: "merged", Note: "nothing_to_commit"})
 		return
 	}
 
 	// Get the commit hash from the worktree.
-	hash, err := gitOutput(ctx, worktreePath, "-C", worktreePath, "rev-parse", "HEAD")
+	hash, err := gitOutput(ctx, worktreePath, "rev-parse", "HEAD")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get commit hash: "+err.Error())
 		return
 	}
 	hash = strings.TrimSpace(hash)
 
-	// Merge into main repo.
-	mergeMsg := fmt.Sprintf("merge: agent task %s", taskID)
-	if err := runGit(ctx, s.repoPath, "-C", s.repoPath, "merge", hash, "--no-ff", "-m", mergeMsg); err != nil {
-		// Leave worktree in place so caller can inspect the conflict.
-		writeError(w, http.StatusConflict, "merge conflict: "+err.Error())
+	// Serialize main-repo mutations (checkout + merge) to prevent concurrent
+	// merges from racing on the working directory.
+	s.repoMu.Lock()
+	mergeResp, mergeErr := s.mergeIntoMainRepo(ctx, taskID, hash, req)
+	s.repoMu.Unlock()
+
+	if mergeErr != nil {
+		writeError(w, http.StatusConflict, "merge conflict: "+mergeErr.Error())
 		return
 	}
 
@@ -296,7 +355,96 @@ func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = runGit(ctx, s.repoPath, "branch", "-D", "agent/"+taskID)
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "merged", "commit": hash})
+	writeJSON(w, http.StatusOK, mergeResp)
+}
+
+// mergeIntoMainRepo performs the checkout + merge + file-change-parse sequence.
+// Must be called under s.repoMu to prevent concurrent mutations.
+func (s *Server) mergeIntoMainRepo(ctx context.Context, taskID, hash string, req mergeRequest) (mergeResponse, error) {
+	// If target_branch is set, save the current branch so we can restore on failure.
+	var origBranch string
+	if req.TargetBranch != "" {
+		out, err := gitOutput(ctx, s.repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+		if err != nil {
+			return mergeResponse{}, fmt.Errorf("failed to determine current branch: %w", err)
+		}
+		origBranch = strings.TrimSpace(out)
+
+		if err := runGit(ctx, s.repoPath, "checkout", req.TargetBranch); err != nil {
+			return mergeResponse{}, fmt.Errorf("failed to checkout target branch: %w", err)
+		}
+	}
+
+	// Build merge commit message with trailers.
+	mergeMsg := fmt.Sprintf("merge: agent task %s", taskID)
+	if req.CommitMessage != "" {
+		mergeMsg = req.CommitMessage
+	}
+	mergeMsg = appendTrailers(mergeMsg, req.Trailers)
+
+	if err := runGit(ctx, s.repoPath, "merge", hash, "--no-ff", "-m", mergeMsg); err != nil {
+		// Restore original branch on merge failure.
+		if origBranch != "" {
+			_ = runGit(ctx, s.repoPath, "checkout", origBranch)
+		}
+		return mergeResponse{}, err
+	}
+
+	// Get merge commit hash for response.
+	mergeHash, _ := gitOutput(ctx, s.repoPath, "rev-parse", "HEAD")
+	mergeHash = strings.TrimSpace(mergeHash)
+
+	// Parse changed files from the merge commit.
+	filesChanged := s.parseChangedFiles(ctx, s.repoPath, mergeHash)
+
+	return mergeResponse{
+		Status:       "merged",
+		Commit:       mergeHash,
+		FilesChanged: filesChanged,
+	}, nil
+}
+
+// branchCreateRequest is the JSON body for POST /branch.
+type branchCreateRequest struct {
+	Name string `json:"name"` // branch name (e.g. "semspec/scenario-auth")
+	Base string `json:"base"` // base ref (default: HEAD)
+}
+
+// handleCreateBranch creates a git branch in the main repository.
+// POST /branch  {"name": "semspec/scenario-auth", "base": "HEAD"}
+func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
+	var req branchCreateRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	if req.Name == "" || !isValidBranchName(req.Name) {
+		writeError(w, http.StatusBadRequest, "invalid or missing branch name")
+		return
+	}
+
+	base := req.Base
+	if base == "" {
+		base = "HEAD"
+	}
+
+	ctx := r.Context()
+
+	// Serialize branch creation against main repo.
+	s.repoMu.Lock()
+	err := runGit(ctx, s.repoPath, "branch", req.Name, base)
+	s.repoMu.Unlock()
+
+	if err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "exists"})
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to create branch: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "created", "branch": req.Name})
 }
 
 // handleListWorktreeFiles lists all files tracked in a worktree.
@@ -311,7 +459,7 @@ func (s *Server) handleListWorktreeFiles(w http.ResponseWriter, r *http.Request)
 	worktreePath := filepath.Join(s.worktreeRoot, taskID)
 	ctx := r.Context()
 
-	output, err := gitOutput(ctx, worktreePath, "-C", worktreePath, "ls-files", "--cached", "--others", "--exclude-standard")
+	output, err := gitOutput(ctx, worktreePath, "ls-files", "--cached", "--others", "--exclude-standard")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list files: "+err.Error())
 		return
@@ -324,7 +472,7 @@ func (s *Server) handleListWorktreeFiles(w http.ResponseWriter, r *http.Request)
 // handleWriteFile writes content to a file path inside a task's worktree.
 // PUT /file  {"task_id": "abc", "path": "main.go", "content": "..."}
 func (s *Server) handleWriteFile(w http.ResponseWriter, r *http.Request) {
-	var req FileWriteRequest
+	var req fileWriteRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
@@ -386,7 +534,7 @@ func (s *Server) handleReadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, FileResponse{
+	writeJSON(w, http.StatusOK, fileResponse{
 		Content: string(content),
 		Size:    len(content),
 	})
@@ -395,7 +543,7 @@ func (s *Server) handleReadFile(w http.ResponseWriter, r *http.Request) {
 // handleList lists directory entries within a task's worktree.
 // POST /list  {"task_id": "abc", "path": "pkg/"}
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
-	var req ListRequest
+	var req listRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
@@ -421,29 +569,29 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var result []ListEntry
+	var result []listEntry
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
-		result = append(result, ListEntry{
+		result = append(result, listEntry{
 			Name:  entry.Name(),
 			IsDir: entry.IsDir(),
 			Size:  info.Size(),
 		})
 	}
 	if result == nil {
-		result = []ListEntry{}
+		result = []listEntry{}
 	}
 
-	writeJSON(w, http.StatusOK, ListResponse{Entries: result})
+	writeJSON(w, http.StatusOK, listResponse{Entries: result})
 }
 
 // handleSearch performs a grep-style pattern search within a task's worktree.
 // POST /search  {"task_id": "abc", "pattern": "func main", "file_glob": "*.go"}
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	var req SearchRequest
+	var req searchRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
@@ -469,7 +617,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var matches []SearchMatch
+	var matches []searchMatch
 
 	walkErr := filepath.Walk(worktreePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -498,7 +646,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		lines := strings.Split(string(data), "\n")
 		for i, line := range lines {
 			if re.MatchString(line) {
-				matches = append(matches, SearchMatch{
+				matches = append(matches, searchMatch{
 					File: relPath,
 					Line: i + 1,
 					Text: line,
@@ -514,10 +662,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if matches == nil {
-		matches = []SearchMatch{}
+		matches = []searchMatch{}
 	}
 
-	writeJSON(w, http.StatusOK, SearchResponse{Matches: matches})
+	writeJSON(w, http.StatusOK, searchResponse{Matches: matches})
 }
 
 // handleGitStatus returns the porcelain git status of a task's worktree.
@@ -541,19 +689,19 @@ func (s *Server) handleGitStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	output, err := gitOutput(r.Context(), worktreePath, "-C", worktreePath, "status", "--porcelain")
+	output, err := gitOutput(r.Context(), worktreePath, "status", "--porcelain")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "git status failed: "+err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, GitStatusResponse{Output: output})
+	writeJSON(w, http.StatusOK, gitStatusResponse{Output: output})
 }
 
 // handleGitCommit stages all changes in a worktree and commits them.
 // POST /git/commit  {"task_id": "abc", "message": "feat: add handler"}
 func (s *Server) handleGitCommit(w http.ResponseWriter, r *http.Request) {
-	var req GitCommitRequest
+	var req gitCommitRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
@@ -570,22 +718,22 @@ func (s *Server) handleGitCommit(w http.ResponseWriter, r *http.Request) {
 	worktreePath := filepath.Join(s.worktreeRoot, req.TaskID)
 	ctx := r.Context()
 
-	if err := runGit(ctx, worktreePath, "-C", worktreePath, "add", "-A"); err != nil {
+	if err := runGit(ctx, worktreePath, "add", "-A"); err != nil {
 		writeError(w, http.StatusInternalServerError, "git add failed: "+err.Error())
 		return
 	}
 
-	commitErr := runGit(ctx, worktreePath, "-C", worktreePath, "commit", "-m", req.Message)
+	commitErr := runGit(ctx, worktreePath, "commit", "-m", req.Message)
 	if commitErr != nil {
 		if strings.Contains(commitErr.Error(), "nothing to commit") {
-			writeJSON(w, http.StatusOK, GitCommitResponse{Status: "nothing_to_commit"})
+			writeJSON(w, http.StatusOK, gitCommitResponse{Status: "nothing_to_commit"})
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "git commit failed: "+commitErr.Error())
 		return
 	}
 
-	hash, err := gitOutput(ctx, worktreePath, "-C", worktreePath, "rev-parse", "HEAD")
+	hash, err := gitOutput(ctx, worktreePath, "rev-parse", "HEAD")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get commit hash: "+err.Error())
 		return
@@ -595,7 +743,7 @@ func (s *Server) handleGitCommit(w http.ResponseWriter, r *http.Request) {
 	// Get changed files for provenance graph entities.
 	filesChanged := s.parseChangedFiles(ctx, worktreePath, commitHash)
 
-	writeJSON(w, http.StatusOK, GitCommitResponse{
+	writeJSON(w, http.StatusOK, gitCommitResponse{
 		Status:       "committed",
 		Hash:         commitHash,
 		FilesChanged: filesChanged,
@@ -626,26 +774,26 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Unstaged changes.
-	unstaged, err := gitOutput(ctx, worktreePath, "-C", worktreePath, "diff")
+	unstaged, err := gitOutput(ctx, worktreePath, "diff")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "git diff failed: "+err.Error())
 		return
 	}
 
 	// Staged changes.
-	staged, err := gitOutput(ctx, worktreePath, "-C", worktreePath, "diff", "--cached")
+	staged, err := gitOutput(ctx, worktreePath, "diff", "--cached")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "git diff --cached failed: "+err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, GitDiffResponse{Output: unstaged + staged})
+	writeJSON(w, http.StatusOK, gitDiffResponse{Output: unstaged + staged})
 }
 
 // handleExec executes a shell command inside a task's worktree.
 // POST /exec  {"task_id": "abc", "command": "go test ./...", "timeout_ms": 30000}
 func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
-	var req ExecRequest
+	var req execRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
@@ -674,7 +822,7 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 
 	classification, missingCmd := classifyExec(stderr, exitCode, timedOut)
 
-	writeJSON(w, http.StatusOK, ExecResponse{
+	writeJSON(w, http.StatusOK, execResponse{
 		Stdout:         stdout,
 		Stderr:         stderr,
 		ExitCode:       exitCode,
@@ -696,7 +844,7 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 // The task_id scopes the working directory. For "go install", the command runs
 // in the worktree directory so GOPATH is correct.
 func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
-	var req InstallRequest
+	var req installRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
@@ -755,7 +903,7 @@ func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 		status = "failed"
 	}
 
-	writeJSON(w, http.StatusOK, InstallResponse{
+	writeJSON(w, http.StatusOK, installResponse{
 		Status:   status,
 		Stdout:   stdout,
 		Stderr:   stderr,
@@ -827,11 +975,11 @@ func (s *Server) removeWorktree(ctx context.Context, worktreePath string) error 
 // silently ignored.
 func (s *Server) copyGitConfig(ctx context.Context, worktreePath string) {
 	for _, key := range []string{"user.name", "user.email"} {
-		val, err := gitOutput(ctx, s.repoPath, "-C", s.repoPath, "config", key)
+		val, err := gitOutput(ctx, s.repoPath, "config", key)
 		if err != nil || strings.TrimSpace(val) == "" {
 			continue
 		}
-		_ = runGit(ctx, worktreePath, "-C", worktreePath, "config", key, strings.TrimSpace(val))
+		_ = runGit(ctx, worktreePath, "config", key, strings.TrimSpace(val))
 	}
 }
 
@@ -839,14 +987,16 @@ func (s *Server) copyGitConfig(ctx context.Context, worktreePath string) {
 // files modified by the commit and their operation (add, modify, delete, rename,
 // copy, type_change). Errors are logged and result in a nil return — callers
 // treat this as optional provenance metadata.
-func (s *Server) parseChangedFiles(ctx context.Context, worktreePath, commitHash string) []FileChangeInfo {
-	out, err := gitOutput(ctx, worktreePath, "-C", worktreePath, "diff-tree", "--no-commit-id", "--name-status", "-r", commitHash)
+func (s *Server) parseChangedFiles(ctx context.Context, worktreePath, commitHash string) []fileChangeInfo {
+	// Use -m to handle merge commits (which have multiple parents) — without
+	// -m, diff-tree produces no output for merge commits.
+	out, err := gitOutput(ctx, worktreePath, "diff-tree", "-m", "--first-parent", "--no-commit-id", "--name-status", "-r", commitHash)
 	if err != nil {
 		s.logger.Warn("parseChangedFiles: git diff-tree failed", "commit", commitHash, "error", err)
 		return nil
 	}
 
-	var files []FileChangeInfo
+	var files []fileChangeInfo
 	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		if line == "" {
 			continue
@@ -876,7 +1026,7 @@ func (s *Server) parseChangedFiles(ctx context.Context, worktreePath, commitHash
 		}
 
 		path := parts[len(parts)-1] // For renames/copies, use the destination path.
-		files = append(files, FileChangeInfo{Path: path, Operation: op})
+		files = append(files, fileChangeInfo{Path: path, Operation: op})
 	}
 	return files
 }
@@ -892,6 +1042,41 @@ var validIDRe = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,256}$`)
 // and git branch name component.
 func isValidID(id string) bool {
 	return validIDRe.MatchString(id)
+}
+
+// validBranchRe matches git branch names: alphanumeric, dots, hyphens,
+// underscores, and forward slashes (for hierarchical names like
+// "semspec/scenario-auth"). Must not start with "-" or ".", must not contain
+// ".." or end with ".lock".
+var validBranchRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,255}$`)
+
+// isValidBranchName reports whether name is a safe git branch name.
+func isValidBranchName(name string) bool {
+	if !validBranchRe.MatchString(name) {
+		return false
+	}
+	if strings.Contains(name, "..") || strings.HasSuffix(name, ".lock") {
+		return false
+	}
+	return true
+}
+
+// appendTrailers appends git trailers to a commit message in deterministic
+// (sorted) order. Returns the message unchanged if trailers is empty.
+func appendTrailers(msg string, trailers map[string]string) string {
+	if len(trailers) == 0 {
+		return msg
+	}
+	keys := make([]string, 0, len(trailers))
+	for k := range trailers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	msg += "\n"
+	for _, k := range keys {
+		msg += fmt.Sprintf("\n%s: %s", k, trailers[k])
+	}
+	return msg
 }
 
 // ---------------------------------------------------------------------------

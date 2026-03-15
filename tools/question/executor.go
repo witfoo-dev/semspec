@@ -15,19 +15,19 @@ import (
 
 const toolName = "raise_question"
 
-// QuestionStorer is the subset of workflow.QuestionStore needed by this tool.
-type QuestionStorer interface {
+// Storer is the subset of workflow.QuestionStore needed by this tool.
+type Storer interface {
 	Store(ctx context.Context, q *workflow.Question) error
 }
 
 // Executor implements agentic.ToolExecutor for the raise_question tool.
 type Executor struct {
-	store  QuestionStorer
+	store  Storer
 	router *answerer.Router // optional — nil means no routing
 }
 
 // NewExecutor constructs a raise_question Executor.
-func NewExecutor(store QuestionStorer, router *answerer.Router) *Executor {
+func NewExecutor(store Storer, router *answerer.Router) *Executor {
 	return &Executor{
 		store:  store,
 		router: router,

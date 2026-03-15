@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	toolName           = "web_search"
-	defaultMaxResults  = 5
+	toolName          = "web_search"
+	defaultMaxResults = 5
 )
 
 // Executor implements the web_search agentic tool.

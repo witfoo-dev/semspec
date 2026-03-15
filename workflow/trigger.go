@@ -50,8 +50,9 @@ type TriggerPayload struct {
 	// Task-execution-specific fields
 	TaskID           string   `json:"task_id,omitempty"`
 	ContextRequestID string   `json:"context_request_id,omitempty"`
-	FileScope        []string `json:"file_scope,omitempty"`    // Files/globs this task may touch
-	SystemPrompt     string   `json:"system_prompt,omitempty"` // Provider-aware system prompt for the agentic loop
+	FileScope        []string `json:"file_scope,omitempty"`      // Files/globs this task may touch
+	SystemPrompt     string   `json:"system_prompt,omitempty"`   // Provider-aware system prompt for the agentic loop
+	ScenarioBranch   string   `json:"scenario_branch,omitempty"` // Target branch for worktree merges (e.g. "semspec/scenario-auth")
 
 	// ChangeProposal-specific fields
 	ProposalID string `json:"proposal_id,omitempty"`
@@ -107,6 +108,7 @@ func (p *TriggerPayload) UnmarshalJSON(data []byte) error {
 			ProposalID       string   `json:"proposal_id,omitempty"`
 			FileScope        []string `json:"file_scope,omitempty"`
 			SystemPrompt     string   `json:"system_prompt,omitempty"`
+			ScenarioBranch   string   `json:"scenario_branch,omitempty"`
 		}
 		if err := json.Unmarshal(p.Data, &nested); err == nil {
 			if p.Slug == "" && nested.Slug != "" {
@@ -147,6 +149,9 @@ func (p *TriggerPayload) UnmarshalJSON(data []byte) error {
 			}
 			if p.SystemPrompt == "" && nested.SystemPrompt != "" {
 				p.SystemPrompt = nested.SystemPrompt
+			}
+			if p.ScenarioBranch == "" && nested.ScenarioBranch != "" {
+				p.ScenarioBranch = nested.ScenarioBranch
 			}
 		}
 	}

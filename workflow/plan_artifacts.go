@@ -182,14 +182,22 @@ func renderArchive(plan *Plan, requirements []Requirement, scenarios []Scenario,
 	b.WriteString(plan.Title)
 	b.WriteString("\n")
 
-	// Summary
 	if plan.Goal != "" {
 		b.WriteString("\n## Summary\n\n")
 		b.WriteString(plan.Goal)
 		b.WriteString("\n")
 	}
 
-	// Timeline
+	renderArchiveTimeline(&b, plan)
+	renderArchiveRequirements(&b, requirements, scenarios)
+	renderArchiveScenarios(&b, scenarios)
+	renderArchiveTasks(&b, tasks)
+	renderArchiveChangeProposals(&b, changeProposals)
+
+	return b.String()
+}
+
+func renderArchiveTimeline(b *strings.Builder, plan *Plan) {
 	b.WriteString("\n## Timeline\n\n")
 	b.WriteString("- **Created:** ")
 	b.WriteString(plan.CreatedAt.Format(time.RFC3339))
@@ -203,26 +211,27 @@ func renderArchive(plan *Plan, requirements []Requirement, scenarios []Scenario,
 	b.WriteString(string(plan.EffectiveStatus()))
 	b.WriteString("\n")
 	if plan.EffectiveStatus() == StatusComplete && plan.ApprovedAt != nil {
-		duration := time.Since(*plan.ApprovedAt)
 		b.WriteString("- **Duration:** ")
-		b.WriteString(formatDuration(duration))
+		b.WriteString(formatDuration(time.Since(*plan.ApprovedAt)))
 		b.WriteString("\n")
 	}
+}
 
-	// Requirements
+func renderArchiveRequirements(b *strings.Builder, requirements []Requirement, scenarios []Scenario) {
 	b.WriteString(fmt.Sprintf("\n## Requirements (%d)\n\n", len(requirements)))
-	if len(requirements) > 0 {
-		// Count scenarios per requirement.
-		scenCountByReq := make(map[string]int, len(requirements))
-		for _, s := range scenarios {
-			scenCountByReq[s.RequirementID]++
-		}
-		for _, req := range requirements {
-			b.WriteString(fmt.Sprintf("- **%s** — %s (%d scenarios)\n", req.Title, req.Status, scenCountByReq[req.ID]))
-		}
+	if len(requirements) == 0 {
+		return
 	}
+	scenCountByReq := make(map[string]int, len(requirements))
+	for _, s := range scenarios {
+		scenCountByReq[s.RequirementID]++
+	}
+	for _, req := range requirements {
+		b.WriteString(fmt.Sprintf("- **%s** — %s (%d scenarios)\n", req.Title, req.Status, scenCountByReq[req.ID]))
+	}
+}
 
-	// Scenario summary
+func renderArchiveScenarios(b *strings.Builder, scenarios []Scenario) {
 	passing, failing, pending, skipped := 0, 0, 0, 0
 	for _, s := range scenarios {
 		switch s.Status {
@@ -237,51 +246,47 @@ func renderArchive(plan *Plan, requirements []Requirement, scenarios []Scenario,
 		}
 	}
 	b.WriteString(fmt.Sprintf("\n## Scenarios (%d)\n\n", len(scenarios)))
-	b.WriteString(fmt.Sprintf("- Passing: %d\n", passing))
-	b.WriteString(fmt.Sprintf("- Failing: %d\n", failing))
-	b.WriteString(fmt.Sprintf("- Pending: %d\n", pending))
-	b.WriteString(fmt.Sprintf("- Skipped: %d\n", skipped))
+	b.WriteString(fmt.Sprintf("- Passing: %d\n- Failing: %d\n- Pending: %d\n- Skipped: %d\n", passing, failing, pending, skipped))
+}
 
-	// Task summary
-	if len(tasks) > 0 {
-		completed, failed, inProgress, taskPending := 0, 0, 0, 0
-		for _, t := range tasks {
-			switch t.Status {
-			case TaskStatusCompleted:
-				completed++
-			case TaskStatusFailed:
-				failed++
-			case TaskStatusInProgress:
-				inProgress++
-			default:
-				taskPending++
-			}
-		}
-		b.WriteString(fmt.Sprintf("\n## Tasks (%d)\n\n", len(tasks)))
-		b.WriteString(fmt.Sprintf("- Completed: %d\n", completed))
-		b.WriteString(fmt.Sprintf("- Failed: %d\n", failed))
-		b.WriteString(fmt.Sprintf("- In Progress: %d\n", inProgress))
-		b.WriteString(fmt.Sprintf("- Pending: %d\n", taskPending))
+func renderArchiveTasks(b *strings.Builder, tasks []Task) {
+	if len(tasks) == 0 {
+		return
 	}
-
-	// Change proposals
-	if len(changeProposals) > 0 {
-		b.WriteString(fmt.Sprintf("\n## Change Proposals (%d)\n\n", len(changeProposals)))
-		for _, cp := range changeProposals {
-			b.WriteString(fmt.Sprintf("### %s\n\n", cp.Title))
-			b.WriteString(fmt.Sprintf("**Status:** %s  \n", cp.Status))
-			b.WriteString(fmt.Sprintf("**Proposed by:** %s  \n", cp.ProposedBy))
-			if cp.Rationale != "" {
-				b.WriteString(fmt.Sprintf("**Rationale:** %s  \n", cp.Rationale))
-			}
-			if len(cp.AffectedReqIDs) > 0 {
-				b.WriteString(fmt.Sprintf("**Affected requirements:** %s\n", strings.Join(cp.AffectedReqIDs, ", ")))
-			}
-			b.WriteString("\n")
+	completed, failed, inProgress, taskPending := 0, 0, 0, 0
+	for _, t := range tasks {
+		switch t.Status {
+		case TaskStatusCompleted:
+			completed++
+		case TaskStatusFailed:
+			failed++
+		case TaskStatusInProgress:
+			inProgress++
+		default:
+			taskPending++
 		}
 	}
+	b.WriteString(fmt.Sprintf("\n## Tasks (%d)\n\n", len(tasks)))
+	b.WriteString(fmt.Sprintf("- Completed: %d\n- Failed: %d\n- In Progress: %d\n- Pending: %d\n", completed, failed, inProgress, taskPending))
+}
 
-	return b.String()
+func renderArchiveChangeProposals(b *strings.Builder, changeProposals []ChangeProposal) {
+	if len(changeProposals) == 0 {
+		return
+	}
+	b.WriteString(fmt.Sprintf("\n## Change Proposals (%d)\n\n", len(changeProposals)))
+	for _, cp := range changeProposals {
+		b.WriteString(fmt.Sprintf("### %s\n\n", cp.Title))
+		b.WriteString(fmt.Sprintf("**Status:** %s  \n", cp.Status))
+		b.WriteString(fmt.Sprintf("**Proposed by:** %s  \n", cp.ProposedBy))
+		if cp.Rationale != "" {
+			b.WriteString(fmt.Sprintf("**Rationale:** %s  \n", cp.Rationale))
+		}
+		if len(cp.AffectedReqIDs) > 0 {
+			b.WriteString(fmt.Sprintf("**Affected requirements:** %s\n", strings.Join(cp.AffectedReqIDs, ", ")))
+		}
+		b.WriteString("\n")
+	}
 }
 
 // formatDuration formats a duration in a human-readable way.

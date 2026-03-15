@@ -32,11 +32,9 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | `processor/planner/` | Single-planner path |
 | `processor/plan-reviewer/` | SOP-aware plan validation |
 | `processor/context-builder/` | Strategy-based LLM context assembly |
-| `processor/source-ingester/` | Document/SOP ingestion |
 | `processor/task-generator/` | Plan → task decomposition (or status advance in reactive mode) |
 | `processor/task-dispatcher/` | Dependency-aware task dispatch |
 | `processor/scenario-orchestrator/` | Reactive execution entry point (ADR-025) |
-| `processor/ast-indexer/` | Go/TS AST parsing → graph entities |
 | `processor/ast/` | AST parsing library |
 | `tools/` | Tool executor implementations (file, git, decompose, spawn, create, tree) |
 | `tools/decompose/` | `decompose_task` — validates LLM-provided TaskDAG |
@@ -153,11 +151,9 @@ semspec/
 │   ├── planner/              # Single-planner path
 │   ├── plan-reviewer/        # SOP-aware plan validation
 │   ├── context-builder/      # Strategy-based context assembly
-│   ├── source-ingester/      # Document/SOP ingestion
 │   ├── task-generator/       # Plan → task decomposition (static) or status advance (reactive)
 │   ├── task-dispatcher/      # Dependency-aware task dispatch
 │   ├── scenario-orchestrator/ # Reactive execution entry point (ADR-025)
-│   ├── ast-indexer/          # Go/TS AST parsing
 │   ├── question-answerer/    # LLM question answering
 │   ├── question-timeout/     # SLA monitoring and escalation
 │   ├── workflow-api/         # Workflow + Requirement/Scenario/ChangeProposal HTTP API
@@ -326,7 +322,7 @@ if req.GraphReady {
 
 Architecture docs, API references, and design documents should be:
 1. Written to `sources/` with YAML frontmatter (`category`, `scope`, `domain`)
-2. Ingested via source-ingester (`source.ingest.document` subject)
+2. Ingested via semsource (external service that watches repo branches)
 3. Stored as graph entities with `source.doc.*` predicates
 4. Discovered by context-builder strategies via `QueryEntitiesByPredicate("source.doc")`
 

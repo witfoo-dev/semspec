@@ -20,6 +20,10 @@ type Config struct {
 	// Model is the model endpoint name passed through to dispatched agents.
 	Model string `json:"model" schema:"type:string,description:Model endpoint name for agent tasks,category:basic,default:default"`
 
+	// SandboxURL is the base URL of the sandbox server. When set, the
+	// scenario-executor creates per-scenario branches for worktree isolation.
+	SandboxURL string `json:"sandbox_url" schema:"type:string,description:Sandbox server URL for branch management,category:advanced"`
+
 	// Ports contains the input and output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
 }

@@ -76,7 +76,7 @@ func TestManifestClient_Fetch_Success(t *testing.T) {
 		{"semspec.plan.status", 3},
 	}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(predicatesResponse(t, preds, len(preds)))
 	}))
@@ -130,16 +130,16 @@ func TestManifestClient_Fetch_ExcludedPredicatesFiltered(t *testing.T) {
 		EntityCount int
 	}{
 		{"source.doc.architecture", 10},
-		{"source.doc.chunk_index", 999},   // excluded
-		{"source.doc.chunk_count", 999},   // excluded
-		{"source.doc.etag", 999},          // excluded
-		{"source.doc.content_hash", 999},  // excluded
-		{"source.doc.error", 999},         // excluded
-		{"source.doc.raw_content", 999},   // excluded
+		{"source.doc.chunk_index", 999},  // excluded
+		{"source.doc.chunk_count", 999},  // excluded
+		{"source.doc.etag", 999},         // excluded
+		{"source.doc.content_hash", 999}, // excluded
+		{"source.doc.error", 999},        // excluded
+		{"source.doc.raw_content", 999},  // excluded
 		{"code.function.main.Run", 50},
 	}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(predicatesResponse(t, preds, len(preds)))
 	}))
@@ -180,7 +180,7 @@ func TestManifestClient_Fetch_CacheHit(t *testing.T) {
 		{"code.function.pkg.Foo", 7},
 	}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		callCount.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(predicatesResponse(t, preds, len(preds)))
@@ -224,7 +224,7 @@ func TestManifestClient_Fetch_StaleOnFailure(t *testing.T) {
 		{"code.function.pkg.Bar", 42},
 	}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if failNext.Load() {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -458,7 +458,7 @@ func TestNewManifestClient_EmptyURL(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestManifestClient_Fetch_GraphQLErrors(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"errors":[{"message":"unknown field 'predicates'"}]}`))
 	}))
