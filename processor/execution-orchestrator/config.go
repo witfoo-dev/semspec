@@ -27,6 +27,16 @@ type Config struct {
 	// directly on the host filesystem.
 	SandboxURL string `json:"sandbox_url,omitempty" schema:"type:string,description:Sandbox server URL for worktree isolation (empty=disabled),category:advanced"`
 
+	// GraphGatewayURL is the URL of the graph-gateway for indexing readiness checks.
+	// When empty, the indexing gate is disabled (merge completes immediately without
+	// waiting for semsource to index the commit).
+	GraphGatewayURL string `json:"graph_gateway_url,omitempty" schema:"type:string,description:Graph gateway URL for indexing gate (empty=disabled),category:advanced"`
+
+	// IndexingBudgetStr is the maximum time to wait for semsource to index a merge
+	// commit before proceeding. Uses Go duration format (e.g. "60s", "90s").
+	// When zero or empty, defaults to 60s.
+	IndexingBudgetStr string `json:"indexing_budget,omitempty" schema:"type:string,description:Max wait for commit indexing after merge (e.g. 60s),category:advanced,default:60s"`
+
 	// Model is the model endpoint name passed through to dispatched agents.
 	Model string `json:"model" schema:"type:string,description:Model endpoint name for agent tasks,category:basic,default:default"`
 
@@ -105,6 +115,11 @@ func (c *Config) Validate() error {
 	if c.TimeoutSeconds <= 0 {
 		return fmt.Errorf("timeout_seconds must be positive")
 	}
+	if c.IndexingBudgetStr != "" {
+		if _, err := time.ParseDuration(c.IndexingBudgetStr); err != nil {
+			return fmt.Errorf("invalid indexing_budget %q: %w", c.IndexingBudgetStr, err)
+		}
+	}
 	return nil
 }
 
@@ -114,4 +129,17 @@ func (c *Config) GetTimeout() time.Duration {
 		return 30 * time.Minute
 	}
 	return time.Duration(c.TimeoutSeconds) * time.Second
+}
+
+// GetIndexingBudget returns the parsed indexing budget duration.
+// Returns 0 if not configured (gate caller should use DefaultIndexingBudget).
+func (c *Config) GetIndexingBudget() time.Duration {
+	if c.IndexingBudgetStr == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(c.IndexingBudgetStr)
+	if err != nil {
+		return 0
+	}
+	return d
 }

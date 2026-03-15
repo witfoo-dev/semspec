@@ -82,6 +82,10 @@ type taskExecution struct {
 	// Set once during initial dispatch; never cleared on retry.
 	WorktreeBranch string
 
+	// ScenarioBranch is the scenario branch this task merges into
+	// (e.g. "semspec/scenario-auth-refresh"). Set from the trigger payload.
+	ScenarioBranch string
+
 	// timeoutTimer holds the per-execution timeout.
 	timeoutTimer *timeoutHandle
 }

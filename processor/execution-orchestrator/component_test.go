@@ -681,3 +681,142 @@ func TestUpdateLastActivity(t *testing.T) {
 		t.Errorf("lastActivity (%v) should be >= start of test (%v)", activity, before)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Config — IndexingBudget validation
+// ---------------------------------------------------------------------------
+
+func TestConfigValidate_InvalidIndexingBudget(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.IndexingBudgetStr = "not-a-duration"
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for IndexingBudgetStr=\"not-a-duration\", got nil")
+	}
+}
+
+func TestConfigValidate_ValidIndexingBudget(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.IndexingBudgetStr = "90s"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("expected valid config with IndexingBudgetStr=\"90s\" to pass, got: %v", err)
+	}
+}
+
+func TestConfigGetIndexingBudget_Empty(t *testing.T) {
+	cfg := Config{}
+	got := cfg.GetIndexingBudget()
+	if got != 0 {
+		t.Errorf("GetIndexingBudget with empty string: want 0, got %v", got)
+	}
+}
+
+func TestConfigGetIndexingBudget_Valid(t *testing.T) {
+	cfg := Config{IndexingBudgetStr: "90s"}
+	got := cfg.GetIndexingBudget()
+	want := 90 * time.Second
+	if got != want {
+		t.Errorf("GetIndexingBudget(\"90s\"): want %v, got %v", want, got)
+	}
+}
+
+func TestConfigGetIndexingBudget_Invalid(t *testing.T) {
+	cfg := Config{IndexingBudgetStr: "bad"}
+	got := cfg.GetIndexingBudget()
+	if got != 0 {
+		t.Errorf("GetIndexingBudget(\"bad\"): want 0 (silent fallback), got %v", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// NewComponent — indexingGate wiring
+// ---------------------------------------------------------------------------
+
+func TestNewComponent_WithGraphGatewayURL(t *testing.T) {
+	rawCfg, _ := json.Marshal(map[string]any{
+		"graph_gateway_url": "http://localhost:8082",
+	})
+	deps := component.Dependencies{}
+
+	comp, err := NewComponent(rawCfg, deps)
+	if err != nil {
+		t.Fatalf("NewComponent with graph_gateway_url: unexpected error: %v", err)
+	}
+	c := comp.(*Component)
+	if c.indexingGate == nil {
+		t.Error("expected indexingGate to be non-nil when graph_gateway_url is configured")
+	}
+}
+
+func TestNewComponent_WithoutGraphGatewayURL(t *testing.T) {
+	rawCfg, _ := json.Marshal(map[string]any{})
+	deps := component.Dependencies{}
+
+	comp, err := NewComponent(rawCfg, deps)
+	if err != nil {
+		t.Fatalf("NewComponent without graph_gateway_url: unexpected error: %v", err)
+	}
+	c := comp.(*Component)
+	if c.indexingGate != nil {
+		t.Error("expected indexingGate to be nil when graph_gateway_url is absent")
+	}
+}
+
+func TestNewComponent_WithIndexingBudget(t *testing.T) {
+	rawCfg, _ := json.Marshal(map[string]any{
+		"indexing_budget": "90s",
+	})
+	deps := component.Dependencies{}
+
+	comp, err := NewComponent(rawCfg, deps)
+	if err != nil {
+		t.Fatalf("NewComponent with indexing_budget=\"90s\": unexpected error: %v", err)
+	}
+	c := comp.(*Component)
+	want := 90 * time.Second
+	got := c.config.GetIndexingBudget()
+	if got != want {
+		t.Errorf("GetIndexingBudget(): want %v, got %v", want, got)
+	}
+}
+
+func TestNewComponent_InvalidIndexingBudget(t *testing.T) {
+	rawCfg, _ := json.Marshal(map[string]any{
+		"indexing_budget": "not-a-duration",
+	})
+	deps := component.Dependencies{}
+
+	_, err := NewComponent(rawCfg, deps)
+	if err == nil {
+		t.Error("expected error for indexing_budget=\"not-a-duration\", got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// awaitIndexing — no-op path tests
+// ---------------------------------------------------------------------------
+
+func TestAwaitIndexing_NilGate_IsNoop(t *testing.T) {
+	c := newTestComponent(t)
+	// Default component has no graph_gateway_url, so indexingGate is nil.
+	if c.indexingGate != nil {
+		t.Skip("indexingGate is unexpectedly set; skipping nil-gate test")
+	}
+	// Must not panic and must return immediately.
+	c.awaitIndexing("abc123def456", "task-1")
+}
+
+func TestAwaitIndexing_EmptyCommitSHA_IsNoop(t *testing.T) {
+	rawCfg, _ := json.Marshal(map[string]any{
+		"graph_gateway_url": "http://localhost:8082",
+	})
+	deps := component.Dependencies{}
+	comp, err := NewComponent(rawCfg, deps)
+	if err != nil {
+		t.Fatalf("NewComponent: %v", err)
+	}
+	c := comp.(*Component)
+
+	// An empty commitSHA triggers the early-return guard in awaitIndexing.
+	// Must not panic and must return immediately even with a non-nil gate.
+	c.awaitIndexing("", "task-1")
+}

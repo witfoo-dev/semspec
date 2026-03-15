@@ -84,9 +84,9 @@ const (
 // worktreeManager defines the sandbox operations used by the orchestrator.
 // Satisfied by *sandbox.Client; narrow interface enables mock injection in tests.
 type worktreeManager interface {
-	CreateWorktree(ctx context.Context, taskID string) (*sandbox.WorktreeInfo, error)
+	CreateWorktree(ctx context.Context, taskID string, opts ...sandbox.WorktreeOption) (*sandbox.WorktreeInfo, error)
 	DeleteWorktree(ctx context.Context, taskID string) error
-	MergeWorktree(ctx context.Context, taskID string) error
+	MergeWorktree(ctx context.Context, taskID string, opts ...sandbox.MergeOption) (*sandbox.MergeResult, error)
 	ListWorktreeFiles(ctx context.Context, taskID string) ([]sandbox.FileEntry, error)
 }
 
@@ -107,7 +107,8 @@ type Component struct {
 	logger       *slog.Logger
 	platform     component.PlatformMeta
 	tripleWriter *graphutil.TripleWriter
-	sandbox      worktreeManager // nil when sandbox is disabled
+	sandbox      worktreeManager        // nil when sandbox is disabled
+	indexingGate *workflow.IndexingGate // nil when graph-gateway not configured
 
 	inputPorts  []component.Port
 	outputPorts []component.Port
@@ -155,12 +156,13 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	logger = logger.With("component", componentName)
 
 	c := &Component{
-		config:     cfg,
-		natsClient: deps.NATSClient,
-		logger:     logger,
-		platform:   deps.Platform,
-		sandbox:    newWorktreeManager(cfg.SandboxURL),
-		shutdown:   make(chan struct{}),
+		config:       cfg,
+		natsClient:   deps.NATSClient,
+		logger:       logger,
+		platform:     deps.Platform,
+		sandbox:      newWorktreeManager(cfg.SandboxURL),
+		indexingGate: workflow.NewIndexingGate(cfg.GraphGatewayURL, logger),
+		shutdown:     make(chan struct{}),
 		tripleWriter: &graphutil.TripleWriter{
 			NATSClient:    deps.NATSClient,
 			Logger:        logger,
@@ -362,6 +364,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 		TraceID:          trigger.TraceID,
 		LoopID:           trigger.LoopID,
 		RequestID:        trigger.RequestID,
+		ScenarioBranch:   trigger.ScenarioBranch,
 	}
 
 	if _, loaded := c.activeExecutions.LoadOrStore(entityID, exec); loaded {
@@ -384,7 +387,11 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 
 	// Create sandbox worktree if sandbox is enabled.
 	if c.sandbox != nil {
-		wtInfo, wtErr := c.sandbox.CreateWorktree(ctx, exec.TaskID)
+		var wtOpts []sandbox.WorktreeOption
+		if exec.ScenarioBranch != "" {
+			wtOpts = append(wtOpts, sandbox.WithBaseBranch(exec.ScenarioBranch))
+		}
+		wtInfo, wtErr := c.sandbox.CreateWorktree(ctx, exec.TaskID, wtOpts...)
 		if wtErr != nil {
 			c.logger.Error("Failed to create worktree, proceeding without sandbox isolation",
 				"slug", exec.Slug,
@@ -950,14 +957,29 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 // Worktree lifecycle helpers
 // ---------------------------------------------------------------------------
 
-// mergeWorktree merges the worktree for the given execution back into main.
+// mergeWorktree merges the worktree for the given execution back into its
+// scenario branch (if set) or the current HEAD branch. Merge metadata
+// (commit hash, files changed) is captured for lineage tracking.
 // Best-effort: failures are logged and recorded as a triple but never block
 // the terminal state transition. Caller must hold exec.mu.
 func (c *Component) mergeWorktree(exec *taskExecution) {
 	if c.sandbox == nil || exec.WorktreePath == "" {
 		return
 	}
-	if err := c.sandbox.MergeWorktree(context.Background(), exec.TaskID); err != nil {
+
+	var opts []sandbox.MergeOption
+	if exec.ScenarioBranch != "" {
+		opts = append(opts, sandbox.WithTargetBranch(exec.ScenarioBranch))
+	}
+	opts = append(opts, sandbox.WithCommitMessage(fmt.Sprintf("feat(%s): %s", exec.Slug, exec.TaskID)))
+	opts = append(opts, sandbox.WithTrailer("Task-ID", exec.TaskID))
+	opts = append(opts, sandbox.WithTrailer("Plan-Slug", exec.Slug))
+	if exec.TraceID != "" {
+		opts = append(opts, sandbox.WithTrailer("Trace-ID", exec.TraceID))
+	}
+
+	result, err := c.sandbox.MergeWorktree(context.Background(), exec.TaskID, opts...)
+	if err != nil {
 		c.logger.Warn("Failed to merge worktree; changes may need manual merge",
 			"slug", exec.Slug,
 			"task_id", exec.TaskID,
@@ -969,6 +991,58 @@ func (c *Component) mergeWorktree(exec *taskExecution) {
 		c.logger.Info("Worktree merged successfully",
 			"slug", exec.Slug,
 			"task_id", exec.TaskID,
+			"commit", result.Commit,
+			"files_changed", len(result.FilesChanged),
+		)
+		// Update FilesModified with definitive file list from merge.
+		if len(result.FilesChanged) > 0 {
+			exec.FilesModified = make([]string, len(result.FilesChanged))
+			for i, f := range result.FilesChanged {
+				exec.FilesModified[i] = f.Path
+			}
+		}
+
+		// Wait for semsource to index the merge commit so dependent tasks
+		// get fresh graph context. Soft gate: proceeds with warning on timeout.
+		c.awaitIndexing(result.Commit, exec.TaskID)
+	}
+}
+
+// awaitIndexing waits for semsource to index a merge commit. No-op when the
+// indexing gate is not configured. Timeout produces a warning, not an error.
+// Uses a context that cancels on component shutdown so the gate doesn't delay
+// graceful stop.
+func (c *Component) awaitIndexing(commitSHA, taskID string) {
+	if c.indexingGate == nil || commitSHA == "" {
+		return
+	}
+
+	budget := c.config.GetIndexingBudget()
+	if budget <= 0 {
+		budget = workflow.DefaultIndexingBudget
+	}
+
+	// Cancel the gate if the component is shutting down.
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-c.shutdown:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	defer cancel()
+
+	if err := c.indexingGate.AwaitCommitIndexed(ctx, commitSHA, budget); err != nil {
+		c.logger.Warn("Indexing gate timed out; dependent task may have stale context",
+			"commit", commitSHA,
+			"budget", budget,
+			"task_id", taskID,
+		)
+	} else {
+		c.logger.Info("Merge commit indexed by semsource",
+			"commit", commitSHA,
+			"task_id", taskID,
 		)
 	}
 }
