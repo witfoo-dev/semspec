@@ -41,6 +41,25 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	if questionHandler != nil {
 		questionHandler.RegisterHTTPHandlers(prefix+"questions", mux)
 	}
+
+	// Workspace browser (proxied to sandbox server)
+	if c.workspace != nil {
+		mux.HandleFunc(prefix+"workspace/tasks", c.workspace.handleTasks)
+		mux.HandleFunc(prefix+"workspace/tree", c.workspace.handleTree)
+		mux.HandleFunc(prefix+"workspace/file", c.workspace.handleFile)
+		mux.HandleFunc(prefix+"workspace/download", c.workspace.handleDownload)
+	} else {
+		// Return 503 for all workspace endpoints when sandbox is not configured.
+		workspaceUnavailable := func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"error":"sandbox not configured"}`)) //nolint:errcheck
+		}
+		mux.HandleFunc(prefix+"workspace/tasks", workspaceUnavailable)
+		mux.HandleFunc(prefix+"workspace/tree", workspaceUnavailable)
+		mux.HandleFunc(prefix+"workspace/file", workspaceUnavailable)
+		mux.HandleFunc(prefix+"workspace/download", workspaceUnavailable)
+	}
 }
 
 // WorkflowExecution represents a workflow execution from the KV bucket.

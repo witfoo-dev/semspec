@@ -352,7 +352,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "execution_bucket_name": "WORKFLOW_EXECUTIONS"
+        "execution_bucket_name": "WORKFLOW_EXECUTIONS",
+        "sandbox_url": "${SANDBOX_URL:-}"
       }
     },
     "trajectory-api": {

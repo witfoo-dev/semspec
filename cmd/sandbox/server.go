@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -62,6 +63,11 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 
 	// Package installation.
 	mux.HandleFunc("POST /install", s.handleInstall)
+
+	// Workspace browser (read-only).
+	mux.HandleFunc("GET /workspace/tasks", s.handleWorkspaceTasks)
+	mux.HandleFunc("GET /workspace/tree", s.handleWorkspaceTree)
+	mux.HandleFunc("GET /workspace/download", s.handleWorkspaceDownload)
 }
 
 // ---------------------------------------------------------------------------
@@ -909,6 +915,250 @@ func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 		Stderr:   stderr,
 		ExitCode: exitCode,
 		TimedOut: timedOut,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Workspace browser types
+// ---------------------------------------------------------------------------
+
+// workspaceTaskInfo describes a single active worktree in the workspace.
+type workspaceTaskInfo struct {
+	TaskID    string `json:"task_id"`
+	FileCount int    `json:"file_count"`
+	Branch    string `json:"branch"`
+}
+
+// workspaceEntry is a node in the nested file tree returned by GET /workspace/tree.
+type workspaceEntry struct {
+	Name     string            `json:"name"`
+	Path     string            `json:"path"`
+	IsDir    bool              `json:"is_dir"`
+	Size     int64             `json:"size"`
+	Children []*workspaceEntry `json:"children,omitempty"`
+}
+
+// dirNode is a build-time helper for constructing the nested workspaceEntry tree.
+type dirNode struct {
+	entry    *workspaceEntry
+	children map[string]*dirNode
+}
+
+// ---------------------------------------------------------------------------
+// Workspace browser handlers
+// ---------------------------------------------------------------------------
+
+// handleWorkspaceTasks lists all active worktrees with their file counts and branches.
+// GET /workspace/tasks
+func (s *Server) handleWorkspaceTasks(w http.ResponseWriter, r *http.Request) {
+	entries, err := os.ReadDir(s.worktreeRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusOK, []workspaceTaskInfo{})
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to read worktree root: "+err.Error())
+		return
+	}
+
+	ctx := r.Context()
+	var tasks []workspaceTaskInfo
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		taskID := entry.Name()
+		if taskID == ".git" || !isValidID(taskID) {
+			continue
+		}
+
+		worktreePath := filepath.Join(s.worktreeRoot, taskID)
+
+		// Count all files tracked or untracked in the worktree.
+		output, err := gitOutput(ctx, worktreePath, "ls-files", "--cached", "--others", "--exclude-standard")
+		fileCount := 0
+		if err == nil {
+			fileCount = len(splitLines(output))
+		}
+
+		// Resolve the current branch name.
+		branch := ""
+		if b, err := gitOutput(ctx, worktreePath, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
+			branch = strings.TrimSpace(b)
+		}
+
+		tasks = append(tasks, workspaceTaskInfo{
+			TaskID:    taskID,
+			FileCount: fileCount,
+			Branch:    branch,
+		})
+	}
+
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].TaskID < tasks[j].TaskID
+	})
+
+	if tasks == nil {
+		tasks = []workspaceTaskInfo{}
+	}
+
+	writeJSON(w, http.StatusOK, tasks)
+}
+
+// handleWorkspaceTree returns a nested file tree for a worktree.
+// GET /workspace/tree?task_id=X
+func (s *Server) handleWorkspaceTree(w http.ResponseWriter, r *http.Request) {
+	taskID := r.URL.Query().Get("task_id")
+	if !isValidID(taskID) {
+		writeError(w, http.StatusBadRequest, "invalid task_id")
+		return
+	}
+
+	worktreePath := filepath.Join(s.worktreeRoot, taskID)
+	if _, err := os.Stat(worktreePath); err != nil {
+		writeError(w, http.StatusNotFound, "worktree not found for task_id: "+taskID)
+		return
+	}
+
+	output, err := gitOutput(r.Context(), worktreePath, "ls-files", "--cached", "--others", "--exclude-standard")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list files: "+err.Error())
+		return
+	}
+
+	files := splitLines(output)
+
+	// Build a nested tree using dirNode helpers.
+	root := &dirNode{
+		entry:    nil,
+		children: make(map[string]*dirNode),
+	}
+
+	for _, relPath := range files {
+		parts := strings.Split(relPath, "/")
+		cur := root
+		for i, part := range parts {
+			node, exists := cur.children[part]
+			if !exists {
+				isDir := i < len(parts)-1
+				entryPath := strings.Join(parts[:i+1], "/")
+				entry := &workspaceEntry{
+					Name:  part,
+					Path:  entryPath,
+					IsDir: isDir,
+				}
+				if !isDir {
+					// Stat the file for its size.
+					if info, err := os.Stat(filepath.Join(worktreePath, relPath)); err == nil {
+						entry.Size = info.Size()
+					}
+				}
+				node = &dirNode{
+					entry:    entry,
+					children: make(map[string]*dirNode),
+				}
+				cur.children[part] = node
+			}
+			cur = node
+		}
+	}
+
+	// Recursively collect and sort entries from a dirNode.
+	var collect func(n *dirNode) []*workspaceEntry
+	collect = func(n *dirNode) []*workspaceEntry {
+		if len(n.children) == 0 {
+			return nil
+		}
+
+		entries := make([]*workspaceEntry, 0, len(n.children))
+		for _, child := range n.children {
+			child.entry.Children = collect(child)
+			entries = append(entries, child.entry)
+		}
+
+		// Sort: directories first, then alphabetical within each group.
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].IsDir != entries[j].IsDir {
+				return entries[i].IsDir
+			}
+			return entries[i].Name < entries[j].Name
+		})
+
+		return entries
+	}
+
+	result := collect(root)
+	if result == nil {
+		result = []*workspaceEntry{}
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleWorkspaceDownload streams the worktree as a ZIP archive.
+// GET /workspace/download?task_id=X
+func (s *Server) handleWorkspaceDownload(w http.ResponseWriter, r *http.Request) {
+	taskID := r.URL.Query().Get("task_id")
+	if !isValidID(taskID) {
+		writeError(w, http.StatusBadRequest, "invalid task_id")
+		return
+	}
+
+	worktreePath := filepath.Join(s.worktreeRoot, taskID)
+	if _, err := os.Stat(worktreePath); err != nil {
+		writeError(w, http.StatusNotFound, "worktree not found for task_id: "+taskID)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-workspace.zip"`, taskID))
+	w.WriteHeader(http.StatusOK)
+
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	_ = filepath.Walk(worktreePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(worktreePath, path)
+		if err != nil {
+			return nil
+		}
+
+		// Skip .git entries (both the .git directory in normal repos and the
+		// .git file that git uses in worktrees) at any depth.
+		if info.Name() == ".git" {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		// Skip files that exceed the per-file size limit.
+		if info.Size() > s.maxFileSize {
+			return nil
+		}
+
+		fw, err := zw.Create(relPath)
+		if err != nil {
+			return nil
+		}
+
+		f, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+
+		_, _ = io.Copy(fw, f)
+		return nil
 	})
 }
 

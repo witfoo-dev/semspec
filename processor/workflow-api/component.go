@@ -31,6 +31,9 @@ type Component struct {
 	// Question HTTP handler for Q&A endpoints
 	questionHandler *workflow.QuestionHTTPHandler
 
+	// workspace proxies read-only workspace requests to the sandbox server.
+	workspace *workspaceProxy
+
 	// Lifecycle state machine
 	// States: 0=stopped, 1=starting, 2=running, 3=stopping
 	state     atomic.Int32
@@ -85,6 +88,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient:      deps.NATSClient,
 		logger:          logger,
 		questionHandler: questionHandler,
+		workspace:       newWorkspaceProxy(config.SandboxURL),
 	}, nil
 }
 

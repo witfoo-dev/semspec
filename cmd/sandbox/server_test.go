@@ -1,10 +1,12 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -1220,4 +1222,246 @@ func TestCleanupStaleWorktrees(t *testing.T) {
 	if _, err := os.Stat(worktreePath); err == nil {
 		t.Errorf("stale worktree %s still exists after cleanup", worktreePath)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Workspace browser tests
+// ---------------------------------------------------------------------------
+
+func TestHandleWorkspaceTasks_NoWorktrees(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	resp := doRequest(t, ts, http.MethodGet, "/workspace/tasks", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /workspace/tasks: expected 200, got %d", resp.StatusCode)
+	}
+
+	var result []workspaceTaskInfo
+	decodeJSON(t, resp, &result)
+
+	if len(result) != 0 {
+		t.Errorf("expected empty array, got %d entries: %+v", len(result), result)
+	}
+}
+
+func TestHandleWorkspaceTasks_WithWorktrees(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	// Create two worktrees with different file counts.
+	createWorktree(t, ts, "wstask-alpha")
+	createWorktree(t, ts, "wstask-beta")
+
+	// Write files into alpha's worktree.
+	for _, name := range []string{"main.go", "util.go"} {
+		doRequest(t, ts, http.MethodPut, "/file", fileWriteRequest{
+			TaskID:  "wstask-alpha",
+			Path:    name,
+			Content: "package main\n",
+		}).Body.Close()
+	}
+
+	resp := doRequest(t, ts, http.MethodGet, "/workspace/tasks", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /workspace/tasks: expected 200, got %d", resp.StatusCode)
+	}
+
+	var result []workspaceTaskInfo
+	decodeJSON(t, resp, &result)
+
+	if len(result) < 2 {
+		t.Fatalf("expected at least 2 tasks, got %d", len(result))
+	}
+
+	// Verify sorted order.
+	if result[0].TaskID > result[1].TaskID {
+		t.Errorf("tasks not sorted: %q > %q", result[0].TaskID, result[1].TaskID)
+	}
+
+	// Locate alpha in the result and verify it reports the two new files plus
+	// the README.md inherited from the initial commit.
+	var alpha *workspaceTaskInfo
+	for i := range result {
+		if result[i].TaskID == "wstask-alpha" {
+			alpha = &result[i]
+			break
+		}
+	}
+	if alpha == nil {
+		t.Fatal("wstask-alpha not found in /workspace/tasks response")
+	}
+	if alpha.FileCount < 2 {
+		t.Errorf("wstask-alpha file_count = %d, want >= 2", alpha.FileCount)
+	}
+	if alpha.Branch == "" {
+		t.Error("wstask-alpha branch is empty")
+	}
+}
+
+func TestHandleWorkspaceTree_ValidWorktree(t *testing.T) {
+	_, ts := newTestServer(t)
+	createWorktree(t, ts, "wstree-valid")
+
+	// Write files at the root and inside a subdirectory.
+	doRequest(t, ts, http.MethodPut, "/file", fileWriteRequest{
+		TaskID:  "wstree-valid",
+		Path:    "main.go",
+		Content: "package main\n",
+	}).Body.Close()
+	doRequest(t, ts, http.MethodPut, "/file", fileWriteRequest{
+		TaskID:  "wstree-valid",
+		Path:    "pkg/util.go",
+		Content: "package pkg\n",
+	}).Body.Close()
+
+	resp := doRequest(t, ts, http.MethodGet, "/workspace/tree?task_id=wstree-valid", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /workspace/tree: expected 200, got %d", resp.StatusCode)
+	}
+
+	var result []*workspaceEntry
+	decodeJSON(t, resp, &result)
+
+	if len(result) == 0 {
+		t.Fatal("expected non-empty tree")
+	}
+
+	// Directories must sort before files.
+	var foundDir, foundFile bool
+	var dirIdx, fileIdx int
+	for i, entry := range result {
+		if entry.IsDir && entry.Name == "pkg" {
+			foundDir = true
+			dirIdx = i
+		}
+		if !entry.IsDir && entry.Name == "main.go" {
+			foundFile = true
+			fileIdx = i
+		}
+	}
+	if !foundDir {
+		t.Error("pkg directory not found in tree root")
+	}
+	if !foundFile {
+		t.Error("main.go not found in tree root")
+	}
+	if foundDir && foundFile && dirIdx > fileIdx {
+		t.Errorf("directories should sort before files; dir at index %d, file at %d", dirIdx, fileIdx)
+	}
+
+	// The pkg directory must have util.go as a child.
+	for _, entry := range result {
+		if entry.Name == "pkg" && entry.IsDir {
+			if len(entry.Children) == 0 {
+				t.Error("pkg directory has no children")
+				break
+			}
+			found := false
+			for _, child := range entry.Children {
+				if child.Name == "util.go" {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("util.go not found in pkg children: %+v", entry.Children)
+			}
+			break
+		}
+	}
+}
+
+func TestHandleWorkspaceTree_InvalidTaskID(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	resp := doRequest(t, ts, http.MethodGet, "/workspace/tree?task_id=../escape", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid task_id, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+func TestHandleWorkspaceTree_EmptyWorktree(t *testing.T) {
+	_, ts := newTestServer(t)
+	createWorktree(t, ts, "wstree-empty")
+
+	// A fresh worktree inherits the initial README.md from HEAD, so this
+	// verifies that the endpoint returns a valid JSON array (not null) even
+	// when the file list is sparse.
+	resp := doRequest(t, ts, http.MethodGet, "/workspace/tree?task_id=wstree-empty", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /workspace/tree: expected 200, got %d", resp.StatusCode)
+	}
+
+	// Response must be a JSON array (possibly empty or with just README.md).
+	var result []*workspaceEntry
+	decodeJSON(t, resp, &result)
+	// No assertion on length — just verifies valid JSON array shape.
+}
+
+func TestHandleWorkspaceDownload_ValidWorktree(t *testing.T) {
+	_, ts := newTestServer(t)
+	createWorktree(t, ts, "wsdl-valid")
+
+	// Write two files.
+	doRequest(t, ts, http.MethodPut, "/file", fileWriteRequest{
+		TaskID:  "wsdl-valid",
+		Path:    "main.go",
+		Content: "package main\n",
+	}).Body.Close()
+	doRequest(t, ts, http.MethodPut, "/file", fileWriteRequest{
+		TaskID:  "wsdl-valid",
+		Path:    "pkg/util.go",
+		Content: "package pkg\n",
+	}).Body.Close()
+
+	resp := doRequest(t, ts, http.MethodGet, "/workspace/download?task_id=wsdl-valid", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /workspace/download: expected 200, got %d", resp.StatusCode)
+	}
+	defer resp.Body.Close()
+
+	if ct := resp.Header.Get("Content-Type"); ct != "application/zip" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/zip")
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, "wsdl-valid-workspace.zip") {
+		t.Errorf("Content-Disposition = %q, want to contain 'wsdl-valid-workspace.zip'", cd)
+	}
+
+	// Read the ZIP and verify expected files are present.
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatalf("open zip: %v", err)
+	}
+
+	inZip := make(map[string]bool)
+	for _, f := range zr.File {
+		inZip[f.Name] = true
+	}
+
+	for _, want := range []string{"main.go", "pkg/util.go"} {
+		if !inZip[want] {
+			t.Errorf("file %q not found in ZIP; got %v", want, inZip)
+		}
+	}
+
+	// .git directory must not appear in the archive.
+	for name := range inZip {
+		if strings.HasPrefix(name, ".git") {
+			t.Errorf("ZIP contains .git entry %q", name)
+		}
+	}
+}
+
+func TestHandleWorkspaceDownload_InvalidTaskID(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	resp := doRequest(t, ts, http.MethodGet, "/workspace/download?task_id=../escape", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid task_id, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
 }

@@ -20,6 +20,10 @@ type Config struct {
 
 	// UserStreamName is the JetStream stream for user signals (escalation, errors).
 	UserStreamName string `json:"user_stream_name" schema:"type:string,description:JetStream stream for user signals,category:basic,default:USER"`
+
+	// SandboxURL is the base URL of the sandbox server for workspace browsing.
+	// When empty, workspace endpoints return 503.
+	SandboxURL string `json:"sandbox_url,omitempty" schema:"type:string,description:Sandbox server URL for workspace browser (empty=disabled),category:advanced"`
 }
 
 // DefaultConfig returns sensible default configuration.
