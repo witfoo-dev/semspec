@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/c360studio/semstreams/component"
+
+	"github.com/c360studio/semspec/workflow"
 )
 
 // executionOrchestratorSchema is the pre-generated schema for this component.
@@ -36,6 +38,12 @@ type Config struct {
 	// commit before proceeding. Uses Go duration format (e.g. "60s", "90s").
 	// When zero or empty, defaults to 60s.
 	IndexingBudgetStr string `json:"indexing_budget,omitempty" schema:"type:string,description:Max wait for commit indexing after merge (e.g. 60s),category:advanced,default:60s"`
+
+	// BenchingThreshold is the per-category error count that triggers agent
+	// benching. When any single error category reaches this count for an agent,
+	// the agent is excluded from future task assignment and the system attempts
+	// to select a replacement agent or escalate to a different model tier.
+	BenchingThreshold int `json:"benching_threshold,omitempty" schema:"type:int,description:Error count per category that triggers agent benching,category:advanced,default:3"`
 
 	// Model is the model endpoint name passed through to dispatched agents.
 	Model string `json:"model" schema:"type:string,description:Model endpoint name for agent tasks,category:basic,default:default"`
@@ -97,6 +105,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.TimeoutSeconds <= 0 {
 		c.TimeoutSeconds = d.TimeoutSeconds
+	}
+	if c.BenchingThreshold <= 0 {
+		c.BenchingThreshold = workflow.DefaultBenchingThreshold
 	}
 	if c.Model == "" {
 		c.Model = d.Model

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 )
 
 // ErrorCategory is a stable identifier for an error category.
@@ -102,4 +104,50 @@ func (r *ErrorCategoryRegistry) All() []*ErrorCategoryDef {
 func (r *ErrorCategoryRegistry) IsValid(id string) bool {
 	_, ok := r.categories[id]
 	return ok
+}
+
+// SignalMatch represents a category matched by signal text analysis.
+type SignalMatch struct {
+	// Category is the matched category definition.
+	Category *ErrorCategoryDef
+
+	// MatchedSignal is the specific signal string that triggered the match.
+	MatchedSignal string
+}
+
+// MatchSignals scans the provided text (e.g. review feedback or explanation)
+// against all registered category signals using case-insensitive substring matching.
+// Returns all matching categories with the specific signal that triggered each match.
+// A category appears at most once (first matching signal wins).
+func (r *ErrorCategoryRegistry) MatchSignals(text string) []SignalMatch {
+	if text == "" {
+		return nil
+	}
+	lower := strings.ToLower(text)
+
+	var matches []SignalMatch
+	seen := map[string]bool{}
+
+	for _, cat := range r.categories {
+		if seen[cat.ID] {
+			continue
+		}
+		for _, signal := range cat.Signals {
+			if strings.Contains(lower, strings.ToLower(signal)) {
+				matches = append(matches, SignalMatch{
+					Category:      cat,
+					MatchedSignal: signal,
+				})
+				seen[cat.ID] = true
+				break
+			}
+		}
+	}
+
+	// Stable ordering by category ID for deterministic prompt construction.
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].Category.ID < matches[j].Category.ID
+	})
+
+	return matches
 }

@@ -955,8 +955,7 @@ func (c *Component) initAgentGraph(ctx context.Context) {
 	}
 
 	kvStore := c.natsClient.NewKVStore(bucket)
-	kvAdapter := agentgraph.NewKVStoreAdapter(kvStore)
-	c.agentHelper = agentgraph.NewHelper(kvAdapter)
+	c.agentHelper = agentgraph.NewHelper(kvStore)
 
 	// Load error categories independently.
 	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")

@@ -219,6 +219,85 @@ func TestErrorCategoryRegistry_Get(t *testing.T) {
 	})
 }
 
+func TestErrorCategoryRegistry_MatchSignals(t *testing.T) {
+	registry, err := LoadErrorCategoriesFromBytes([]byte(categoriesJSON))
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	t.Run("matches single category", func(t *testing.T) {
+		matches := registry.MatchSignals("There is no test file created for this change")
+		if len(matches) != 1 {
+			t.Fatalf("expected 1 match, got %d", len(matches))
+		}
+		if matches[0].Category.ID != "missing_tests" {
+			t.Errorf("matched category = %q, want missing_tests", matches[0].Category.ID)
+		}
+		if matches[0].MatchedSignal != "No test file created" {
+			t.Errorf("matched signal = %q, want %q", matches[0].MatchedSignal, "No test file created")
+		}
+	})
+
+	t.Run("case insensitive", func(t *testing.T) {
+		matches := registry.MatchSignals("NO TEST FILE CREATED alongside the implementation")
+		if len(matches) != 1 {
+			t.Fatalf("expected 1 match, got %d", len(matches))
+		}
+		if matches[0].Category.ID != "missing_tests" {
+			t.Errorf("matched category = %q, want missing_tests", matches[0].Category.ID)
+		}
+	})
+
+	t.Run("matches multiple categories", func(t *testing.T) {
+		text := "The implementation has no test file created, and there is a TODO left in code"
+		matches := registry.MatchSignals(text)
+		if len(matches) < 2 {
+			t.Fatalf("expected at least 2 matches, got %d", len(matches))
+		}
+		ids := map[string]bool{}
+		for _, m := range matches {
+			ids[m.Category.ID] = true
+		}
+		if !ids["missing_tests"] {
+			t.Error("expected missing_tests to match")
+		}
+		if !ids["incomplete_implementation"] {
+			t.Error("expected incomplete_implementation to match")
+		}
+	})
+
+	t.Run("no match", func(t *testing.T) {
+		matches := registry.MatchSignals("Everything looks great, well done!")
+		if len(matches) != 0 {
+			t.Errorf("expected 0 matches, got %d", len(matches))
+		}
+	})
+
+	t.Run("empty text", func(t *testing.T) {
+		matches := registry.MatchSignals("")
+		if matches != nil {
+			t.Errorf("expected nil for empty text, got %v", matches)
+		}
+	})
+
+	t.Run("category appears at most once", func(t *testing.T) {
+		// Even if multiple signals from the same category match, it should appear once.
+		// "No test file created" is the only signal for missing_tests in test data,
+		// so we can't easily test this. But verify the dedup logic works.
+		text := "No test file created and also no test file created again"
+		matches := registry.MatchSignals(text)
+		count := 0
+		for _, m := range matches {
+			if m.Category.ID == "missing_tests" {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("missing_tests appeared %d times, want 1", count)
+		}
+	})
+}
+
 func TestErrorCategoryRegistry_IsValid(t *testing.T) {
 	registry, err := LoadErrorCategoriesFromBytes([]byte(categoriesJSON))
 	if err != nil {

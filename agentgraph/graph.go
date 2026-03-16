@@ -10,6 +10,7 @@ import (
 
 	gtypes "github.com/c360studio/semstreams/graph"
 	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/natsclient"
 	"github.com/c360studio/semstreams/pkg/types"
 	"github.com/google/uuid"
 
@@ -77,37 +78,28 @@ const (
 	PredicateErrorCategoryGuidance    = "error.category.guidance"
 )
 
-// KVEntityStore provides entity storage via NATS KV.
-// Any component with a natsclient.Client can create one via NewKVStore.
-// *natsclient.KVStore satisfies this interface directly.
-type KVEntityStore interface {
-	Get(ctx context.Context, key string) (KVEntry, error)
+// KVStore defines the KV operations used by the agent graph helper.
+// *natsclient.KVStore satisfies this interface directly — no adapter needed.
+type KVStore interface {
+	Get(ctx context.Context, key string) (*natsclient.KVEntry, error)
 	Put(ctx context.Context, key string, value []byte) (uint64, error)
 	UpdateWithRetry(ctx context.Context, key string, updateFn func(current []byte) ([]byte, error)) error
 	KeysByPrefix(ctx context.Context, prefix string) ([]string, error)
 }
 
-// KVEntry mirrors natsclient.KVEntry to avoid a direct import dependency
-// in consuming packages that only need the interface.
-type KVEntry struct {
-	Key      string
-	Value    []byte
-	Revision uint64
-}
-
 // Helper provides graph operations for agent hierarchy tracking.
-// It is a thin façade over KVEntityStore that speaks in agent-domain terms
+// It is a thin façade over KVStore that speaks in agent-domain terms
 // (loop IDs, task IDs) rather than raw entity keys.
 //
 // All methods are safe for concurrent use — they delegate directly to the
 // underlying KV store without holding additional state.
 type Helper struct {
-	kv KVEntityStore
+	kv KVStore
 }
 
-// NewHelper constructs a Helper backed by a KVEntityStore.
+// NewHelper constructs a Helper backed by a KVStore.
 // The argument is required; passing nil will cause panics at call time.
-func NewHelper(kv KVEntityStore) *Helper {
+func NewHelper(kv KVStore) *Helper {
 	return &Helper{kv: kv}
 }
 
@@ -369,9 +361,14 @@ func (h *Helper) GetAgent(ctx context.Context, agentID string) (*workflow.Agent,
 		return nil, fmt.Errorf("agentgraph: get agent — unmarshal %q: %w", agentID, err)
 	}
 
+	return parseAgentFromTriples(agentID, entity.Triples), nil
+}
+
+// parseAgentFromTriples reconstructs a workflow.Agent from entity triples.
+func parseAgentFromTriples(agentID string, triples []message.Triple) *workflow.Agent {
 	agent := &workflow.Agent{ID: agentID}
 
-	for _, t := range entity.Triples {
+	for _, t := range triples {
 		v, _ := t.Object.(string)
 		switch t.Predicate {
 		case PredicateAgentName:
@@ -411,20 +408,21 @@ func (h *Helper) GetAgent(ctx context.Context, agentID string) (*workflow.Agent,
 		}
 	}
 
-	return agent, nil
+	return agent
 }
 
-// GetOrCreateDefaultAgent returns an existing agent for the given role, or creates
-// a new one when no agent with that role is found in the graph.
-// If multiple agents share the same role, the first one found is returned.
-func (h *Helper) GetOrCreateDefaultAgent(ctx context.Context, role, model string) (*workflow.Agent, error) {
+// ListAgentsByRole returns all persistent agents whose role triple matches the
+// given role string. Agents that cannot be parsed are silently skipped rather
+// than failing the whole scan — a corrupt entry should not block dispatch.
+func (h *Helper) ListAgentsByRole(ctx context.Context, role string) ([]*workflow.Agent, error) {
 	prefix := AgentTypePrefix()
 
 	keys, err := h.kv.KeysByPrefix(ctx, prefix)
 	if err != nil {
-		return nil, fmt.Errorf("agentgraph: list agents: %w", err)
+		return nil, fmt.Errorf("agentgraph: list agents by role: %w", err)
 	}
 
+	var agents []*workflow.Agent
 	for _, key := range keys {
 		entry, err := h.kv.Get(ctx, key)
 		if err != nil {
@@ -434,20 +432,95 @@ func (h *Helper) GetOrCreateDefaultAgent(ctx context.Context, role, model string
 		if err != nil {
 			continue
 		}
+		// Check role triple before full parse to avoid unnecessary work.
+		roleMatch := false
 		for _, t := range entity.Triples {
 			if t.Predicate == PredicateAgentRole {
 				if r, ok := t.Object.(string); ok && r == role {
-					parsed, parseErr := types.ParseEntityID(key)
-					if parseErr != nil {
-						continue
-					}
-					return h.GetAgent(ctx, parsed.Instance)
+					roleMatch = true
 				}
+				break
 			}
+		}
+		if !roleMatch {
+			continue
+		}
+		parsed, parseErr := types.ParseEntityID(key)
+		if parseErr != nil {
+			continue
+		}
+		agents = append(agents, parseAgentFromTriples(parsed.Instance, entity.Triples))
+	}
+
+	if agents == nil {
+		agents = []*workflow.Agent{}
+	}
+	return agents, nil
+}
+
+// SetAgentStatus atomically updates the agent state and updated-at triples.
+// Uses UpdateWithRetry for CAS semantics.
+func (h *Helper) SetAgentStatus(ctx context.Context, agentID string, status workflow.AgentStatus) error {
+	entityID := AgentEntityID(agentID)
+
+	err := h.kv.UpdateWithRetry(ctx, entityID, func(current []byte) ([]byte, error) {
+		entity, unmarshalErr := unmarshalEntityState(current)
+		if unmarshalErr != nil {
+			return nil, fmt.Errorf("agentgraph: set agent status — get entity %q: %w", agentID, unmarshalErr)
+		}
+
+		now := time.Now()
+		entity.Triples = replaceTriple(entity.Triples, PredicateAgentState,
+			propertyTriple(entityID, PredicateAgentState, string(status), now))
+		entity.Triples = replaceTriple(entity.Triples, PredicateAgentUpdatedAt,
+			propertyTriple(entityID, PredicateAgentUpdatedAt, now.Format(time.RFC3339), now))
+		entity.UpdatedAt = now
+		return json.Marshal(entity)
+	})
+	if err != nil {
+		return fmt.Errorf("agentgraph: set agent status %q -> %q: %w", agentID, status, err)
+	}
+	return nil
+}
+
+// SelectAgent selects the best available agent for the given role using a
+// two-criteria sort: lowest TotalErrorCount first, then highest OverallAvg as
+// a tie-breaker. Only agents with AgentAvailable status are considered.
+//
+// When no available agent exists and nextModel is non-empty, a fresh agent is
+// created with that model and returned. When no available agent exists and
+// nextModel is empty, nil is returned without error — the caller is responsible
+// for escalating.
+func (h *Helper) SelectAgent(ctx context.Context, role, nextModel string) (*workflow.Agent, error) {
+	agents, err := h.ListAgentsByRole(ctx, role)
+	if err != nil {
+		return nil, fmt.Errorf("agentgraph: select agent: %w", err)
+	}
+
+	var available []*workflow.Agent
+	for _, a := range agents {
+		if a.Status == workflow.AgentAvailable {
+			available = append(available, a)
 		}
 	}
 
-	// No existing agent found — create a new one.
+	if len(available) > 0 {
+		sort.Slice(available, func(i, j int) bool {
+			ti := available[i].TotalErrorCount()
+			tj := available[j].TotalErrorCount()
+			if ti != tj {
+				return ti < tj
+			}
+			return available[i].ReviewStats.OverallAvg > available[j].ReviewStats.OverallAvg
+		})
+		return available[0], nil
+	}
+
+	// No available agents — create one if a model was provided.
+	if nextModel == "" {
+		return nil, nil
+	}
+
 	id := uuid.New().String()
 	shortID := strings.ReplaceAll(id, "-", "")[:8]
 	now := time.Now()
@@ -455,16 +528,50 @@ func (h *Helper) GetOrCreateDefaultAgent(ctx context.Context, role, model string
 		ID:        shortID,
 		Name:      role + "-" + shortID,
 		Role:      role,
-		Model:     model,
+		Model:     nextModel,
 		Status:    workflow.AgentAvailable,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-
 	if err := h.CreateAgent(ctx, agent); err != nil {
-		return nil, fmt.Errorf("agentgraph: create default agent for role %q: %w", role, err)
+		return nil, fmt.Errorf("agentgraph: select agent — create for role %q: %w", role, err)
 	}
 	return &agent, nil
+}
+
+// BenchAgent benches the agent if ShouldBench returns true for the given threshold.
+// Returns true when the agent was benched, false when the threshold was not met.
+// Does not return an error if the agent is already benched — the status update is
+// applied unconditionally when the threshold is reached.
+func (h *Helper) BenchAgent(ctx context.Context, agentID string, threshold int) (bool, error) {
+	agent, err := h.GetAgent(ctx, agentID)
+	if err != nil {
+		return false, fmt.Errorf("agentgraph: bench agent — get %q: %w", agentID, err)
+	}
+
+	if !agent.ShouldBench(threshold) {
+		return false, nil
+	}
+
+	if err := h.SetAgentStatus(ctx, agentID, workflow.AgentBenched); err != nil {
+		return false, fmt.Errorf("agentgraph: bench agent %q: %w", agentID, err)
+	}
+	return true, nil
+}
+
+// GetOrCreateDefaultAgent delegates to SelectAgent to find the best available
+// agent for the given role, creating a new one with model when none exists.
+// Returns an error when SelectAgent returns nil (all agents exhausted and no
+// model was provided to create a new one).
+func (h *Helper) GetOrCreateDefaultAgent(ctx context.Context, role, model string) (*workflow.Agent, error) {
+	agent, err := h.SelectAgent(ctx, role, model)
+	if err != nil {
+		return nil, err
+	}
+	if agent == nil {
+		return nil, fmt.Errorf("agentgraph: no agent available for role %q", role)
+	}
+	return agent, nil
 }
 
 // UpdateAgentStats replaces the review stat triples on the agent entity with
@@ -591,15 +698,34 @@ func (h *Helper) IncrementAgentErrorCounts(ctx context.Context, agentID string, 
 	return nil
 }
 
-// GetAgentErrorTrends returns a sorted list of error categories that have
-// accumulated more than one occurrence for the given agent.
-// Categories are resolved via registry; unrecognised category IDs are skipped.
-// Results are sorted by count descending so callers can use the top-N entries.
+// DefaultErrorTrendThreshold is the minimum occurrence count for an error
+// category to be considered a trend. Categories with counts at or below this
+// value are filtered out. Override per-call via GetAgentErrorTrendsWithThreshold.
+const DefaultErrorTrendThreshold = 1
+
+// GetAgentErrorTrends returns error trends using the DefaultErrorTrendThreshold.
+// See GetAgentErrorTrendsWithThreshold for a configurable variant.
 func (h *Helper) GetAgentErrorTrends(
 	ctx context.Context,
 	agentID string,
 	registry *workflow.ErrorCategoryRegistry,
 ) ([]workflow.ErrorTrend, error) {
+	return h.GetAgentErrorTrendsWithThreshold(ctx, agentID, registry, DefaultErrorTrendThreshold)
+}
+
+// GetAgentErrorTrendsWithThreshold returns a sorted list of error categories
+// that have accumulated more than threshold occurrences for the given agent.
+// Categories are resolved via registry; unrecognised category IDs are skipped.
+// Results are sorted by count descending so callers can use the top-N entries.
+func (h *Helper) GetAgentErrorTrendsWithThreshold(
+	ctx context.Context,
+	agentID string,
+	registry *workflow.ErrorCategoryRegistry,
+	threshold int,
+) ([]workflow.ErrorTrend, error) {
+	if threshold < 0 {
+		threshold = 0
+	}
 	entityID := AgentEntityID(agentID)
 
 	entry, err := h.kv.Get(ctx, entityID)
@@ -626,7 +752,7 @@ func (h *Helper) GetAgentErrorTrends(
 
 	var trends []workflow.ErrorTrend
 	for catID, count := range counts {
-		if count <= 1 {
+		if count <= threshold {
 			continue
 		}
 		cat, ok := registry.Get(catID)

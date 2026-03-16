@@ -72,6 +72,13 @@ type taskExecution struct {
 	ValidatorTaskID string
 	ReviewerTaskID  string
 
+	// --- Persistent agent identity (Phase B) ---
+
+	// AgentID is the persistent agent ID assigned to this execution.
+	// Set during initial trigger handling via SelectAgent; may change on
+	// benching if a replacement agent is selected.
+	AgentID string
+
 	// --- Sandbox worktree (persists across retries) ---
 
 	// WorktreePath is the filesystem path of the worktree on the sandbox server.

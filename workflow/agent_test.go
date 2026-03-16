@@ -111,6 +111,147 @@ func TestUpdateStats_RunningAverageFormula(t *testing.T) {
 	}
 }
 
+func TestAgent_IsBenched(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		status AgentStatus
+		want   bool
+	}{
+		{"available", AgentAvailable, false},
+		{"busy", AgentBusy, false},
+		{"benched", AgentBenched, true},
+		{"retired", AgentRetired, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := &Agent{Status: tc.status}
+			if got := a.IsBenched(); got != tc.want {
+				t.Errorf("IsBenched() = %v, want %v (status=%q)", got, tc.want, tc.status)
+			}
+		})
+	}
+}
+
+func TestAgent_ShouldBench(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		errorCounts map[ErrorCategory]int
+		threshold   int
+		want        bool
+	}{
+		{
+			name:        "nil map",
+			errorCounts: nil,
+			threshold:   DefaultBenchingThreshold,
+			want:        false,
+		},
+		{
+			name:        "empty map",
+			errorCounts: map[ErrorCategory]int{},
+			threshold:   DefaultBenchingThreshold,
+			want:        false,
+		},
+		{
+			name: "all counts below threshold",
+			errorCounts: map[ErrorCategory]int{
+				"missing_tests": 1,
+				"wrong_pattern": 2,
+			},
+			threshold: DefaultBenchingThreshold,
+			want:      false,
+		},
+		{
+			name: "one count at threshold",
+			errorCounts: map[ErrorCategory]int{
+				"missing_tests": DefaultBenchingThreshold,
+			},
+			threshold: DefaultBenchingThreshold,
+			want:      true,
+		},
+		{
+			name: "one count above threshold",
+			errorCounts: map[ErrorCategory]int{
+				"sop_violation": DefaultBenchingThreshold + 1,
+			},
+			threshold: DefaultBenchingThreshold,
+			want:      true,
+		},
+		{
+			name: "multiple categories, one at threshold",
+			errorCounts: map[ErrorCategory]int{
+				"missing_tests": 1,
+				"wrong_pattern": DefaultBenchingThreshold,
+				"scope_violation": 2,
+			},
+			threshold: DefaultBenchingThreshold,
+			want:      true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := &Agent{ErrorCounts: tc.errorCounts}
+			if got := a.ShouldBench(tc.threshold); got != tc.want {
+				t.Errorf("ShouldBench(%d) = %v, want %v", tc.threshold, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAgent_TotalErrorCount(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		errorCounts map[ErrorCategory]int
+		want        int
+	}{
+		{
+			name:        "nil map",
+			errorCounts: nil,
+			want:        0,
+		},
+		{
+			name:        "empty map",
+			errorCounts: map[ErrorCategory]int{},
+			want:        0,
+		},
+		{
+			name: "single category",
+			errorCounts: map[ErrorCategory]int{
+				"missing_tests": 4,
+			},
+			want: 4,
+		},
+		{
+			name: "multiple categories summed",
+			errorCounts: map[ErrorCategory]int{
+				"missing_tests":  2,
+				"wrong_pattern":  3,
+				"sop_violation":  1,
+			},
+			want: 6,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := &Agent{ErrorCounts: tc.errorCounts}
+			if got := a.TotalErrorCount(); got != tc.want {
+				t.Errorf("TotalErrorCount() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestAgent_IncrementErrorCount(t *testing.T) {
 	t.Run("initialises map on first call", func(t *testing.T) {
 		agent := &Agent{}

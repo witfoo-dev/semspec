@@ -10,6 +10,7 @@ import (
 
 	gtypes "github.com/c360studio/semstreams/graph"
 	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/natsclient"
 
 	"github.com/c360studio/semspec/agentgraph"
 	semspecvocab "github.com/c360studio/semspec/vocabulary/semspec"
@@ -18,7 +19,7 @@ import (
 
 // -- mock KV store --
 
-// mockKV is a minimal in-memory KVEntityStore for testing.
+// mockKV is a minimal in-memory KVStore for testing.
 type mockKV struct {
 	data    map[string][]byte
 	putErr  error
@@ -30,15 +31,15 @@ func newMockKV() *mockKV {
 	return &mockKV{data: make(map[string][]byte)}
 }
 
-func (m *mockKV) Get(_ context.Context, key string) (agentgraph.KVEntry, error) {
+func (m *mockKV) Get(_ context.Context, key string) (*natsclient.KVEntry, error) {
 	if m.getErr != nil {
-		return agentgraph.KVEntry{}, m.getErr
+		return nil, m.getErr
 	}
 	v, ok := m.data[key]
 	if !ok {
-		return agentgraph.KVEntry{}, errors.New("kv: key not found")
+		return nil, errors.New("kv: key not found")
 	}
-	return agentgraph.KVEntry{Key: key, Value: v, Revision: 1}, nil
+	return &natsclient.KVEntry{Key: key, Value: v, Revision: 1}, nil
 }
 
 func (m *mockKV) Put(_ context.Context, key string, value []byte) (uint64, error) {
@@ -1084,6 +1085,55 @@ func TestHelper_GetAgentErrorTrends_FiltersThreshold(t *testing.T) {
 	}
 }
 
+func TestHelper_GetAgentErrorTrendsWithThreshold(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+	registry := makeTestRegistry(t)
+
+	entityID := agentgraph.AgentEntityID("threshold-agent")
+	countsJSON := `{"missing_tests":2,"bad_error_handling":4}`
+	entity := &gtypes.EntityState{
+		ID: entityID,
+		Triples: []message.Triple{
+			{Predicate: agentgraph.PredicateAgentErrorCounts, Object: countsJSON},
+		},
+	}
+	data, _ := json.Marshal(entity)
+	kv.data[entityID] = data
+
+	// Default threshold (1) — both categories should appear.
+	trends, err := h.GetAgentErrorTrends(context.Background(), "threshold-agent", registry)
+	if err != nil {
+		t.Fatalf("GetAgentErrorTrends() error = %v", err)
+	}
+	if len(trends) != 2 {
+		t.Fatalf("default threshold: expected 2 trends, got %d", len(trends))
+	}
+
+	// Custom threshold of 3 — only bad_error_handling (count=4) should appear.
+	trends, err = h.GetAgentErrorTrendsWithThreshold(context.Background(), "threshold-agent", registry, 3)
+	if err != nil {
+		t.Fatalf("GetAgentErrorTrendsWithThreshold() error = %v", err)
+	}
+	if len(trends) != 1 {
+		t.Fatalf("threshold=3: expected 1 trend, got %d", len(trends))
+	}
+	if trends[0].Category.ID != "bad_error_handling" {
+		t.Errorf("threshold=3: trend[0].Category.ID = %q, want %q", trends[0].Category.ID, "bad_error_handling")
+	}
+
+	// Threshold of 5 — nothing should appear.
+	trends, err = h.GetAgentErrorTrendsWithThreshold(context.Background(), "threshold-agent", registry, 5)
+	if err != nil {
+		t.Fatalf("GetAgentErrorTrendsWithThreshold() error = %v", err)
+	}
+	if len(trends) != 0 {
+		t.Fatalf("threshold=5: expected 0 trends, got %d", len(trends))
+	}
+}
+
 func TestHelper_GetAgentErrorTrends_SortedByCount(t *testing.T) {
 	t.Parallel()
 
@@ -1116,5 +1166,323 @@ func TestHelper_GetAgentErrorTrends_SortedByCount(t *testing.T) {
 	}
 	if trends[0].Category.ID != "bad_error_handling" {
 		t.Errorf("highest count trend should be bad_error_handling, got %q", trends[0].Category.ID)
+	}
+}
+
+// -- Phase B tests: roster query methods --
+
+func TestHelper_ListAgentsByRole_Multiple(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	now := time.Now().Truncate(time.Second)
+	for _, a := range []workflow.Agent{
+		{ID: "dev1", Name: "developer-dev1", Role: "developer", Model: "gpt-4o", Status: workflow.AgentAvailable, CreatedAt: now, UpdatedAt: now},
+		{ID: "dev2", Name: "developer-dev2", Role: "developer", Model: "gpt-4o", Status: workflow.AgentAvailable, CreatedAt: now, UpdatedAt: now},
+		{ID: "rev1", Name: "reviewer-rev1", Role: "reviewer", Model: "gpt-4o", Status: workflow.AgentAvailable, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := h.CreateAgent(context.Background(), a); err != nil {
+			t.Fatalf("CreateAgent(%q) error = %v", a.ID, err)
+		}
+	}
+
+	agents, err := h.ListAgentsByRole(context.Background(), "developer")
+	if err != nil {
+		t.Fatalf("ListAgentsByRole() error = %v", err)
+	}
+
+	if len(agents) != 2 {
+		t.Fatalf("expected 2 developer agents, got %d", len(agents))
+	}
+	for _, a := range agents {
+		if a.Role != "developer" {
+			t.Errorf("agent %q has role %q, want %q", a.ID, a.Role, "developer")
+		}
+	}
+}
+
+func TestHelper_ListAgentsByRole_Empty(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	agents, err := h.ListAgentsByRole(context.Background(), "developer")
+	if err != nil {
+		t.Fatalf("ListAgentsByRole() error = %v", err)
+	}
+
+	if agents == nil {
+		t.Error("expected non-nil empty slice, got nil")
+	}
+	if len(agents) != 0 {
+		t.Errorf("expected 0 agents, got %d", len(agents))
+	}
+}
+
+func TestHelper_SetAgentStatus(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	agent := makeTestAgent()
+	if err := h.CreateAgent(context.Background(), agent); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+
+	if err := h.SetAgentStatus(context.Background(), agent.ID, workflow.AgentBenched); err != nil {
+		t.Fatalf("SetAgentStatus() error = %v", err)
+	}
+
+	got, err := h.GetAgent(context.Background(), agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgent() error = %v", err)
+	}
+	if got.Status != workflow.AgentBenched {
+		t.Errorf("Status = %q, want %q", got.Status, workflow.AgentBenched)
+	}
+}
+
+func TestHelper_SelectAgent_PicksLowestErrors(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+	ctx := context.Background()
+
+	now := time.Now().Truncate(time.Second)
+	agents := []struct {
+		id     string
+		errors int
+	}{
+		{"ag1", 5},
+		{"ag2", 2},
+		{"ag3", 8},
+	}
+
+	for _, tc := range agents {
+		a := workflow.Agent{
+			ID:        tc.id,
+			Name:      "developer-" + tc.id,
+			Role:      "developer",
+			Model:     "gpt-4o",
+			Status:    workflow.AgentAvailable,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		if err := h.CreateAgent(ctx, a); err != nil {
+			t.Fatalf("CreateAgent(%q) error = %v", tc.id, err)
+		}
+		// Increment errors to reach the desired total.
+		cats := make([]string, tc.errors)
+		for i := range cats {
+			cats[i] = "missing_tests"
+		}
+		if err := h.IncrementAgentErrorCounts(ctx, tc.id, cats); err != nil {
+			t.Fatalf("IncrementAgentErrorCounts(%q) error = %v", tc.id, err)
+		}
+	}
+
+	selected, err := h.SelectAgent(ctx, "developer", "")
+	if err != nil {
+		t.Fatalf("SelectAgent() error = %v", err)
+	}
+	if selected == nil {
+		t.Fatal("expected non-nil agent")
+	}
+	if selected.ID != "ag2" {
+		t.Errorf("SelectAgent() returned agent %q, want %q (lowest error count)", selected.ID, "ag2")
+	}
+}
+
+func TestHelper_SelectAgent_TiesBreakByScore(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+	ctx := context.Background()
+
+	now := time.Now().Truncate(time.Second)
+	for _, a := range []workflow.Agent{
+		{ID: "low-score", Name: "developer-low-score", Role: "developer", Model: "gpt-4o", Status: workflow.AgentAvailable, CreatedAt: now, UpdatedAt: now},
+		{ID: "high-score", Name: "developer-high-score", Role: "developer", Model: "gpt-4o", Status: workflow.AgentAvailable, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := h.CreateAgent(ctx, a); err != nil {
+			t.Fatalf("CreateAgent(%q) error = %v", a.ID, err)
+		}
+	}
+
+	// Both agents have the same error count (0). Differentiate via OverallAvg.
+	if err := h.UpdateAgentStats(ctx, "low-score", workflow.ReviewStats{OverallAvg: 3.0, ReviewCount: 1}); err != nil {
+		t.Fatalf("UpdateAgentStats(low-score) error = %v", err)
+	}
+	if err := h.UpdateAgentStats(ctx, "high-score", workflow.ReviewStats{OverallAvg: 8.5, ReviewCount: 1}); err != nil {
+		t.Fatalf("UpdateAgentStats(high-score) error = %v", err)
+	}
+
+	selected, err := h.SelectAgent(ctx, "developer", "")
+	if err != nil {
+		t.Fatalf("SelectAgent() error = %v", err)
+	}
+	if selected == nil {
+		t.Fatal("expected non-nil agent")
+	}
+	if selected.ID != "high-score" {
+		t.Errorf("SelectAgent() returned %q, want %q (higher OverallAvg)", selected.ID, "high-score")
+	}
+}
+
+func TestHelper_SelectAgent_SkipsBenched(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+	ctx := context.Background()
+
+	now := time.Now().Truncate(time.Second)
+	available := workflow.Agent{ID: "avail1", Name: "developer-avail1", Role: "developer", Model: "gpt-4o", Status: workflow.AgentAvailable, CreatedAt: now, UpdatedAt: now}
+	benched := workflow.Agent{ID: "bench1", Name: "developer-bench1", Role: "developer", Model: "gpt-4o", Status: workflow.AgentBenched, CreatedAt: now, UpdatedAt: now}
+
+	for _, a := range []workflow.Agent{available, benched} {
+		if err := h.CreateAgent(ctx, a); err != nil {
+			t.Fatalf("CreateAgent(%q) error = %v", a.ID, err)
+		}
+	}
+
+	// Give the benched agent a lower error count to ensure selection is not
+	// based on counts alone — the status filter must exclude it first.
+	if err := h.IncrementAgentErrorCounts(ctx, available.ID, []string{"missing_tests", "missing_tests", "missing_tests", "missing_tests", "missing_tests"}); err != nil {
+		t.Fatalf("IncrementAgentErrorCounts(avail1) error = %v", err)
+	}
+	if err := h.IncrementAgentErrorCounts(ctx, benched.ID, []string{"missing_tests"}); err != nil {
+		t.Fatalf("IncrementAgentErrorCounts(bench1) error = %v", err)
+	}
+
+	selected, err := h.SelectAgent(ctx, "developer", "")
+	if err != nil {
+		t.Fatalf("SelectAgent() error = %v", err)
+	}
+	if selected == nil {
+		t.Fatal("expected non-nil agent")
+	}
+	if selected.ID != available.ID {
+		t.Errorf("SelectAgent() returned %q, want %q (available despite higher errors)", selected.ID, available.ID)
+	}
+}
+
+func TestHelper_SelectAgent_CreatesNew(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	agent, err := h.SelectAgent(context.Background(), "developer", "test-model")
+	if err != nil {
+		t.Fatalf("SelectAgent() error = %v", err)
+	}
+	if agent == nil {
+		t.Fatal("expected non-nil agent when nextModel is set")
+	}
+	if agent.Model != "test-model" {
+		t.Errorf("Model = %q, want %q", agent.Model, "test-model")
+	}
+	if agent.Role != "developer" {
+		t.Errorf("Role = %q, want %q", agent.Role, "developer")
+	}
+	if agent.Status != workflow.AgentAvailable {
+		t.Errorf("Status = %q, want %q", agent.Status, workflow.AgentAvailable)
+	}
+}
+
+func TestHelper_SelectAgent_NilWhenExhausted(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+	ctx := context.Background()
+
+	now := time.Now().Truncate(time.Second)
+	a := workflow.Agent{ID: "bench2", Name: "developer-bench2", Role: "developer", Model: "gpt-4o", Status: workflow.AgentBenched, CreatedAt: now, UpdatedAt: now}
+	if err := h.CreateAgent(ctx, a); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+
+	selected, err := h.SelectAgent(ctx, "developer", "")
+	if err != nil {
+		t.Fatalf("SelectAgent() error = %v", err)
+	}
+	if selected != nil {
+		t.Errorf("SelectAgent() = %v, want nil when all agents benched and no nextModel", selected)
+	}
+}
+
+func TestHelper_BenchAgent_ThresholdMet(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+	ctx := context.Background()
+
+	agent := makeTestAgent()
+	if err := h.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+
+	// Set error count to exactly the threshold for one category.
+	if err := h.IncrementAgentErrorCounts(ctx, agent.ID, []string{"missing_tests", "missing_tests", "missing_tests"}); err != nil {
+		t.Fatalf("IncrementAgentErrorCounts() error = %v", err)
+	}
+
+	benched, err := h.BenchAgent(ctx, agent.ID, 3)
+	if err != nil {
+		t.Fatalf("BenchAgent() error = %v", err)
+	}
+	if !benched {
+		t.Error("BenchAgent() = false, want true (threshold met)")
+	}
+
+	got, err := h.GetAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgent() error = %v", err)
+	}
+	if got.Status != workflow.AgentBenched {
+		t.Errorf("Status = %q, want %q", got.Status, workflow.AgentBenched)
+	}
+}
+
+func TestHelper_BenchAgent_ThresholdNotMet(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+	ctx := context.Background()
+
+	agent := makeTestAgent()
+	if err := h.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+
+	// Error count (2) is below threshold (3).
+	if err := h.IncrementAgentErrorCounts(ctx, agent.ID, []string{"missing_tests", "missing_tests"}); err != nil {
+		t.Fatalf("IncrementAgentErrorCounts() error = %v", err)
+	}
+
+	benched, err := h.BenchAgent(ctx, agent.ID, 3)
+	if err != nil {
+		t.Fatalf("BenchAgent() error = %v", err)
+	}
+	if benched {
+		t.Error("BenchAgent() = true, want false (threshold not met)")
+	}
+
+	got, err := h.GetAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgent() error = %v", err)
+	}
+	if got.Status != workflow.AgentAvailable {
+		t.Errorf("Status = %q, want %q (should be unchanged)", got.Status, workflow.AgentAvailable)
 	}
 }

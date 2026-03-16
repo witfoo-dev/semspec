@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -140,6 +141,82 @@ func TestAssemblerRoleFiltering(t *testing.T) {
 	if strings.Contains(result.SystemMessage, "rev only") {
 		t.Error("should not contain reviewer fragment")
 	}
+}
+
+func TestAssemblerErrorTrendInjection(t *testing.T) {
+	r := NewRegistry()
+	// Register the error trends fragment with the same pattern as software.go.
+	r.Register(&Fragment{
+		ID:       "error-trends",
+		Category: CategoryPeerFeedback,
+		Roles:    []Role{RoleDeveloper},
+		Condition: func(ctx *AssemblyContext) bool {
+			return ctx.TaskContext != nil && len(ctx.TaskContext.ErrorTrends) > 0
+		},
+		ContentFunc: func(ctx *AssemblyContext) string {
+			var sb strings.Builder
+			sb.WriteString("RECURRING ISSUES:\n")
+			for _, trend := range ctx.TaskContext.ErrorTrends {
+				sb.WriteString(fmt.Sprintf("- %s (%d): %s\n", trend.Label, trend.Count, trend.Guidance))
+			}
+			return sb.String()
+		},
+	})
+
+	a := NewAssembler(r)
+
+	t.Run("trends present", func(t *testing.T) {
+		result := a.Assemble(&AssemblyContext{
+			Role:     RoleDeveloper,
+			Provider: ProviderOpenAI,
+			TaskContext: &TaskContext{
+				ErrorTrends: []ErrorTrend{
+					{CategoryID: "missing_tests", Label: "Missing Tests", Count: 3, Guidance: "Create test files."},
+					{CategoryID: "wrong_pattern", Label: "Wrong Pattern", Count: 2, Guidance: "Follow conventions."},
+				},
+				AgentID: "agent-dev-1",
+			},
+		})
+
+		if !strings.Contains(result.SystemMessage, "RECURRING ISSUES") {
+			t.Error("expected error trends section in system message")
+		}
+		if !strings.Contains(result.SystemMessage, "Missing Tests (3)") {
+			t.Error("expected 'Missing Tests (3)' in system message")
+		}
+		if !strings.Contains(result.SystemMessage, "Wrong Pattern (2)") {
+			t.Error("expected 'Wrong Pattern (2)' in system message")
+		}
+		if !strings.Contains(result.SystemMessage, "Create test files.") {
+			t.Error("expected guidance text in system message")
+		}
+	})
+
+	t.Run("no trends", func(t *testing.T) {
+		result := a.Assemble(&AssemblyContext{
+			Role:     RoleDeveloper,
+			Provider: ProviderOpenAI,
+			TaskContext: &TaskContext{
+				ErrorTrends: nil,
+				AgentID:     "agent-dev-2",
+			},
+		})
+
+		if strings.Contains(result.SystemMessage, "RECURRING ISSUES") {
+			t.Error("should NOT contain error trends section when no trends")
+		}
+	})
+
+	t.Run("nil task context", func(t *testing.T) {
+		result := a.Assemble(&AssemblyContext{
+			Role:     RoleDeveloper,
+			Provider: ProviderOpenAI,
+		})
+
+		if strings.Contains(result.SystemMessage, "RECURRING ISSUES") {
+			t.Error("should NOT contain error trends section with nil TaskContext")
+		}
+	})
 }
 
 func TestFormatSection(t *testing.T) {

@@ -96,3 +96,33 @@ func (a *Agent) IncrementErrorCount(category ErrorCategory) {
 	}
 	a.ErrorCounts[category]++
 }
+
+// DefaultBenchingThreshold is the minimum error count per category that triggers
+// agent benching. When any single error category reaches this count, the agent
+// should be excluded from future task assignment.
+const DefaultBenchingThreshold = 3
+
+// IsBenched returns true if the agent is in the benched state.
+func (a *Agent) IsBenched() bool {
+	return a.Status == AgentBenched
+}
+
+// ShouldBench returns true if any error category count has reached or exceeded
+// the given threshold, indicating the agent should be benched.
+func (a *Agent) ShouldBench(threshold int) bool {
+	for _, count := range a.ErrorCounts {
+		if count >= threshold {
+			return true
+		}
+	}
+	return false
+}
+
+// TotalErrorCount returns the sum of all error category counts.
+func (a *Agent) TotalErrorCount() int {
+	total := 0
+	for _, count := range a.ErrorCounts {
+		total += count
+	}
+	return total
+}

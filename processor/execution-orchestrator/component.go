@@ -24,11 +24,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/agentgraph"
+	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/tools/sandbox"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
@@ -109,6 +114,11 @@ type Component struct {
 	tripleWriter *graphutil.TripleWriter
 	sandbox      worktreeManager        // nil when sandbox is disabled
 	indexingGate *workflow.IndexingGate // nil when graph-gateway not configured
+
+	// Agent roster (Phase B). Nil when ENTITY_STATES bucket is unavailable.
+	agentHelper     *agentgraph.Helper
+	errorCategories *workflow.ErrorCategoryRegistry
+	modelRegistry   *model.Registry
 
 	inputPorts  []component.Port
 	outputPorts []component.Port
@@ -201,6 +211,7 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 	c.mu.RUnlock()
 
+	c.initAgentGraph()
 	c.logger.Info("Starting execution-orchestrator")
 
 	triggerHandler := func(ctx context.Context, msg *nats.Msg) {
@@ -320,6 +331,97 @@ func (c *Component) Stop(timeout time.Duration) error {
 }
 
 // ---------------------------------------------------------------------------
+// Agent roster initialization (Phase B)
+// ---------------------------------------------------------------------------
+
+// initAgentGraph connects to the ENTITY_STATES KV bucket and loads error
+// categories. When the bucket is unavailable, agent selection is disabled
+// and the orchestrator falls back to using the model from the trigger payload.
+func (c *Component) initAgentGraph() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	bucket, err := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES")
+	if err != nil {
+		c.logger.Debug("ENTITY_STATES bucket not available — agent selection disabled", "error", err)
+		return
+	}
+	kvStore := c.natsClient.NewKVStore(bucket)
+	c.agentHelper = agentgraph.NewHelper(kvStore)
+
+	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoRoot == "" {
+		repoRoot, _ = os.Getwd()
+	}
+	catPath := filepath.Join(repoRoot, "configs", "error_categories.json")
+	if reg, err := workflow.LoadErrorCategories(catPath); err != nil {
+		c.logger.Debug("Failed to load error categories — signal matching disabled", "error", err)
+	} else {
+		c.errorCategories = reg
+	}
+
+	c.modelRegistry = model.NewDefaultRegistry()
+	c.logger.Info("Agent roster initialized")
+}
+
+// selectReplacementAgent attempts to find a replacement agent after benching.
+// First tries existing available agents, then walks the model fallback chain
+// to create a new agent on a different model tier.
+// Returns nil when all options are exhausted (caller should escalate).
+func (c *Component) selectReplacementAgent(ctx context.Context, exec *taskExecution) *workflow.Agent {
+	if c.agentHelper == nil {
+		return nil
+	}
+
+	// Single roster query — derive both available agents and used models.
+	roster, err := c.agentHelper.ListAgentsByRole(ctx, "developer")
+	if err != nil {
+		c.logger.Warn("Replacement agent selection failed", "error", err)
+		return nil
+	}
+
+	// Try existing available agents (lowest errors first).
+	var available []*workflow.Agent
+	usedModels := make(map[string]bool, len(roster))
+	for _, a := range roster {
+		usedModels[a.Model] = true
+		if a.Status == workflow.AgentAvailable {
+			available = append(available, a)
+		}
+	}
+	if len(available) > 0 {
+		sort.Slice(available, func(i, j int) bool {
+			ti := available[i].TotalErrorCount()
+			tj := available[j].TotalErrorCount()
+			if ti != tj {
+				return ti < tj
+			}
+			return available[i].ReviewStats.OverallAvg > available[j].ReviewStats.OverallAvg
+		})
+		return available[0]
+	}
+
+	// No available agents — try creating one with the next model in fallback chain.
+	if c.modelRegistry == nil {
+		return nil
+	}
+	chain := c.modelRegistry.GetFallbackChainForRole("developer")
+	for _, modelName := range chain {
+		if usedModels[modelName] {
+			continue
+		}
+		newAgent, createErr := c.agentHelper.SelectAgent(ctx, "developer", modelName)
+		if createErr != nil {
+			c.logger.Warn("Failed to create agent with fallback model",
+				"model", modelName, "error", createErr)
+			continue
+		}
+		return newAgent
+	}
+
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Trigger handler
 // ---------------------------------------------------------------------------
 
@@ -365,6 +467,17 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 		LoopID:           trigger.LoopID,
 		RequestID:        trigger.RequestID,
 		ScenarioBranch:   trigger.ScenarioBranch,
+	}
+
+	// Resolve persistent agent for this execution (Phase B).
+	if c.agentHelper != nil {
+		agent, agentErr := c.agentHelper.SelectAgent(ctx, "developer", exec.Model)
+		if agentErr != nil {
+			c.logger.Warn("Agent selection failed, using trigger model", "error", agentErr)
+		} else if agent != nil {
+			exec.AgentID = agent.ID
+			exec.Model = agent.Model
+		}
 	}
 
 	if _, loaded := c.activeExecutions.LoadOrStore(entityID, exec); loaded {
@@ -610,11 +723,29 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 		c.logger.Error("Failed to write phase triple", "phase", phaseRejected, "error", err)
 	}
 
+	// Phase B: Auto-classify feedback into error categories and check benching.
+	agentBenched := c.checkAgentBenching(ctx, exec, result.Feedback)
+
 	switch result.RejectionType {
 	case rejectionTypeMisscoped, rejectionTypeArchitectural, rejectionTypeTooBig:
 		// Non-fixable rejection — escalate immediately regardless of budget.
 		c.markEscalatedLocked(ctx, exec, fmt.Sprintf("non-fixable rejection: %s", result.RejectionType))
 	default:
+		if agentBenched {
+			// Agent was benched — try to find a replacement before retrying.
+			replacement := c.selectReplacementAgent(ctx, exec)
+			if replacement == nil {
+				c.markEscalatedLocked(ctx, exec, "all agents benched, no fallback models available")
+				return
+			}
+			exec.AgentID = replacement.ID
+			exec.Model = replacement.Model
+			c.logger.Info("Replacement agent selected after benching",
+				"new_agent_id", replacement.ID,
+				"new_model", replacement.Model,
+				"slug", exec.Slug,
+			)
+		}
 		// Fixable rejection — retry if budget remains.
 		if exec.Iteration+1 < exec.MaxIterations {
 			c.startDeveloperRetryLocked(ctx, exec, result.Feedback)
@@ -622,6 +753,45 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 			c.markEscalatedLocked(ctx, exec, "fixable rejections exceeded iteration budget")
 		}
 	}
+}
+
+// checkAgentBenching classifies the rejection feedback into error categories,
+// increments the agent's error counts, and benches the agent if the threshold
+// is reached. Returns true if the agent was benched by this call.
+func (c *Component) checkAgentBenching(ctx context.Context, exec *taskExecution, feedback string) bool {
+	if c.agentHelper == nil || exec.AgentID == "" {
+		return false
+	}
+
+	// Auto-classify feedback into error categories via signal matching.
+	if c.errorCategories != nil && feedback != "" {
+		matches := c.errorCategories.MatchSignals(feedback)
+		var categoryIDs []string
+		for _, m := range matches {
+			categoryIDs = append(categoryIDs, m.Category.ID)
+		}
+		if len(categoryIDs) > 0 {
+			if err := c.agentHelper.IncrementAgentErrorCounts(ctx, exec.AgentID, categoryIDs); err != nil {
+				c.logger.Warn("Failed to increment agent error counts",
+					"agent_id", exec.AgentID, "error", err)
+			}
+		}
+	}
+
+	// Check if the agent should be benched.
+	benched, err := c.agentHelper.BenchAgent(ctx, exec.AgentID, c.config.BenchingThreshold)
+	if err != nil {
+		c.logger.Warn("Benching check failed", "agent_id", exec.AgentID, "error", err)
+		return false
+	}
+	if benched {
+		c.logger.Info("Agent benched due to error threshold",
+			"agent_id", exec.AgentID,
+			"threshold", c.config.BenchingThreshold,
+			"slug", exec.Slug,
+		)
+	}
+	return benched
 }
 
 // ---------------------------------------------------------------------------

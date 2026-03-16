@@ -674,8 +674,7 @@ func registerAgenticToolsFromKV(ctx context.Context, natsClient *natsclient.Clie
 	}
 
 	kvStore := natsClient.NewKVStore(bucket)
-	kvAdapter := agentgraph.NewKVStoreAdapter(kvStore)
-	agentHelper := agentgraph.NewHelper(kvAdapter)
+	agentHelper := agentgraph.NewHelper(kvStore)
 
 	// Load and seed error categories.
 	var registry *workflow.ErrorCategoryRegistry
