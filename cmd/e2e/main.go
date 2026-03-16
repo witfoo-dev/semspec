@@ -53,7 +53,10 @@ Available scenarios:
   doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
   openspec-ingest     - Tests OpenSpec specification ingestion with requirements and scenarios
   scenario-execution  - Tests Requirement/Scenario CRUD and scenario-execution+DAG reactive workflow trigger
+  reactive-execution  - Tests full reactive execution lifecycle: decomposition → node dispatch → completion
   change-proposal     - Tests ChangeProposal CRUD, status transitions, cascade response, and error handling
+  sandbox-lifecycle   - Tests sandbox server lifecycle: worktree CRUD, file ops, git, exec, merge, cleanup
+  agent-roster        - Tests persistent agent roster: agent selection, error tracking, dispatch verification
   hello-world                  - Greenfield Python+JS: add /goodbye endpoint with semantic validation
   hello-world-plan-rejection   - Hello-world with plan rejection → revision → approval
   hello-world-task-rejection   - Hello-world with task rejection → revision → approval
@@ -133,7 +136,10 @@ func listCmd() *cobra.Command {
 			fmt.Println("  trajectory          Tests trajectory tracking via trajectory-api endpoints")
 			fmt.Println("  questions-api       Tests Q&A HTTP API endpoints (list, get, answer)")
 			fmt.Println("  scenario-execution  Tests Requirement/Scenario CRUD and reactive workflow trigger")
+			fmt.Println("  reactive-execution  Tests full reactive execution: decomposition → dispatch → completion")
 			fmt.Println("  change-proposal     Tests ChangeProposal CRUD, status transitions, cascade, and error handling")
+			fmt.Println("  sandbox-lifecycle   Tests sandbox worktree CRUD, file ops, git, exec, merge, cleanup")
+			fmt.Println("  agent-roster        Tests persistent agent roster: selection, error tracking, dispatch")
 			fmt.Println()
 			fmt.Println("  Document Processing Tests (require source-ingester enabled):")
 			fmt.Println("  doc-ingest          Tests document ingestion: markdown, RST parsing and chunking")
@@ -176,7 +182,10 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewTrajectoryScenario(cfg),
 		scenarios.NewQuestionsAPIScenario(cfg),
 		scenarios.NewScenarioExecutionScenario(cfg),
+		scenarios.NewReactiveExecutionScenario(cfg),
 		scenarios.NewChangeProposalScenario(cfg),
+		scenarios.NewSandboxLifecycleScenario(cfg),
+		scenarios.NewAgentRosterScenario(cfg),
 		// Document processing scenarios (require source-ingester enabled)
 		scenarios.NewDocIngestScenario(cfg),
 		scenarios.NewOpenSpecIngestScenario(cfg),

@@ -1,0 +1,10 @@
+{
+  "phases": [
+    {
+      "name": "Health Check Implementation",
+      "description": "Implement the /healthz endpoint in api/health.go, register it on the server router in api/server.go, write tests in api/health_test.go, and update monitoring/config.yaml to add the scrape target.",
+      "depends_on": [],
+      "requires_approval": false
+    }
+  ]
+}

@@ -12,6 +12,7 @@ import { PlansListPage } from '../pages/PlansListPage';
 import { SourcesPage } from '../pages/SourcesPage';
 import { EntitiesPage } from '../pages/EntitiesPage';
 import { SettingsPage } from '../pages/SettingsPage';
+import { ExecutionPage } from '../pages/ExecutionPage';
 
 // Re-export workspace helpers for test files
 export {
@@ -45,6 +46,7 @@ export const test = base.extend<{
 	sourcesPage: SourcesPage;
 	entitiesPage: EntitiesPage;
 	settingsPage: SettingsPage;
+	executionPage: ExecutionPage;
 }>({
 	// Mock project-api/status by default to prevent Setup Wizard from appearing.
 	// Under parallel execution, setup-wizard tests modify shared workspace state,
@@ -122,6 +124,10 @@ export const test = base.extend<{
 	settingsPage: async ({ page }, use) => {
 		const settingsPage = new SettingsPage(page);
 		await use(settingsPage);
+	},
+	executionPage: async ({ page }, use) => {
+		const executionPage = new ExecutionPage(page);
+		await use(executionPage);
 	},
 });
 

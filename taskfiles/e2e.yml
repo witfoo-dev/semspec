@@ -25,41 +25,68 @@ tasks:
 
   check-ports:
     internal: true
-    desc: Check if required backend E2E ports are available
+    desc: Check if required backend E2E ports are available (auto-cleans stale containers)
     silent: false
     cmds:
       - |
         echo "[CHECK] Verifying backend E2E ports are available..."
+        STALE=false
         for port in 4322 8322 8180 8182; do
           if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
-            echo "[ERROR] Port $port is already in use:"
-            lsof -Pi :$port -sTCP:LISTEN
-            echo ""
-            echo "Hint: If the UI E2E stack is running, it uses different ports and won't conflict."
-            echo "      If this is a stale backend E2E stack, run: task e2e:nuke"
-            exit 1
+            STALE=true
+            break
           fi
         done
-        echo "[OK] All backend E2E ports available (4322, 8322, 8180, 8182)"
+        if [ "$STALE" = "true" ]; then
+          echo "[CHECK] Stale containers detected — auto-cleaning..."
+          docker compose -p semspec-e2e -f docker/compose/e2e.yml down -v --timeout 5 2>/dev/null || true
+          docker ps -a --filter name=semspec-e2e --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+          docker network ls -q --filter name=semspec-e2e | xargs -r docker network rm 2>/dev/null || true
+          sleep 2
+          # Verify ports are now free
+          for port in 4322 8322 8180 8182; do
+            if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+              echo "[ERROR] Port $port still in use after cleanup:"
+              lsof -Pi :$port -sTCP:LISTEN
+              echo ""
+              echo "Hint: Manually kill the process or restart Docker Desktop."
+              exit 1
+            fi
+          done
+          echo "[OK] Stale containers cleaned, ports now available"
+        else
+          echo "[OK] All backend E2E ports available (4322, 8322, 8180, 8182)"
+        fi
 
   check-ports:ui:
     internal: true
-    desc: Check if required UI E2E ports are available
+    desc: Check if required UI E2E ports are available (auto-cleans stale containers)
     silent: false
     cmds:
       - |
         echo "[CHECK] Verifying UI E2E ports are available..."
+        STALE=false
         for port in 3000 4223 8223 11534; do
           if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
-            echo "[ERROR] Port $port is already in use:"
-            lsof -Pi :$port -sTCP:LISTEN
-            echo ""
-            echo "Hint: If the backend E2E stack is running, it uses different ports and won't conflict."
-            echo "      If this is a stale UI E2E stack, run: task e2e:ui:down"
-            exit 1
+            STALE=true
+            break
           fi
         done
-        echo "[OK] All UI E2E ports available (3000, 4223, 8223, 11534)"
+        if [ "$STALE" = "true" ]; then
+          echo "[CHECK] Stale UI containers detected — auto-cleaning..."
+          docker compose -p semspec-ui-e2e -f ui/docker-compose.e2e.yml down -v --timeout 5 2>/dev/null || true
+          docker ps -a --filter name=semspec-ui-e2e --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+          sleep 2
+          for port in 3000 4223 8223 11534; do
+            if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+              echo "[ERROR] Port $port still in use after cleanup."
+              exit 1
+            fi
+          done
+          echo "[OK] Stale UI containers cleaned, ports now available"
+        else
+          echo "[OK] All UI E2E ports available (3000, 4223, 8223, 11534)"
+        fi
 
   clean:
     internal: true
@@ -314,12 +341,30 @@ tasks:
     desc: Nuclear cleanup - remove ALL semspec docker resources (backend + UI)
     cmds:
       - echo "[NUKE] Removing ALL Semspec Docker resources..."
-      - docker compose -p semspec-e2e -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
-      - docker compose -p semspec-ui-e2e -f ui/docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml down -v --timeout 5 2>/dev/null || true
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 5 2>/dev/null || true
+      - docker compose -p semspec-ui-e2e -f ui/docker-compose.e2e.yml down -v --timeout 5 2>/dev/null || true
       - docker ps -a --filter name=semspec --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+      - docker ps -a --filter name=semspec-e2e --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
       - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
       - docker network ls -q --filter name=semspec | xargs -r docker network rm 2>/dev/null || true
       - docker images --filter reference='*semspec*' --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
+      - |
+        # Wait for ports to be released (Docker Desktop can hold them briefly).
+        echo "[NUKE] Waiting for ports to release..."
+        for i in 1 2 3; do
+          ALL_FREE=true
+          for port in 4322 8322 8180 8182; do
+            if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+              ALL_FREE=false
+              break
+            fi
+          done
+          if [ "$ALL_FREE" = "true" ]; then
+            break
+          fi
+          sleep 1
+        done
       - echo "[OK] Nuclear cleanup complete (backend + UI)"
 
   # ============================================================================
@@ -380,6 +425,21 @@ tasks:
     cmds:
       - |
         echo "[E2E:MOCK] Scenario: {{.SCENARIO}}"
+
+        # Validate mock fixtures exist for this scenario.
+        FIXTURE_DIR="test/e2e/fixtures/mock-responses/{{.SCENARIO}}"
+        if [ ! -d "$FIXTURE_DIR" ]; then
+          echo "[ERROR] No mock LLM fixtures found at: $FIXTURE_DIR"
+          echo ""
+          echo "This scenario does not have mock LLM fixtures."
+          echo "Use 'task e2e:run -- {{.SCENARIO}}' against running infra instead,"
+          echo "or create fixtures in $FIXTURE_DIR."
+          echo ""
+          echo "Available mock scenarios:"
+          ls -1 test/e2e/fixtures/mock-responses/ 2>/dev/null | sed 's/^/  /'
+          exit 1
+        fi
+
         echo "[E2E:MOCK] Starting infrastructure with mock LLM..."
         MOCK_SCENARIO={{.SCENARIO}} docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
       - |

@@ -719,27 +719,35 @@ func (c *HTTPClient) GetFullLLMCall(ctx context.Context, requestID, traceID stri
 	return &call, resp.StatusCode, nil
 }
 
+// AnswerAction represents a machine-executable action attached to an answer.
+type AnswerAction struct {
+	Type       string            `json:"type"`
+	Parameters map[string]string `json:"parameters,omitempty"`
+}
+
 // Question represents a knowledge gap question from the Q&A system.
 type Question struct {
-	ID            string     `json:"id"`
-	FromAgent     string     `json:"from_agent"`
-	Topic         string     `json:"topic"`
-	Question      string     `json:"question"`
-	Context       string     `json:"context,omitempty"`
-	BlockedLoopID string     `json:"blocked_loop_id,omitempty"`
-	TraceID       string     `json:"trace_id,omitempty"`
-	Urgency       string     `json:"urgency"`
-	Status        string     `json:"status"`
-	CreatedAt     time.Time  `json:"created_at"`
-	Deadline      *time.Time `json:"deadline,omitempty"`
-	AssignedTo    string     `json:"assigned_to,omitempty"`
-	AssignedAt    time.Time  `json:"assigned_at,omitempty"`
-	AnsweredAt    *time.Time `json:"answered_at,omitempty"`
-	Answer        string     `json:"answer,omitempty"`
-	AnsweredBy    string     `json:"answered_by,omitempty"`
-	AnswererType  string     `json:"answerer_type,omitempty"`
-	Confidence    string     `json:"confidence,omitempty"`
-	Sources       string     `json:"sources,omitempty"`
+	ID            string            `json:"id"`
+	FromAgent     string            `json:"from_agent"`
+	Topic         string            `json:"topic"`
+	Question      string            `json:"question"`
+	Category      string            `json:"category,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
+	Context       string            `json:"context,omitempty"`
+	BlockedLoopID string            `json:"blocked_loop_id,omitempty"`
+	TraceID       string            `json:"trace_id,omitempty"`
+	Urgency       string            `json:"urgency"`
+	Status        string            `json:"status"`
+	CreatedAt     time.Time         `json:"created_at"`
+	Deadline      *time.Time        `json:"deadline,omitempty"`
+	AssignedTo    string            `json:"assigned_to,omitempty"`
+	AssignedAt    time.Time         `json:"assigned_at,omitempty"`
+	AnsweredAt    *time.Time        `json:"answered_at,omitempty"`
+	Answer        string            `json:"answer,omitempty"`
+	AnsweredBy    string            `json:"answered_by,omitempty"`
+	AnswererType  string            `json:"answerer_type,omitempty"`
+	Confidence    string            `json:"confidence,omitempty"`
+	Sources       string            `json:"sources,omitempty"`
 }
 
 // ListQuestionsResponse represents the response from GET /workflow-api/questions.
@@ -836,9 +844,10 @@ func (c *HTTPClient) GetQuestion(ctx context.Context, id string) (*Question, err
 
 // AnswerQuestionRequest is the request body for answering a question.
 type AnswerQuestionRequest struct {
-	Answer     string `json:"answer"`
-	Confidence string `json:"confidence,omitempty"`
-	Sources    string `json:"sources,omitempty"`
+	Answer     string        `json:"answer"`
+	Confidence string        `json:"confidence,omitempty"`
+	Sources    string        `json:"sources,omitempty"`
+	Action     *AnswerAction `json:"action,omitempty"`
 }
 
 // AnswerQuestion submits an answer to a question.
@@ -853,6 +862,45 @@ func (c *HTTPClient) AnswerQuestion(ctx context.Context, id, answer, confidence,
 	}
 
 	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var question Question
+	if err := json.Unmarshal(body, &question); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &question, nil
+}
+
+// AnswerQuestionWithAction submits an answer with an optional machine-executable action.
+// Returns the updated question.
+func (c *HTTPClient) AnswerQuestionWithAction(ctx context.Context, id string, req AnswerQuestionRequest) (*Question, error) {
+	url := fmt.Sprintf("%s/workflow-api/questions/%s/answer", c.baseURL, id)
+
+	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}

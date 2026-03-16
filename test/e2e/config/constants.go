@@ -11,6 +11,7 @@ const (
 	DefaultGraphURL   = "http://localhost:8182"
 	DefaultMetricsURL = "http://localhost:9190"
 	DefaultMockLLMURL = "http://localhost:11434"
+	DefaultSandboxURL = "http://localhost:8190"
 )
 
 // Default timeouts.
@@ -80,6 +81,7 @@ type Config struct {
 	HTTPBaseURL    string        `json:"http_base_url"`
 	GraphURL       string        `json:"graph_url"`
 	MetricsURL     string        `json:"metrics_url"`
+	SandboxURL     string        `json:"sandbox_url"`
 	WorkspacePath  string        `json:"workspace_path"`
 	FixturesPath   string        `json:"fixtures_path"`
 	BinaryPath     string        `json:"binary_path"`
@@ -98,6 +100,7 @@ func DefaultConfig() *Config {
 		HTTPBaseURL:    DefaultHTTPURL,
 		GraphURL:       DefaultGraphURL,
 		MetricsURL:     DefaultMetricsURL,
+		SandboxURL:     DefaultSandboxURL,
 		MockLLMURL:     DefaultMockLLMURL,
 		WorkspacePath:  "/workspace",
 		FixturesPath:   "/fixtures",

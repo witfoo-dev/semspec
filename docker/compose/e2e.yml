@@ -27,6 +27,7 @@ services:
       - NATS_URL=nats://nats:4222
       - SEMSPEC_REPO_PATH=/workspace
       - LLM_API_URL=http://host.docker.internal:11434
+      - SANDBOX_URL=http://sandbox:8090
     volumes:
       - ../../test/e2e/workspace:/workspace
     depends_on:
@@ -39,6 +40,25 @@ services:
       timeout: 3s
       retries: 10
       start_period: 15s
+
+  sandbox:
+    build:
+      context: ../..
+      dockerfile: docker/sandbox.Dockerfile
+    ports:
+      - "8190:8090"
+    command: ["--addr", ":8090", "--repo", "/workspace"]
+    volumes:
+      - ../../test/e2e/workspace:/workspace
+    depends_on:
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
 volumes:
   nats-data:

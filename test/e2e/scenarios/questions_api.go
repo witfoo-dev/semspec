@@ -13,11 +13,13 @@ import (
 
 // QuestionsAPIScenario tests the Q&A HTTP API endpoints.
 // It creates a question, retrieves it, answers it, and verifies the answer event.
+// It also covers Q/A modernization features: Category, Metadata, and AnswerAction.
 type QuestionsAPIScenario struct {
 	name        string
 	description string
 	config      *config.Config
 	http        *client.HTTPClient
+	nats        *client.NATSClient
 	fs          *client.FilesystemClient
 }
 
@@ -56,6 +58,13 @@ func (s *QuestionsAPIScenario) Setup(ctx context.Context) error {
 		return fmt.Errorf("service not healthy: %w", err)
 	}
 
+	// Create NATS client for direct KV writes (question creation)
+	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
+	if err != nil {
+		return fmt.Errorf("create NATS client: %w", err)
+	}
+	s.nats = natsClient
+
 	return nil
 }
 
@@ -75,6 +84,9 @@ func (s *QuestionsAPIScenario) Execute(ctx context.Context) (*Result, error) {
 		{"verify-answered", s.stageVerifyAnswered},
 		{"verify-answer-event", s.stageVerifyAnswerEvent},
 		{"verify-conflict", s.stageVerifyConflict},
+		{"create-categorized-question", s.stageCreateCategorizedQuestion},
+		{"verify-category-roundtrip", s.stageVerifyCategoryRoundtrip},
+		{"answer-with-action", s.stageAnswerWithAction},
 	}
 
 	for _, stage := range stages {
@@ -102,7 +114,10 @@ func (s *QuestionsAPIScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *QuestionsAPIScenario) Teardown(_ context.Context) error {
+func (s *QuestionsAPIScenario) Teardown(ctx context.Context) error {
+	if s.nats != nil {
+		return s.nats.Close(ctx)
+	}
 	return nil
 }
 
@@ -400,6 +415,112 @@ func (s *QuestionsAPIScenario) stageVerifyAnswerEvent(ctx context.Context, resul
 
 	// Answer event not found - this might be OK depending on configuration
 	result.AddWarning("Answer event not found in message logger - this may be expected if message-logger doesn't capture question.answer.> subjects")
+	return nil
+}
+
+// stageCreateCategorizedQuestion creates a question with category "environment" and metadata
+// via direct NATS KV write, testing the Q/A modernization Category and Metadata fields.
+func (s *QuestionsAPIScenario) stageCreateCategorizedQuestion(ctx context.Context, result *Result) error {
+	questionID := fmt.Sprintf("q-cat-%d", time.Now().UnixNano()%100000000)
+	result.SetDetail("categorized_question_id", questionID)
+
+	q := map[string]any{
+		"id":         questionID,
+		"from_agent": "e2e-test",
+		"topic":      "environment.build.gradle",
+		"question":   "How do I install Gradle for the build?",
+		"category":   "environment",
+		"metadata": map[string]string{
+			"exec_result": "command_not_found",
+			"command":     "gradle",
+		},
+		"urgency":    "normal",
+		"status":     "pending",
+		"created_at": time.Now().UTC(),
+	}
+
+	data, err := json.Marshal(q)
+	if err != nil {
+		return fmt.Errorf("marshal question: %w", err)
+	}
+
+	js := s.nats.JetStreamContext()
+	kv, err := js.KeyValue(ctx, "QUESTIONS")
+	if err != nil {
+		return fmt.Errorf("get QUESTIONS KV bucket: %w", err)
+	}
+
+	if _, err := kv.Put(ctx, questionID, data); err != nil {
+		return fmt.Errorf("store categorized question: %w", err)
+	}
+
+	result.SetDetail("categorized_question_stored", true)
+	return nil
+}
+
+// stageVerifyCategoryRoundtrip retrieves the categorized question via HTTP and verifies
+// that Category and Metadata fields survive the KV → HTTP API roundtrip.
+func (s *QuestionsAPIScenario) stageVerifyCategoryRoundtrip(ctx context.Context, result *Result) error {
+	questionID, ok := result.GetDetailString("categorized_question_id")
+	if !ok {
+		return fmt.Errorf("categorized_question_id not found in result")
+	}
+
+	question, err := s.http.GetQuestion(ctx, questionID)
+	if err != nil {
+		return fmt.Errorf("get categorized question %s: %w", questionID, err)
+	}
+
+	if question.Category != "environment" {
+		return fmt.Errorf("category mismatch: expected %q, got %q", "environment", question.Category)
+	}
+
+	if question.Metadata == nil {
+		return fmt.Errorf("metadata is nil; expected exec_result and command keys")
+	}
+
+	if v := question.Metadata["exec_result"]; v != "command_not_found" {
+		return fmt.Errorf("metadata[exec_result] mismatch: expected %q, got %q", "command_not_found", v)
+	}
+
+	if v := question.Metadata["command"]; v != "gradle" {
+		return fmt.Errorf("metadata[command] mismatch: expected %q, got %q", "gradle", v)
+	}
+
+	result.SetDetail("category_roundtrip_verified", true)
+	return nil
+}
+
+// stageAnswerWithAction answers the categorized question with an AnswerAction and verifies
+// the returned question reflects status "answered".
+func (s *QuestionsAPIScenario) stageAnswerWithAction(ctx context.Context, result *Result) error {
+	questionID, ok := result.GetDetailString("categorized_question_id")
+	if !ok {
+		return fmt.Errorf("categorized_question_id not found in result")
+	}
+
+	req := client.AnswerQuestionRequest{
+		Answer:     "Install Gradle to resolve the build issue",
+		Confidence: "high",
+		Action: &client.AnswerAction{
+			Type: "install_package",
+			Parameters: map[string]string{
+				"package_manager": "apt",
+				"packages":        "gradle",
+			},
+		},
+	}
+
+	answered, err := s.http.AnswerQuestionWithAction(ctx, questionID, req)
+	if err != nil {
+		return fmt.Errorf("answer question with action: %w", err)
+	}
+
+	if answered.Status != "answered" {
+		return fmt.Errorf("expected status %q, got %q", "answered", answered.Status)
+	}
+
+	result.SetDetail("answer_with_action_verified", true)
 	return nil
 }
 
