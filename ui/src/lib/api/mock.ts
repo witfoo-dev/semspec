@@ -1,8 +1,10 @@
 import type { Loop, ActivityEvent, MessageResponse } from '$lib/types';
-import { mockPlans, mockTasks, mockPhases } from './mock-plans';
+import { mockPlans, mockTasks, mockPhases, mockRequirements, mockScenarios } from './mock-plans';
 import type { PlanWithStatus } from '$lib/types/plan';
 import type { Task } from '$lib/types/task';
 import type { Phase } from '$lib/types/phase';
+import type { Requirement } from '$lib/types/requirement';
+import type { Scenario } from '$lib/types/scenario';
 import type { SynthesisResult } from '$lib/types/review';
 import type { ContextBuildResponse } from '$lib/types/context';
 
@@ -156,6 +158,8 @@ type MockHandler = (body?: any, slug?: string) => Promise<any>;
 let mutablePlans = structuredClone(mockPlans);
 let mutablePhases: Record<string, Phase[]> = structuredClone(mockPhases);
 let mutableTasks: Record<string, Task[]> = structuredClone(mockTasks);
+const mutableRequirements: Record<string, Requirement[]> = structuredClone(mockRequirements);
+const mutableScenarios: Record<string, Scenario[]> = structuredClone(mockScenarios);
 
 const mockHandlers: Record<string, MockHandler> = {
 	'GET /agentic-dispatch/loops': async () => {
@@ -347,6 +351,28 @@ export async function mockRequest<T>(
 	if (method === 'GET' && tasksMatch) {
 		await delay(100);
 		return (mutableTasks[tasksMatch[1]] || []) as T;
+	}
+
+	// GET /workflow-api/plans/{slug}/requirements
+	const requirementsMatch = cleanPath.match(/^\/workflow-api\/plans\/([^/]+)\/requirements$/);
+	if (method === 'GET' && requirementsMatch) {
+		await delay(100);
+		return (mutableRequirements[requirementsMatch[1]] || []) as T;
+	}
+
+	// GET /workflow-api/plans/{slug}/scenarios?requirement_id={reqId}
+	const scenariosMatch = cleanPath.match(/^\/workflow-api\/plans\/([^/]+)\/scenarios$/);
+	if (method === 'GET' && scenariosMatch) {
+		await delay(100);
+		const slug = scenariosMatch[1];
+		const all = mutableScenarios[slug] || [];
+		const requirementId = path.includes('?')
+			? new URLSearchParams(path.split('?')[1]).get('requirement_id')
+			: null;
+		if (requirementId) {
+			return all.filter((s) => s.requirement_id === requirementId) as T;
+		}
+		return all as T;
 	}
 
 	// GET /workflow-api/plans/{slug}/phases

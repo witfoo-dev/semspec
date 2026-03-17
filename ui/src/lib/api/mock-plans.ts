@@ -1,10 +1,12 @@
 /**
- * Mock data for ADR-003 Plan + Tasks workflow model.
+ * Mock data for ADR-024 Plan → Requirement → Scenario → Task hierarchy.
  */
 
 import type { PlanWithStatus } from '$lib/types/plan';
 import type { Task } from '$lib/types/task';
 import type { Phase } from '$lib/types/phase';
+import type { Requirement } from '$lib/types/requirement';
+import type { Scenario } from '$lib/types/scenario';
 
 /**
  * Sample plans including both drafts and approved plans.
@@ -26,7 +28,7 @@ export const mockPlans: PlanWithStatus[] = [
 			do_not_touch: ['internal/core/']
 		},
 		project_id: 'default',
-		stage: 'executing',
+		stage: 'implementing',
 		github: {
 			epic_number: 42,
 			epic_url: 'https://github.com/org/repo/issues/42',
@@ -70,7 +72,7 @@ export const mockPlans: PlanWithStatus[] = [
 			do_not_touch: ['migrations/']
 		},
 		project_id: 'default',
-		stage: 'tasks',
+		stage: 'ready_for_execution',
 		active_loops: [],
 		task_stats: {
 			total: 5,
@@ -157,7 +159,8 @@ export const mockTasks: Record<string, Task[]> = {
 			files: ['internal/user/model.go', 'migrations/002_add_users.sql'],
 			status: 'completed',
 			created_at: '2025-02-08T13:00:00Z',
-			completed_at: '2025-02-08T14:30:00Z'
+			completed_at: '2025-02-08T14:30:00Z',
+			scenario_ids: ['scenario.auth.1.1']
 		},
 		{
 			id: 'task.add-user-authentication.2',
@@ -186,7 +189,8 @@ export const mockTasks: Record<string, Task[]> = {
 			files: ['internal/user/repository.go', 'internal/user/repository_test.go'],
 			status: 'completed',
 			created_at: '2025-02-08T14:30:00Z',
-			completed_at: '2025-02-09T10:00:00Z'
+			completed_at: '2025-02-09T10:00:00Z',
+			scenario_ids: ['scenario.auth.1.2']
 		},
 		{
 			id: 'task.add-user-authentication.3',
@@ -215,7 +219,8 @@ export const mockTasks: Record<string, Task[]> = {
 			files: ['internal/auth/jwt.go', 'internal/auth/jwt_test.go'],
 			status: 'completed',
 			created_at: '2025-02-09T10:00:00Z',
-			completed_at: '2025-02-09T16:00:00Z'
+			completed_at: '2025-02-09T16:00:00Z',
+			scenario_ids: ['scenario.auth.2.1']
 		},
 		{
 			id: 'task.add-user-authentication.4',
@@ -244,6 +249,7 @@ export const mockTasks: Record<string, Task[]> = {
 			files: ['cmd/api/handlers/auth.go', 'cmd/api/handlers/auth_test.go'],
 			status: 'in_progress',
 			created_at: '2025-02-09T16:00:00Z',
+			scenario_ids: ['scenario.auth.3.1'],
 			assigned_loop_id: 'loop_abc123',
 			iteration: 2,
 			max_iterations: 3,
@@ -280,7 +286,8 @@ export const mockTasks: Record<string, Task[]> = {
 			],
 			files: ['cmd/api/handlers/auth.go'],
 			status: 'pending',
-			created_at: '2025-02-09T16:00:00Z'
+			created_at: '2025-02-09T16:00:00Z',
+			scenario_ids: ['scenario.auth.3.2']
 		},
 		{
 			id: 'task.add-user-authentication.6',
@@ -303,7 +310,8 @@ export const mockTasks: Record<string, Task[]> = {
 			],
 			files: ['cmd/api/handlers/auth_integration_test.go'],
 			status: 'pending',
-			created_at: '2025-02-09T16:00:00Z'
+			created_at: '2025-02-09T16:00:00Z',
+			scenario_ids: ['scenario.auth.4.1']
 		},
 		{
 			id: 'task.add-user-authentication.7',
@@ -321,7 +329,8 @@ export const mockTasks: Record<string, Task[]> = {
 			],
 			files: ['docs/api.md'],
 			status: 'pending',
-			created_at: '2025-02-09T16:00:00Z'
+			created_at: '2025-02-09T16:00:00Z',
+			scenario_ids: ['scenario.auth.4.2']
 		}
 	],
 	'refactor-database-layer': [
@@ -341,7 +350,8 @@ export const mockTasks: Record<string, Task[]> = {
 			],
 			files: ['internal/database/config.go'],
 			status: 'pending',
-			created_at: '2025-02-10T17:00:00Z'
+			created_at: '2025-02-10T17:00:00Z',
+			scenario_ids: ['scenario.db.1.1']
 		},
 		{
 			id: 'task.refactor-database-layer.2',
@@ -364,7 +374,8 @@ export const mockTasks: Record<string, Task[]> = {
 			],
 			files: ['internal/database/pool.go', 'internal/database/pool_test.go'],
 			status: 'pending',
-			created_at: '2025-02-10T17:00:00Z'
+			created_at: '2025-02-10T17:00:00Z',
+			scenario_ids: ['scenario.db.2.1']
 		},
 		{
 			id: 'task.refactor-database-layer.3',
@@ -382,7 +393,8 @@ export const mockTasks: Record<string, Task[]> = {
 			],
 			files: ['internal/repository/'],
 			status: 'pending',
-			created_at: '2025-02-10T17:00:00Z'
+			created_at: '2025-02-10T17:00:00Z',
+			scenario_ids: ['scenario.db.2.2']
 		},
 		{
 			id: 'task.refactor-database-layer.4',
@@ -400,7 +412,8 @@ export const mockTasks: Record<string, Task[]> = {
 			],
 			files: ['internal/database/metrics.go'],
 			status: 'pending',
-			created_at: '2025-02-10T17:00:00Z'
+			created_at: '2025-02-10T17:00:00Z',
+			scenario_ids: ['scenario.db.3.1']
 		},
 		{
 			id: 'task.refactor-database-layer.5',
@@ -423,7 +436,8 @@ export const mockTasks: Record<string, Task[]> = {
 			],
 			files: ['test/load/'],
 			status: 'pending',
-			created_at: '2025-02-10T17:00:00Z'
+			created_at: '2025-02-10T17:00:00Z',
+			scenario_ids: ['scenario.db.3.2']
 		}
 	]
 };
@@ -516,6 +530,264 @@ export const mockPhases: Record<string, Phase[]> = {
 			status: 'pending',
 			requires_approval: true,
 			created_at: '2025-02-10T16:00:00Z'
+		}
+	]
+};
+
+/**
+ * Mock requirements per plan slug — ADR-024 Plan → Requirement hierarchy.
+ */
+export const mockRequirements: Record<string, Requirement[]> = {
+	'add-user-authentication': [
+		{
+			id: 'req.auth.1',
+			plan_id: 'plan.add-user-authentication',
+			title: 'User Data Persistence',
+			description:
+				'The system must store user identity data durably with a unique identifier, email address, and hashed credential. The schema must support future profile extensions without breaking existing queries.',
+			status: 'active',
+			created_at: '2025-02-08T09:30:00Z',
+			updated_at: '2025-02-08T09:30:00Z'
+		},
+		{
+			id: 'req.auth.2',
+			plan_id: 'plan.add-user-authentication',
+			title: 'JWT Authentication',
+			description:
+				'The system must issue signed JWT tokens upon successful credential verification and validate those tokens on protected routes. Expired tokens must be rejected with a clear error.',
+			status: 'active',
+			depends_on: ['req.auth.1'],
+			created_at: '2025-02-08T09:30:00Z',
+			updated_at: '2025-02-08T09:30:00Z'
+		},
+		{
+			id: 'req.auth.3',
+			plan_id: 'plan.add-user-authentication',
+			title: 'Auth API Endpoints',
+			description:
+				'The system must expose HTTP endpoints for user login and registration. Each endpoint must validate input, return appropriate HTTP status codes, and include a JWT in the success response.',
+			status: 'active',
+			depends_on: ['req.auth.2'],
+			created_at: '2025-02-08T09:30:00Z',
+			updated_at: '2025-02-08T09:30:00Z'
+		},
+		{
+			id: 'req.auth.4',
+			plan_id: 'plan.add-user-authentication',
+			title: 'Quality Assurance',
+			description:
+				'The auth package must have integration test coverage above 80% and all public endpoints must be documented with request/response examples.',
+			status: 'active',
+			depends_on: ['req.auth.3'],
+			created_at: '2025-02-08T09:30:00Z',
+			updated_at: '2025-02-08T09:30:00Z'
+		}
+	],
+	'refactor-database-layer': [
+		{
+			id: 'req.db.1',
+			plan_id: 'plan.refactor-database-layer',
+			title: 'Connection Pool Configuration',
+			description:
+				'The database package must support configurable pool settings — max open connections, max idle connections, and connection max lifetime — loaded from application configuration at startup.',
+			status: 'active',
+			created_at: '2025-02-10T14:30:00Z',
+			updated_at: '2025-02-10T14:30:00Z'
+		},
+		{
+			id: 'req.db.2',
+			plan_id: 'plan.refactor-database-layer',
+			title: 'Pool Implementation',
+			description:
+				'The system must reuse database connections across requests via a pool. When the pool is at capacity, new requests must wait with a timeout rather than failing immediately. All existing repositories must be migrated to use the pool.',
+			status: 'active',
+			depends_on: ['req.db.1'],
+			created_at: '2025-02-10T14:30:00Z',
+			updated_at: '2025-02-10T14:30:00Z'
+		},
+		{
+			id: 'req.db.3',
+			plan_id: 'plan.refactor-database-layer',
+			title: 'Observability',
+			description:
+				'The pool must expose runtime metrics (active connections, idle connections, wait time) via the metrics endpoint. Pool settings must be validated under load to confirm no connection exhaustion occurs at peak concurrency.',
+			status: 'active',
+			depends_on: ['req.db.2'],
+			created_at: '2025-02-10T14:30:00Z',
+			updated_at: '2025-02-10T14:30:00Z'
+		}
+	]
+};
+
+/**
+ * Mock scenarios per plan slug — ADR-024 Requirement → Scenario hierarchy.
+ */
+export const mockScenarios: Record<string, Scenario[]> = {
+	'add-user-authentication': [
+		{
+			id: 'scenario.auth.1.1',
+			requirement_id: 'req.auth.1',
+			given: 'A clean database with no existing schema',
+			when: 'The migration is applied',
+			then: [
+				'A users table exists with columns: id (UUID), email (unique), password_hash, created_at',
+				'The id column auto-generates a UUID on insert',
+				'The email column enforces a unique constraint'
+			],
+			status: 'passing',
+			created_at: '2025-02-08T09:45:00Z',
+			updated_at: '2025-02-08T14:30:00Z'
+		},
+		{
+			id: 'scenario.auth.1.2',
+			requirement_id: 'req.auth.1',
+			given: 'A valid user struct with email and hashed password',
+			when: 'UserRepository CRUD operations are exercised',
+			then: [
+				'Create persists the user and returns it with a generated ID',
+				'FindByEmail returns the user when the email exists',
+				'FindByEmail returns ErrNotFound when the email does not exist'
+			],
+			status: 'passing',
+			created_at: '2025-02-08T09:45:00Z',
+			updated_at: '2025-02-09T10:00:00Z'
+		},
+		{
+			id: 'scenario.auth.2.1',
+			requirement_id: 'req.auth.2',
+			given: 'A valid user ID',
+			when: 'The JWT service is called',
+			then: [
+				'GenerateToken returns a signed JWT with a 24-hour expiry',
+				'ValidateToken extracts and returns the user ID from a valid JWT',
+				'ValidateToken returns ErrTokenExpired for an expired JWT'
+			],
+			status: 'passing',
+			created_at: '2025-02-08T09:45:00Z',
+			updated_at: '2025-02-09T16:00:00Z'
+		},
+		{
+			id: 'scenario.auth.3.1',
+			requirement_id: 'req.auth.3',
+			given: 'A registered user with known credentials',
+			when: 'POST /auth/login is called',
+			then: [
+				'Valid email and password returns 200 with a JWT token',
+				'An invalid email returns 401 Unauthorized',
+				'A wrong password returns 401 Unauthorized'
+			],
+			status: 'pending',
+			created_at: '2025-02-08T09:45:00Z',
+			updated_at: '2025-02-09T16:00:00Z'
+		},
+		{
+			id: 'scenario.auth.3.2',
+			requirement_id: 'req.auth.3',
+			given: 'The registration endpoint is live',
+			when: 'POST /auth/register is called',
+			then: [
+				'Valid email and password creates a user and returns 201 with user_id',
+				'A duplicate email returns 409 Conflict',
+				'A password shorter than 8 characters returns 400 with a validation error'
+			],
+			status: 'pending',
+			created_at: '2025-02-08T09:45:00Z',
+			updated_at: '2025-02-09T16:00:00Z'
+		},
+		{
+			id: 'scenario.auth.4.1',
+			requirement_id: 'req.auth.4',
+			given: 'A test database and the full auth integration test suite',
+			when: 'Tests run against a real database',
+			then: [
+				'All auth endpoints are exercised end-to-end',
+				'Auth package test coverage is above 80%'
+			],
+			status: 'pending',
+			created_at: '2025-02-08T09:45:00Z',
+			updated_at: '2025-02-09T16:00:00Z'
+		},
+		{
+			id: 'scenario.auth.4.2',
+			requirement_id: 'req.auth.4',
+			given: 'The existing API documentation',
+			when: 'Documentation is updated for the auth feature',
+			then: [
+				'Login and registration endpoints are documented with example request and response payloads',
+				'Error codes and their meanings are described'
+			],
+			status: 'pending',
+			created_at: '2025-02-08T09:45:00Z',
+			updated_at: '2025-02-09T16:00:00Z'
+		}
+	],
+	'refactor-database-layer': [
+		{
+			id: 'scenario.db.1.1',
+			requirement_id: 'req.db.1',
+			given: 'Application configuration containing database pool settings',
+			when: 'The database package initialises',
+			then: [
+				'MaxOpenConns, MaxIdleConns, and ConnMaxLifetime are read from config',
+				'Missing or zero values fall back to documented defaults'
+			],
+			status: 'pending',
+			created_at: '2025-02-10T14:45:00Z',
+			updated_at: '2025-02-10T14:45:00Z'
+		},
+		{
+			id: 'scenario.db.2.1',
+			requirement_id: 'req.db.2',
+			given: 'The pool is initialised with a max of 10 open connections',
+			when: 'Concurrent requests arrive',
+			then: [
+				'Connections are reused across requests rather than created fresh',
+				'A request that arrives when the pool is at capacity waits up to the configured timeout',
+				'A request that times out returns a clear error rather than panicking'
+			],
+			status: 'pending',
+			created_at: '2025-02-10T14:45:00Z',
+			updated_at: '2025-02-10T14:45:00Z'
+		},
+		{
+			id: 'scenario.db.2.2',
+			requirement_id: 'req.db.2',
+			given: 'Existing repository implementations that open direct connections',
+			when: 'Repositories are migrated to use the pool',
+			then: [
+				'All database operations are routed through the pool',
+				'No repository opens a raw connection directly'
+			],
+			status: 'pending',
+			created_at: '2025-02-10T14:45:00Z',
+			updated_at: '2025-02-10T14:45:00Z'
+		},
+		{
+			id: 'scenario.db.3.1',
+			requirement_id: 'req.db.3',
+			given: 'The pool is running and handling requests',
+			when: 'The metrics endpoint is called',
+			then: [
+				'Active connection count is reported',
+				'Idle connection count is reported',
+				'Cumulative wait time is reported'
+			],
+			status: 'pending',
+			created_at: '2025-02-10T14:45:00Z',
+			updated_at: '2025-02-10T14:45:00Z'
+		},
+		{
+			id: 'scenario.db.3.2',
+			requirement_id: 'req.db.3',
+			given: 'A load test scenario simulating 1000 concurrent requests',
+			when: 'The load test runs against the pooled implementation',
+			then: [
+				'No connection exhaustion errors occur during the test',
+				'Optimal pool settings are identified and documented in the test output'
+			],
+			status: 'pending',
+			created_at: '2025-02-10T14:45:00Z',
+			updated_at: '2025-02-10T14:45:00Z'
 		}
 	]
 };
