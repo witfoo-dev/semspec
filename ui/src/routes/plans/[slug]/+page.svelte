@@ -96,24 +96,17 @@
 	const rightPanelShouldOpen = $derived(canShowReviews || activeLoopId !== null);
 
 	onMount(() => {
-		// Initial data fetch
 		plansStore.fetch().then(() => {
 			if (slug) {
-				// Fetch requirements and scenarios
 				fetchRequirements();
-				// Legacy: fetch phases and tasks
 				plansStore.fetchTasks(slug).then((fetched) => {
 					tasks = fetched;
 				});
-				api.phases.list(slug).then((fetched) => {
-					phases = fetched;
-				}).catch(() => {
-					phases = [];
-				});
 			}
 		});
+
+		// Periodically refresh requirements during auto-cascade stages
 		const interval = setInterval(() => {
-			// Periodically refresh requirements during cascade
 			if (plan && ['approved', 'requirements_generated', 'scenarios_generated'].includes(plan.stage)) {
 				fetchRequirements();
 				plansStore.fetch();
@@ -130,6 +123,10 @@
 		if (!slug) return;
 		try {
 			requirements = await api.requirements.list(slug);
+			// Auto-fetch scenarios for each requirement
+			for (const req of requirements) {
+				fetchScenariosForReq(req.id);
+			}
 		} catch {
 			requirements = [];
 		}
