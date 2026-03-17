@@ -5,7 +5,6 @@
 	import Header from '$lib/components/shared/Header.svelte';
 	import BottomChatBar from '$lib/components/chat/BottomChatBar.svelte';
 	import Toast from '$lib/components/shared/Toast.svelte';
-	import SetupWizard from '$lib/components/setup/SetupWizard.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
@@ -38,49 +37,26 @@
 		}
 	}
 
-	// Determine whether to show the wizard (allow-list of active wizard steps)
-	const showWizard = $derived(
+	// Check if project config is missing (warn, don't block)
+	const configWarning = $derived(
 		setupStore.step === 'scaffold' ||
-			setupStore.step === 'scaffolding' ||
 			setupStore.step === 'detection' ||
-			setupStore.step === 'checklist' ||
-			setupStore.step === 'standards' ||
-			setupStore.step === 'error' ||
-			setupStore.step === 'initializing'
+			setupStore.step === 'error'
 	);
 
-	// Show a loading overlay while we check status initially
-	const showInitialLoading = $derived(
-		setupStore.step === 'loading' || setupStore.step === 'detecting'
-	);
-
-	// Mark hydration complete for e2e tests
+	// Mark hydration complete for e2e tests and initialize connections
 	onMount(() => {
 		document.body.classList.add('hydrated');
-		// Check if this project needs initialization
 		setupStore.checkStatus();
-	});
 
-	// Apply reduced motion setting
-	$effect(() => {
-		if (settingsStore.reducedMotion) {
-			document.documentElement.classList.add('reduced-motion');
-		} else {
-			document.documentElement.classList.remove('reduced-motion');
-		}
-	});
-
-	// Initialize connections on mount
-	$effect(() => {
+		// Initialize SSE and data connections (runs once)
 		activityStore.connect();
 		questionsStore.connect();
 		loopsStore.fetch();
 		systemStore.fetch();
 		plansStore.fetch();
 
-		// Subscribe to activity events for chat responses
 		const unsubscribe = activityStore.onEvent((event) => {
-			console.log('[layout] activity event received:', event.type);
 			messagesStore.handleActivityEvent(event);
 		});
 
@@ -98,68 +74,63 @@
 			clearInterval(interval);
 		};
 	});
+
+	// Apply reduced motion setting (reactive — responds to preference changes)
+	$effect(() => {
+		if (settingsStore.reducedMotion) {
+			document.documentElement.classList.add('reduced-motion');
+		} else {
+			document.documentElement.classList.remove('reduced-motion');
+		}
+	});
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
-<!-- Setup wizard takes over the full viewport when the project is not initialized -->
-{#if showWizard}
-	<SetupWizard />
-{:else if showInitialLoading}
-	<!-- Brief loading state while checking project status -->
-	<div class="init-loading" role="status" aria-live="polite">
-		<Icon name="loader" size={24} class="spin" />
-		<span>Loading...</span>
-	</div>
-{:else}
-	<div class="app-layout">
-		<Sidebar currentPath={page.url.pathname} />
+<div class="app-layout">
+	<Sidebar currentPath={page.url.pathname} />
 
-		<!-- Mobile sidebar backdrop -->
-		{#if sidebarStore.isOpen}
-			<button
-				class="sidebar-backdrop"
-				onclick={() => sidebarStore.close()}
-				aria-label="Close navigation"
-			></button>
+	<!-- Mobile sidebar backdrop -->
+	{#if sidebarStore.isOpen}
+		<button
+			class="sidebar-backdrop"
+			onclick={() => sidebarStore.close()}
+			aria-label="Close navigation"
+		></button>
+	{/if}
+
+	<div class="main-area">
+		<!-- Mobile hamburger button -->
+		<button
+			class="hamburger-btn"
+			onclick={() => sidebarStore.open()}
+			aria-label="Open navigation"
+			aria-expanded={sidebarStore.isOpen}
+		>
+			<Icon name="menu" size={24} />
+		</button>
+
+		<Header />
+
+		<!-- Config warning banner (non-blocking) -->
+		{#if configWarning}
+			<div class="config-warning" role="alert">
+				<Icon name="alert-triangle" size={16} />
+				<span>Project not fully configured — checklist or standards missing. Some features may be limited.</span>
+			</div>
 		{/if}
 
-		<div class="main-area">
-			<!-- Mobile hamburger button -->
-			<button
-				class="hamburger-btn"
-				onclick={() => sidebarStore.open()}
-				aria-label="Open navigation"
-				aria-expanded={sidebarStore.isOpen}
-			>
-				<Icon name="menu" size={24} />
-			</button>
+		<main class="content">
+			{@render children()}
+		</main>
 
-			<Header />
-
-			<main class="content">
-				{@render children()}
-			</main>
-
-			<!-- Persistent bottom chat bar (replaces ChatDrawer overlay) -->
-			<BottomChatBar />
-			<Toast />
-		</div>
+		<!-- Persistent bottom chat bar -->
+		<BottomChatBar />
+		<Toast />
 	</div>
-{/if}
+</div>
 
 <style>
-	.init-loading {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: var(--space-3);
-		height: 100vh;
-		color: var(--color-text-muted);
-		font-size: var(--font-size-sm);
-		background: var(--color-bg-primary);
-	}
-
 	:global(.spin) {
 		animation: spin 1s linear infinite;
 	}
@@ -189,6 +160,17 @@
 	.content {
 		flex: 1;
 		overflow: auto;
+	}
+
+	.config-warning {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-4);
+		background: var(--color-warning-muted);
+		color: var(--color-warning);
+		font-size: var(--font-size-xs);
+		border-bottom: 1px solid var(--color-warning);
 	}
 
 	/* Mobile hamburger button - hidden on desktop */
