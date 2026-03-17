@@ -340,7 +340,22 @@
 				</div>
 			{/if}
 		</div>
-		<div class="header-right"></div>
+		<div class="header-right">
+			{#if plan}
+				{#if pipeline && plan.approved}
+					<PipelineIndicator
+						plan={pipeline.plan}
+						requirements={pipeline.requirements}
+						execute={pipeline.execute}
+					/>
+				{/if}
+				<ActionBar
+					{plan}
+					onPromote={handlePromote}
+					onExecute={handleExecute}
+				/>
+			{/if}
+		</div>
 	</header>
 
 	{#if !plan}
@@ -392,18 +407,9 @@
 
 				{#snippet centerPanel()}
 					<div class="center-content">
-						{#if pipeline && plan.approved}
-							<div class="pipeline-section">
-								<PipelineIndicator
-									plan={pipeline.plan}
-									requirements={pipeline.requirements}
-									execute={pipeline.execute}
-								/>
-								{#if plan.active_loops && plan.active_loops.length > 0}
-									<div class="agent-pipeline-section">
-										<AgentPipelineView slug={plan.slug} loops={plan.active_loops} />
-									</div>
-								{/if}
+						{#if plan.active_loops && plan.active_loops.length > 0}
+							<div class="agent-pipeline-section">
+								<AgentPipelineView slug={plan.slug} loops={plan.active_loops} />
 							</div>
 						{/if}
 
@@ -413,12 +419,6 @@
 								taskDescription={activeRejection.task.description}
 							/>
 						{/if}
-
-						<ActionBar
-							{plan}
-							onPromote={handlePromote}
-							onExecute={handleExecute}
-						/>
 
 						<div class="detail-panel">
 							<PlanDetailPanel
@@ -497,10 +497,16 @@
 		flex-shrink: 0;
 	}
 
-	.header-left,
-	.header-right {
+	.header-left {
 		flex-shrink: 0;
 		min-width: 150px;
+	}
+
+	.header-right {
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
 	}
 
 	.header-center {
@@ -657,13 +663,6 @@
 		height: 100%;
 		overflow: auto;
 		padding: var(--space-4);
-	}
-
-	.pipeline-section {
-		padding-bottom: var(--space-4);
-		margin-bottom: var(--space-4);
-		border-bottom: 1px solid var(--color-border);
-		flex-shrink: 0;
 	}
 
 	.agent-pipeline-section {

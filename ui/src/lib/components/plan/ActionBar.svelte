@@ -98,8 +98,6 @@
 	.action-bar {
 		display: flex;
 		gap: var(--space-3);
-		padding: var(--space-4) 0;
-		margin-bottom: var(--space-4);
 		flex-wrap: wrap;
 		align-items: center;
 	}
@@ -108,7 +106,7 @@
 		display: inline-flex;
 		align-items: center;
 		gap: var(--space-2);
-		padding: var(--space-3) var(--space-5);
+		padding: var(--space-2) var(--space-4);
 		border: none;
 		border-radius: var(--radius-md);
 		font-size: var(--font-size-sm);
