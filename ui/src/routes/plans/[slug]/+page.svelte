@@ -414,8 +414,8 @@
 										{plan}
 										onPromote={handlePromote}
 										onExecute={handleExecute}
-									onReplay={handleReplay}
-	/>
+										onReplay={handleReplay}
+									/>
 								</div>
 							</div>
 						{:else if !plan.approved && plan.goal}
@@ -426,8 +426,8 @@
 										{plan}
 										onPromote={handlePromote}
 										onExecute={handleExecute}
-									onReplay={handleReplay}
-	/>
+										onReplay={handleReplay}
+									/>
 								</div>
 							</div>
 						{/if}

@@ -37,6 +37,11 @@
 			['ready_for_execution', 'tasks_approved', 'tasks', 'tasks_generated'].includes(plan.stage)
 	);
 
+	// Show executing status when plan is actively running
+	const isExecuting = $derived(
+		plan.approved && ['implementing', 'executing'].includes(plan.stage)
+	);
+
 	// Replay when plan has failed or been escalated
 	const showReplay = $derived(
 		plan.approved && ['failed'].includes(plan.stage) && !!onReplay
@@ -75,7 +80,7 @@
 	}
 </script>
 
-{#if showApprovePlan || isCascading || showExecute || showReplay}
+{#if showApprovePlan || isCascading || showExecute || isExecuting || showReplay || plan.stage === 'complete'}
 	<div class="action-bar">
 		{#if showApprovePlan}
 			<button
@@ -106,6 +111,20 @@
 				<Icon name="play" size={16} />
 				<span>Start Execution</span>
 			</button>
+		{/if}
+
+		{#if isExecuting}
+			<div class="execution-status" role="status">
+				<Icon name="loader" size={16} />
+				<span>Executing...</span>
+			</div>
+		{/if}
+
+		{#if plan.stage === 'complete'}
+			<div class="complete-status" role="status">
+				<Icon name="check-circle" size={16} />
+				<span>Complete</span>
+			</div>
 		{/if}
 
 		{#if showReplay}
@@ -210,8 +229,32 @@
 		color: var(--color-accent);
 	}
 
-	.cascade-status :global(svg) {
+	.cascade-status :global(svg),
+	.execution-status :global(svg) {
 		animation: spin 1s linear infinite;
+	}
+
+	.execution-status {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-4);
+		background: var(--color-success-muted);
+		border-radius: var(--radius-md);
+		font-size: var(--font-size-sm);
+		color: var(--color-success);
+	}
+
+	.complete-status {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-4);
+		background: var(--color-success-muted);
+		border-radius: var(--radius-md);
+		font-size: var(--font-size-sm);
+		color: var(--color-success);
+		font-weight: var(--font-weight-medium);
 	}
 
 	@media (max-width: 600px) {
