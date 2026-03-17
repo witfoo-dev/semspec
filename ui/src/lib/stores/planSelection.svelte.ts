@@ -30,8 +30,8 @@ export interface ChatContext {
 class PlanSelectionStore {
 	selection = $state<PlanSelection | null>(null);
 
-	// Cache for labels to avoid recomputation
-	private labelCache = $state<Map<string, string>>(new Map());
+	// Plain Map — not reactive since labels are only used for display lookup
+	private labelCache = new Map<string, string>();
 
 	selectPlan(slug: string): void {
 		this.selection = {

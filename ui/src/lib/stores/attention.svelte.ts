@@ -15,23 +15,16 @@ export type AttentionType =
  * Store for items requiring human attention.
  * Derives attention items from plans, loops, and questions stores.
  *
- * Attention sources:
- * - Plans with stage 'tasks' → ready to execute
- * - Plans with active rejections → rejection
- * - Loops in 'failed' state → task_failed
- *
- * Note: Questions are surfaced via toasts and inline chat messages, not attention items.
+ * All computed properties use $derived to cache results and avoid
+ * creating new references on every template read.
  */
 class AttentionStore {
-	/**
-	 * All attention items derived from other stores
-	 */
-	get items(): AttentionItem[] {
-		const items: AttentionItem[] = [];
+	items = $derived.by((): AttentionItem[] => {
+		const result: AttentionItem[] = [];
 
 		// Plans ready to execute (tasks approved)
 		for (const plan of plansStore.all.filter((p) => p.stage === 'tasks_approved')) {
-			items.push({
+			result.push({
 				type: 'approval_needed',
 				plan_slug: plan.slug,
 				title: `Ready to execute "${plan.slug}"`,
@@ -46,7 +39,7 @@ class AttentionStore {
 			const tasks = plansStore.getTasks(plan.slug);
 			const rejectedTask = tasks.find((t) => t.rejection && t.status === 'in_progress');
 			if (rejectedTask && rejectedTask.rejection) {
-				items.push({
+				result.push({
 					type: 'rejection',
 					plan_slug: plan.slug,
 					title: `Task rejected in "${plan.slug}"`,
@@ -59,12 +52,11 @@ class AttentionStore {
 
 		// Failed loops
 		for (const loop of loopsStore.all.filter((l) => l.state === 'failed')) {
-			// Try to find the plan slug from active plans
 			const plan = plansStore.all.find((p) =>
 				p.active_loops?.some((al) => al.loop_id === loop.loop_id)
 			);
 
-			items.push({
+			result.push({
 				type: 'task_failed',
 				loop_id: loop.loop_id,
 				plan_slug: plan?.slug,
@@ -75,23 +67,14 @@ class AttentionStore {
 			});
 		}
 
-		// Sort by created_at descending (newest first)
-		return items.sort(
+		return result.sort(
 			(a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
 		);
-	}
+	});
 
-	/**
-	 * Count of attention items (for badge display)
-	 */
-	get count(): number {
-		return this.items.length;
-	}
+	count = $derived(this.items.length);
 
-	/**
-	 * Items grouped by type
-	 */
-	get byType(): Record<AttentionType, AttentionItem[]> {
+	byType = $derived.by((): Record<AttentionType, AttentionItem[]> => {
 		const grouped: Record<AttentionType, AttentionItem[]> = {
 			approval_needed: [],
 			task_failed: [],
@@ -104,25 +87,16 @@ class AttentionStore {
 		}
 
 		return grouped;
-	}
+	});
 
-	/**
-	 * Check if there are any items of a specific type
-	 */
 	hasType(type: AttentionType): boolean {
 		return this.items.some((i) => i.type === type);
 	}
 
-	/**
-	 * Get items for a specific plan
-	 */
 	forPlan(slug: string): AttentionItem[] {
 		return this.items.filter((i) => i.plan_slug === slug);
 	}
 
-	/**
-	 * Get items for a specific change (alias for forPlan for backwards compatibility)
-	 */
 	forChange(slug: string): AttentionItem[] {
 		return this.forPlan(slug);
 	}

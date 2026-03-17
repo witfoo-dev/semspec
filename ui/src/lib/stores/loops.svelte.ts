@@ -6,31 +6,41 @@ class LoopsStore {
 	loading = $state(false);
 	error = $state<string | null>(null);
 
-	get active(): Loop[] {
-		return this.all.filter((l) => ['pending', 'executing', 'paused'].includes(l.state));
-	}
+	active = $derived(
+		this.all.filter((l) => ['pending', 'executing', 'paused'].includes(l.state))
+	);
 
-	get paused(): Loop[] {
-		return this.all.filter((l) => l.state === 'paused');
-	}
-
-	get completedToday(): number {
-		const today = new Date().toDateString();
-		return this.all.filter(
-			(l) =>
-				l.state === 'complete' &&
-				l.created_at &&
-				new Date(l.created_at).toDateString() === today
-		).length;
-	}
+	paused = $derived(this.all.filter((l) => l.state === 'paused'));
 
 	async fetch(): Promise<void> {
 		this.loading = true;
 		this.error = null;
 
 		try {
-			// Backend returns Loop[] directly (not wrapped)
-			this.all = await api.router.getLoops();
+			const fetched = await api.router.getLoops();
+			if (!Array.isArray(fetched)) return;
+
+			// Reconcile in-place to avoid unnecessary re-renders
+			const fetchedById = new Map(fetched.map((l) => [l.loop_id, l]));
+			const existingIds = new Set(this.all.map((l) => l.loop_id));
+
+			const filtered = this.all.filter((l) => fetchedById.has(l.loop_id));
+			for (const existing of filtered) {
+				const updated = fetchedById.get(existing.loop_id);
+				if (updated) Object.assign(existing, updated);
+			}
+
+			let added = false;
+			for (const loop of fetched) {
+				if (!existingIds.has(loop.loop_id)) {
+					filtered.push(loop);
+					added = true;
+				}
+			}
+
+			if (added || filtered.length !== this.all.length) {
+				this.all = filtered;
+			}
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to fetch loops';
 		} finally {

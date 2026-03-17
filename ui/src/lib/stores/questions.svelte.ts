@@ -19,21 +19,10 @@ class QuestionsStore {
 	private unsubscribe: (() => void) | null = null;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-	get pending(): Question[] {
-		return (this.all ?? []).filter((q) => q.status === 'pending');
-	}
-
-	get answered(): Question[] {
-		return (this.all ?? []).filter((q) => q.status === 'answered');
-	}
-
-	get timedOut(): Question[] {
-		return (this.all ?? []).filter((q) => q.status === 'timeout');
-	}
-
-	get blocking(): Question[] {
-		return this.pending.filter((q) => q.urgency === 'blocking');
-	}
+	pending = $derived((this.all ?? []).filter((q) => q.status === 'pending'));
+	answered = $derived((this.all ?? []).filter((q) => q.status === 'answered'));
+	timedOut = $derived((this.all ?? []).filter((q) => q.status === 'timeout'));
+	blocking = $derived(this.pending.filter((q) => q.urgency === 'blocking'));
 
 	/**
 	 * Connect to the questions SSE stream for real-time updates.

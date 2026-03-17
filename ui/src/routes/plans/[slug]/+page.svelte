@@ -106,10 +106,10 @@
 		});
 
 		// Periodically refresh requirements during auto-cascade stages
+		// (plansStore.fetch is handled by the layout's 30s interval — don't duplicate)
 		const interval = setInterval(() => {
 			if (plan && ['approved', 'requirements_generated', 'scenarios_generated'].includes(plan.stage)) {
 				fetchRequirements();
-				plansStore.fetch();
 			}
 		}, 5000);
 

@@ -4,15 +4,9 @@ import type { Task } from '$lib/types/task';
 
 /**
  * Store for ADR-003 Plan + Tasks workflow.
- * Replaces the old changesStore.
  *
- * API endpoints:
- * - GET /workflow-api/plans
- * - GET /workflow-api/plans/{slug}
- * - GET /workflow-api/plans/{slug}/tasks
- * - POST /workflow-api/plans/{slug}/promote
- * - POST /workflow-api/plans/{slug}/tasks/generate
- * - POST /workflow-api/plans/{slug}/execute
+ * All computed properties use $derived to avoid creating new array references
+ * on every read — raw class getters would cause cascading re-renders.
  */
 class PlansStore {
 	all = $state<PlanWithStatus[]>([]);
@@ -21,31 +15,25 @@ class PlansStore {
 	error = $state<string | null>(null);
 	selectedSlug = $state<string | null>(null);
 
-	/**
-	 * Draft plans (not yet approved)
-	 */
-	get drafts(): PlanWithStatus[] {
-		return this.all.filter((p) => !p.approved);
-	}
+	/** Draft plans (not yet approved) */
+	drafts = $derived(this.all.filter((p) => !p.approved));
 
-	/**
-	 * Approved plans
-	 */
-	get approved(): PlanWithStatus[] {
-		return this.all.filter((p) => p.approved);
-	}
+	/** Approved plans */
+	approved = $derived(this.all.filter((p) => p.approved));
 
-	/**
-	 * Active plans (not complete or failed)
-	 */
-	get active(): PlanWithStatus[] {
-		return this.all.filter((p) => !['complete', 'failed'].includes(p.stage));
-	}
+	/** Active plans (not complete or failed) */
+	active = $derived(this.all.filter((p) => !['complete', 'failed'].includes(p.stage)));
 
-	/**
-	 * Plans grouped by stage
-	 */
-	get byStage(): Record<PlanStage, PlanWithStatus[]> {
+	/** Plans currently executing */
+	executing = $derived(
+		this.all.filter((p) => p.stage === 'implementing' || p.stage === 'executing')
+	);
+
+	/** Plans with active loops */
+	withActiveLoops = $derived(this.all.filter((p) => (p.active_loops?.length ?? 0) > 0));
+
+	/** Plans grouped by stage */
+	byStage = $derived.by((): Record<PlanStage, PlanWithStatus[]> => {
 		const grouped: Record<PlanStage, PlanWithStatus[]> = {
 			draft: [],
 			drafting: [],
@@ -77,21 +65,7 @@ class PlansStore {
 		}
 
 		return grouped;
-	}
-
-	/**
-	 * Plans currently executing
-	 */
-	get executing(): PlanWithStatus[] {
-		return this.all.filter((p) => p.stage === 'implementing' || p.stage === 'executing');
-	}
-
-	/**
-	 * Plans with active loops
-	 */
-	get withActiveLoops(): PlanWithStatus[] {
-		return this.all.filter((p) => (p.active_loops?.length ?? 0) > 0);
-	}
+	});
 
 	/**
 	 * Get a single plan by slug
@@ -101,14 +75,41 @@ class PlansStore {
 	}
 
 	/**
-	 * Fetch all plans
+	 * Fetch all plans with in-place reconciliation to avoid unnecessary re-renders.
 	 */
 	async fetch(): Promise<void> {
 		this.loading = true;
 		this.error = null;
 
 		try {
-			this.all = await api.plans.list();
+			const fetched = await api.plans.list();
+			if (!Array.isArray(fetched)) return;
+
+			const fetchedBySlug = new Map(fetched.map((p) => [p.slug, p]));
+			const existingSlugs = new Set(this.all.map((p) => p.slug));
+
+			// Remove deleted plans
+			const filtered = this.all.filter((p) => fetchedBySlug.has(p.slug));
+
+			// Update existing plans in-place (preserves Svelte proxy references)
+			for (const existing of filtered) {
+				const updated = fetchedBySlug.get(existing.slug);
+				if (updated) Object.assign(existing, updated);
+			}
+
+			// Add new plans
+			let added = false;
+			for (const plan of fetched) {
+				if (!existingSlugs.has(plan.slug)) {
+					filtered.push(plan);
+					added = true;
+				}
+			}
+
+			// Only replace the array if items were added or removed
+			if (added || filtered.length !== this.all.length) {
+				this.all = filtered;
+			}
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to fetch plans';
 		} finally {
@@ -146,7 +147,6 @@ class PlansStore {
 
 		try {
 			const updated = await api.plans.promote(slug);
-			// Update local state with response
 			Object.assign(plan, updated);
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to approve plan';
@@ -163,7 +163,6 @@ class PlansStore {
 		try {
 			const tasks = await api.plans.generateTasks(slug);
 			this.tasksByPlan[slug] = tasks;
-			// Update local state
 			plan.stage = 'tasks_generated';
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to generate tasks';
@@ -175,11 +174,10 @@ class PlansStore {
 	 */
 	async execute(slug: string): Promise<void> {
 		const plan = this.getBySlug(slug);
-		if (!plan || plan.stage !== 'tasks_approved') return;
+		if (!plan) return;
 
 		try {
 			const updated = await api.plans.execute(slug);
-			// Update local state with response
 			Object.assign(plan, updated);
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to start execution';

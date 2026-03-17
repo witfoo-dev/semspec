@@ -13,12 +13,7 @@
 	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
 	import { kanbanStore } from '$lib/stores/kanban.svelte';
 	import type { KanbanCardItem, KanbanStatus } from '$lib/types/kanban';
-	import { onMount } from 'svelte';
-
-	onMount(() => {
-		plansStore.fetch();
-	});
-
+	// plansStore.fetch() is handled by the layout — no duplicate needed here
 	const activePlans = $derived(plansStore.active);
 	const activeLoopsCount = $derived(loopsStore.active.length);
 	const isHealthy = $derived(systemStore.healthy);
