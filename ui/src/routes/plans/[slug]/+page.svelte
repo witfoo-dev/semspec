@@ -178,6 +178,12 @@
 		}
 	}
 
+	async function handleReplay() {
+		if (plan) {
+			await plansStore.execute(plan.slug);
+		}
+	}
+
 	async function handleRefreshPlan() {
 		if (slug) {
 			await plansStore.fetch();
@@ -340,22 +346,7 @@
 				</div>
 			{/if}
 		</div>
-		<div class="header-right">
-			{#if plan}
-				{#if pipeline && plan.approved}
-					<PipelineIndicator
-						plan={pipeline.plan}
-						requirements={pipeline.requirements}
-						execute={pipeline.execute}
-					/>
-				{/if}
-				<ActionBar
-					{plan}
-					onPromote={handlePromote}
-					onExecute={handleExecute}
-				/>
-			{/if}
-		</div>
+		<div class="header-right"></div>
 	</header>
 
 	{#if !plan}
@@ -407,6 +398,40 @@
 
 				{#snippet centerPanel()}
 					<div class="center-content">
+						{#if plan.approved}
+							<div class="pipeline-bar">
+								<div class="pipeline-left">
+									{#if pipeline}
+										<PipelineIndicator
+											plan={pipeline.plan}
+											requirements={pipeline.requirements}
+											execute={pipeline.execute}
+										/>
+									{/if}
+								</div>
+								<div class="pipeline-right">
+									<ActionBar
+										{plan}
+										onPromote={handlePromote}
+										onExecute={handleExecute}
+									onReplay={handleReplay}
+	/>
+								</div>
+							</div>
+						{:else if !plan.approved && plan.goal}
+							<div class="pipeline-bar">
+								<div class="pipeline-left"></div>
+								<div class="pipeline-right">
+									<ActionBar
+										{plan}
+										onPromote={handlePromote}
+										onExecute={handleExecute}
+									onReplay={handleReplay}
+	/>
+								</div>
+							</div>
+						{/if}
+
 						{#if plan.active_loops && plan.active_loops.length > 0}
 							<div class="agent-pipeline-section">
 								<AgentPipelineView slug={plan.slug} loops={plan.active_loops} />
@@ -504,9 +529,7 @@
 
 	.header-right {
 		flex-shrink: 0;
-		display: flex;
-		align-items: center;
-		gap: var(--space-3);
+		min-width: 150px;
 	}
 
 	.header-center {
@@ -663,6 +686,27 @@
 		height: 100%;
 		overflow: auto;
 		padding: var(--space-4);
+	}
+
+	.pipeline-bar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-4);
+		padding: var(--space-3) var(--space-4);
+		background: var(--color-bg-tertiary);
+		border-radius: var(--radius-lg);
+		margin-bottom: var(--space-4);
+		flex-shrink: 0;
+	}
+
+	.pipeline-left {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.pipeline-right {
+		flex-shrink: 0;
 	}
 
 	.agent-pipeline-section {

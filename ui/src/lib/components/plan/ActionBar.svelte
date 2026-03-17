@@ -6,9 +6,10 @@
 		plan: PlanWithStatus;
 		onPromote: () => Promise<void>;
 		onExecute: () => Promise<void>;
+		onReplay?: () => Promise<void>;
 	}
 
-	let { plan, onPromote, onExecute }: Props = $props();
+	let { plan, onPromote, onExecute, onReplay }: Props = $props();
 
 	// Button visibility logic
 	const showApprovePlan = $derived(!plan.approved && !!plan.goal);
@@ -36,9 +37,15 @@
 			['ready_for_execution', 'tasks_approved', 'tasks', 'tasks_generated'].includes(plan.stage)
 	);
 
+	// Replay when plan has failed or been escalated
+	const showReplay = $derived(
+		plan.approved && ['failed'].includes(plan.stage) && !!onReplay
+	);
+
 	// Loading states
 	let promoteLoading = $state(false);
 	let executeLoading = $state(false);
+	let replayLoading = $state(false);
 
 	async function handlePromote() {
 		promoteLoading = true;
@@ -57,9 +64,18 @@
 			executeLoading = false;
 		}
 	}
+
+	async function handleReplay() {
+		replayLoading = true;
+		try {
+			await onReplay?.();
+		} finally {
+			replayLoading = false;
+		}
+	}
 </script>
 
-{#if showApprovePlan || isCascading || showExecute}
+{#if showApprovePlan || isCascading || showExecute || showReplay}
 	<div class="action-bar">
 		{#if showApprovePlan}
 			<button
@@ -89,6 +105,18 @@
 			>
 				<Icon name="play" size={16} />
 				<span>Start Execution</span>
+			</button>
+		{/if}
+
+		{#if showReplay}
+			<button
+				class="action-btn btn-warning"
+				onclick={handleReplay}
+				disabled={replayLoading}
+				aria-busy={replayLoading}
+			>
+				<Icon name="refresh-cw" size={16} />
+				<span>Replay</span>
 			</button>
 		{/if}
 	</div>
@@ -164,6 +192,11 @@
 	.btn-success {
 		background: var(--color-success);
 		color: white;
+	}
+
+	.btn-warning {
+		background: var(--color-warning);
+		color: var(--color-bg-primary);
 	}
 
 	.cascade-status {
