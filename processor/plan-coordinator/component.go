@@ -910,10 +910,14 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 
 	switch verdict {
 	case "approved":
-		// Write approved phase — rules handle status=completed + publish event.
+		// Write approved phase — rules handle status=completed.
 		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseApproved); err != nil {
 			c.logger.Error("Failed to write phase triple", "error", err)
 		}
+
+		// Publish typed PlanApprovedEvent for workflow-api to update plan file.
+		c.publishPlanApprovedEvent(ctx, exec, verdict, summary)
+
 		exec.terminated = true
 		c.coordinationsCompleted.Add(1)
 		c.cleanupExecutionLocked(exec)
@@ -940,6 +944,43 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 			"verdict", verdict, "slug", exec.Slug)
 		c.markErrorLocked(ctx, exec, fmt.Sprintf("unknown reviewer verdict: %s", verdict))
 	}
+}
+
+// publishPlanApprovedEvent sends a typed PlanApprovedEvent to the WORKFLOW stream
+// so workflow-api can update the plan file on disk.
+func (c *Component) publishPlanApprovedEvent(ctx context.Context, exec *coordinationExecution, verdict, summary string) {
+	event := &workflow.PlanApprovedEvent{
+		Slug:    exec.Slug,
+		Verdict: verdict,
+		Summary: summary,
+	}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		c.logger.Error("Failed to marshal PlanApprovedEvent", "error", err)
+		return
+	}
+
+	// Wrap in BaseMessage for ParseReactivePayload compatibility.
+	envelope := struct {
+		Payload json.RawMessage `json:"payload"`
+	}{Payload: data}
+
+	envelopeData, err := json.Marshal(envelope)
+	if err != nil {
+		c.logger.Error("Failed to marshal BaseMessage envelope", "error", err)
+		return
+	}
+
+	subject := workflow.PlanApproved.Pattern
+	if err := c.natsClient.PublishToStream(ctx, subject, envelopeData); err != nil {
+		c.logger.Error("Failed to publish PlanApprovedEvent",
+			"subject", subject, "slug", exec.Slug, "error", err)
+		return
+	}
+
+	c.logger.Info("Published PlanApprovedEvent",
+		"slug", exec.Slug, "subject", subject)
 }
 
 // parseReviewerVerdict extracts verdict and summary from a reviewer result.

@@ -688,9 +688,9 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		c.logger.Warn("Failed to publish plan entity", "slug", plan.Slug, "error", pubErr)
 	}
 
-	// Trigger plan-review-loop workflow (ADR-005 OODA feedback loop).
-	// The workflow-processor handles: planner → reviewer → revise with findings → re-review.
-	requestID, err := c.triggerPlanReviewLoop(ctx, plan, tc.TraceID)
+	// Trigger plan-coordinator for the full plan phase pipeline:
+	// plan → requirements → scenarios → review → approve/escalate.
+	requestID, err := c.triggerPlanCoordinator(ctx, plan, tc.TraceID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -732,42 +732,33 @@ func (c *Component) respondWithExistingPlan(ctx context.Context, w http.Response
 	}
 }
 
-// triggerPlanReviewLoop builds and publishes the plan-review-loop JetStream trigger.
+// triggerPlanCoordinator builds and publishes a plan-coordinator trigger.
 // It returns the generated requestID that callers include in their response.
-func (c *Component) triggerPlanReviewLoop(ctx context.Context, plan *workflow.Plan, traceID string) (string, error) {
+func (c *Component) triggerPlanCoordinator(ctx context.Context, plan *workflow.Plan, traceID string) (string, error) {
 	requestID := uuid.New().String()
 
-	triggerPayload := workflow.NewSemstreamsTrigger(
-		"plan-review-loop", // workflowID
-		"planner",          // role
-		plan.Title,         // prompt
-		requestID,          // requestID
-		plan.Slug,          // slug
-		plan.Title,         // title
-		plan.Title,         // description
-		traceID,            // traceID
-		plan.ProjectID,     // projectID
-		nil,                // scopePatterns
-		false,              // auto
-	)
+	req := &payloads.PlanCoordinatorRequest{
+		RequestID:   requestID,
+		Slug:        plan.Slug,
+		Title:       plan.Title,
+		Description: plan.Title,
+		ProjectID:   plan.ProjectID,
+		TraceID:     traceID,
+	}
 
-	baseMsg := message.NewBaseMessage(
-		workflow.WorkflowTriggerType,
-		triggerPayload,
-		"workflow-api",
-	)
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "workflow-api")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		c.logger.Error("Failed to marshal plan-review-loop trigger", "error", err)
+		c.logger.Error("Failed to marshal plan-coordinator trigger", "error", err)
 		return "", fmt.Errorf("Internal error")
 	}
 
-	if err := c.natsClient.PublishToStream(ctx, "workflow.trigger.plan-review-loop", data); err != nil {
-		c.logger.Error("Failed to trigger plan-review-loop workflow", "error", err)
+	if err := c.natsClient.PublishToStream(ctx, "workflow.trigger.plan-coordinator", data); err != nil {
+		c.logger.Error("Failed to trigger plan-coordinator", "error", err)
 		return "", fmt.Errorf("Failed to start planning")
 	}
 
-	c.logger.Info("Triggered plan-review-loop workflow",
+	c.logger.Info("Triggered plan-coordinator",
 		"request_id", requestID,
 		"slug", plan.Slug,
 		"trace_id", traceID)
