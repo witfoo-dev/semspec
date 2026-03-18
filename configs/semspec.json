@@ -521,6 +521,7 @@
       "enabled": true,
       "config": {
         "rules_files": ["configs/rules/semspec-review/handle-approved.json", "configs/rules/semspec-review/handle-escalated.json", "configs/rules/semspec-review/handle-error.json"],
+        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.*-review.execution.*"]},
         "entity": {
           "pattern": "local.semspec.workflow.*-review.execution.*",
           "watch_buckets": [
@@ -531,7 +532,7 @@
           "inputs": [
             {
               "name": "entity_states",
-              "subject": "ENTITY_STATES.>",
+              "subject": "ENTITY_STATES",
               "type": "kv-watch",
               "bucket": "ENTITY_STATES"
             }
@@ -606,6 +607,7 @@
       "enabled": true,
       "config": {
         "rules_files": ["configs/rules/semspec-task-execution/handle-approved.json", "configs/rules/semspec-task-execution/handle-escalated.json", "configs/rules/semspec-task-execution/handle-error.json"],
+        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.task-execution.execution.*"]},
         "entity": {
           "pattern": "local.semspec.workflow.task-execution.execution.*",
           "watch_buckets": [
@@ -642,6 +644,7 @@
       "enabled": true,
       "config": {
         "rules_files": ["configs/rules/semspec-coordination/handle-completed.json"],
+        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.coordination.execution.*"]},
         "entity": {
           "pattern": "local.semspec.workflow.coordination.execution.*",
           "watch_buckets": [
@@ -794,6 +797,7 @@
       "enabled": true,
       "config": {
         "rules_files": ["configs/rules/semspec-scenario-execution/handle-completed.json", "configs/rules/semspec-scenario-execution/handle-error.json", "configs/rules/semspec-scenario-execution/handle-failed.json"],
+        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.scenario-execution.execution.*"]},
         "entity": {
           "pattern": "local.semspec.workflow.scenario-execution.execution.*",
           "watch_buckets": [
