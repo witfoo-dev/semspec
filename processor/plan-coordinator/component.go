@@ -50,30 +50,47 @@ import (
 
 const (
 	componentName    = "plan-coordinator"
-	componentVersion = "0.2.0"
+	componentVersion = "0.3.0"
 
-	// WorkflowSlugCoordination identifies coordination events in LoopCompletedEvent.
-	WorkflowSlugCoordination = "semspec-coordination"
-
-	// Workflow step constants for planner agent dispatch.
-	workflowStepPlan = "plan"
+	// WorkflowSlugPlan identifies plan phase events in LoopCompletedEvent.
+	WorkflowSlugPlan = "semspec-plan"
 
 	// Phase values written to entity triples.
-	phaseFocusing     = "focusing"
-	phasePlanning     = "planning"
-	phaseSynthesizing = "synthesizing"
-	phaseCompleted    = "completed"
-	phaseError        = "error"
+	// The plan-coordinator advances through these phases sequentially.
+	// Rules react to terminal phases (approved, escalated, error) to set status.
+	phaseFocusing              = "focusing"
+	phasePlanning              = "planning"
+	phaseSynthesizing          = "synthesizing"
+	phasePlanned               = "planned"
+	phaseGeneratingRequirements = "generating_requirements"
+	phaseRequirementsGenerated = "requirements_generated"
+	phaseGeneratingScenarios   = "generating_scenarios"
+	phaseScenariosGenerated    = "scenarios_generated"
+	phaseReviewing             = "reviewing"
+	phaseApproved              = "approved"
+	phaseRevisionNeeded        = "revision_needed"
+	phaseEscalated             = "escalated"
+	phaseAwaitingHuman         = "awaiting_human"
+	phaseError                 = "error"
 
 	// Trigger and completion subjects.
 	subjectCoordinationTrigger = "workflow.trigger.plan-coordinator"
 	subjectLoopCompleted       = "agent.complete.>"
 
-	// Downstream dispatch: typed planner request.
-	subjectPlannerAsync = "workflow.async.planner"
+	// Downstream dispatch: typed requests to processing components.
+	subjectPlannerAsync      = "workflow.async.planner"
+	subjectReqGeneratorAsync = "workflow.async.requirement-generator"
+	subjectScenGeneratorAsync = "workflow.async.scenario-generator"
+	subjectReviewerAsync     = "workflow.async.plan-reviewer"
 
 	// TaskID separator for encoding role::entityID.
 	taskIDSep = "::"
+
+	// Roles for TaskID encoding.
+	rolePlanner          = "planner"
+	roleReqGenerator     = "requirement-generator"
+	roleScenGenerator    = "scenario-generator"
+	roleReviewer         = "reviewer"
 )
 
 // llmCompleter is the subset of the LLM client used by plan-coordinator.
@@ -466,8 +483,14 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 	defer exec.mu.Unlock()
 
 	switch role {
-	case "planner":
+	case rolePlanner:
 		c.handlePlannerCompleteLocked(ctx, event, exec)
+	case roleReqGenerator:
+		c.handleReqGeneratorCompleteLocked(ctx, event, exec)
+	case roleScenGenerator:
+		c.handleScenGeneratorCompleteLocked(ctx, event, exec)
+	case roleReviewer:
+		c.handleReviewerCompleteLocked(ctx, event, exec)
 	default:
 		c.logger.Debug("Unknown completion role", "role", role, "entity_id", entityID)
 	}
@@ -572,21 +595,22 @@ func (c *Component) synthesizeAndCompleteLocked(ctx context.Context, exec *coord
 		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.plan_scope", string(scopeJSON))
 	}
 
-	// Mark completed — rules handle status transition.
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseCompleted); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseCompleted, "error", err)
+	// Plan is synthesized — advance to planned phase.
+	// The plan-coordinator will then dispatch the requirement-generator.
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phasePlanned); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phasePlanned, "error", err)
 	}
 
-	c.coordinationsCompleted.Add(1)
-
-	c.logger.Info("Coordination completed",
+	c.logger.Info("Plan synthesized, advancing to requirement generation",
 		"entity_id", exec.EntityID,
 		"slug", exec.Slug,
 		"planner_count", exec.ExpectedPlanners,
 	)
 
-	c.publishEntity(context.Background(), NewCoordinationEntity(exec).WithPhase(phaseCompleted))
-	c.cleanupExecutionLocked(exec)
+	c.publishEntity(context.Background(), NewCoordinationEntity(exec).WithPhase(phasePlanned))
+
+	// Dispatch requirement generator.
+	c.dispatchRequirementGeneratorLocked(ctx, exec)
 }
 
 // ---------------------------------------------------------------------------
@@ -675,7 +699,7 @@ func (c *Component) dispatchPlannersLocked(ctx context.Context, exec *coordinati
 		req := &payloads.PlannerRequest{
 			ExecutionID:  exec.EntityID,
 			TaskID:       taskID,
-			WorkflowSlug: WorkflowSlugCoordination,
+			WorkflowSlug: WorkflowSlugPlan,
 			RequestID:    exec.RequestID,
 			Slug:         exec.Slug,
 			Title:        exec.Title,
@@ -703,6 +727,240 @@ func (c *Component) dispatchPlannersLocked(ctx context.Context, exec *coordinati
 		)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Pipeline step dispatchers
+// ---------------------------------------------------------------------------
+
+// dispatchRequirementGeneratorLocked dispatches the requirement generator
+// after plan synthesis completes.
+func (c *Component) dispatchRequirementGeneratorLocked(ctx context.Context, exec *coordinationExecution) {
+	if exec.terminated {
+		return
+	}
+
+	taskID := fmt.Sprintf("%s%s%s", roleReqGenerator, taskIDSep, exec.EntityID)
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseGeneratingRequirements); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseGeneratingRequirements, "error", err)
+	}
+
+	req := &payloads.PlannerRequest{
+		ExecutionID:  exec.EntityID,
+		TaskID:       taskID,
+		WorkflowSlug: WorkflowSlugPlan,
+		RequestID:    exec.RequestID,
+		Slug:         exec.Slug,
+		Title:        exec.Title,
+		Description:  exec.Description,
+		ProjectID:    exec.ProjectID,
+		TraceID:      exec.TraceID,
+		LoopID:       exec.LoopID,
+	}
+
+	if err := c.publishBaseMessage(ctx, subjectReqGeneratorAsync, req); err != nil {
+		c.logger.Error("Failed to dispatch requirement generator", "error", err)
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch requirement-generator failed: %v", err))
+		return
+	}
+
+	c.logger.Info("Dispatched requirement-generator",
+		"slug", exec.Slug, "task_id", taskID)
+}
+
+// dispatchScenarioGeneratorLocked dispatches the scenario generator
+// after requirements are generated.
+func (c *Component) dispatchScenarioGeneratorLocked(ctx context.Context, exec *coordinationExecution) {
+	if exec.terminated {
+		return
+	}
+
+	taskID := fmt.Sprintf("%s%s%s", roleScenGenerator, taskIDSep, exec.EntityID)
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseGeneratingScenarios); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseGeneratingScenarios, "error", err)
+	}
+
+	req := &payloads.PlannerRequest{
+		ExecutionID:  exec.EntityID,
+		TaskID:       taskID,
+		WorkflowSlug: WorkflowSlugPlan,
+		RequestID:    exec.RequestID,
+		Slug:         exec.Slug,
+		Title:        exec.Title,
+		Description:  exec.Description,
+		ProjectID:    exec.ProjectID,
+		TraceID:      exec.TraceID,
+		LoopID:       exec.LoopID,
+	}
+
+	if err := c.publishBaseMessage(ctx, subjectScenGeneratorAsync, req); err != nil {
+		c.logger.Error("Failed to dispatch scenario generator", "error", err)
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch scenario-generator failed: %v", err))
+		return
+	}
+
+	c.logger.Info("Dispatched scenario-generator",
+		"slug", exec.Slug, "task_id", taskID)
+}
+
+// dispatchReviewerLocked dispatches the plan reviewer (el jefe) after
+// scenarios are generated.
+func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *coordinationExecution) {
+	if exec.terminated {
+		return
+	}
+
+	taskID := fmt.Sprintf("%s%s%s", roleReviewer, taskIDSep, exec.EntityID)
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
+	}
+
+	req := &payloads.PlanReviewRequest{
+		ExecutionID:  exec.EntityID,
+		TaskID:       taskID,
+		WorkflowSlug: WorkflowSlugPlan,
+		RequestID:    exec.RequestID,
+		Slug:         exec.Slug,
+		ProjectID:    exec.ProjectID,
+		TraceID:      exec.TraceID,
+		LoopID:       exec.LoopID,
+	}
+
+	// Include synthesized plan content if available.
+	if exec.SynthesizedPlan != nil {
+		if planJSON, err := json.Marshal(exec.SynthesizedPlan); err == nil {
+			req.PlanContent = planJSON
+		}
+	}
+
+	if err := c.publishBaseMessage(ctx, subjectReviewerAsync, req); err != nil {
+		c.logger.Error("Failed to dispatch reviewer", "error", err)
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch reviewer failed: %v", err))
+		return
+	}
+
+	c.logger.Info("Dispatched reviewer (el jefe)",
+		"slug", exec.Slug, "task_id", taskID)
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline step completion handlers
+// ---------------------------------------------------------------------------
+
+// handleReqGeneratorCompleteLocked processes requirement generator completion.
+func (c *Component) handleReqGeneratorCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *coordinationExecution) {
+	if exec.terminated {
+		return
+	}
+
+	c.logger.Info("Requirement generator completed",
+		"entity_id", exec.EntityID, "slug", exec.Slug)
+
+	// TODO: Parse requirements from event.Result and write to disk/triples.
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseRequirementsGenerated); err != nil {
+		c.logger.Error("Failed to write phase triple", "error", err)
+	}
+
+	// Advance to scenario generation.
+	c.dispatchScenarioGeneratorLocked(ctx, exec)
+}
+
+// handleScenGeneratorCompleteLocked processes scenario generator completion.
+func (c *Component) handleScenGeneratorCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *coordinationExecution) {
+	if exec.terminated {
+		return
+	}
+
+	c.logger.Info("Scenario generator completed",
+		"entity_id", exec.EntityID, "slug", exec.Slug)
+
+	// TODO: Parse scenarios from event.Result and write to disk/triples.
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseScenariosGenerated); err != nil {
+		c.logger.Error("Failed to write phase triple", "error", err)
+	}
+
+	// Advance to review.
+	c.dispatchReviewerLocked(ctx, exec)
+}
+
+// handleReviewerCompleteLocked processes reviewer (el jefe) completion.
+func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *coordinationExecution) {
+	if exec.terminated {
+		return
+	}
+
+	// Parse the reviewer verdict from the result.
+	verdict, summary := c.parseReviewerVerdict(event.Result)
+
+	c.logger.Info("Reviewer completed",
+		"entity_id", exec.EntityID,
+		"slug", exec.Slug,
+		"verdict", verdict,
+		"summary", summary,
+	)
+
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.review.verdict", verdict)
+	if summary != "" {
+		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.review.summary", summary)
+	}
+
+	switch verdict {
+	case "approved":
+		// Write approved phase — rules handle status=completed + publish event.
+		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseApproved); err != nil {
+			c.logger.Error("Failed to write phase triple", "error", err)
+		}
+		exec.terminated = true
+		c.coordinationsCompleted.Add(1)
+		c.cleanupExecutionLocked(exec)
+
+	case "needs_changes":
+		// Write revision_needed — rules check iteration budget and either
+		// reset to planning or escalate.
+		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseRevisionNeeded); err != nil {
+			c.logger.Error("Failed to write phase triple", "error", err)
+		}
+		// TODO: Implement retry loop — increment iteration, re-dispatch planner
+		// with reviewer feedback. For now, escalate.
+		c.logger.Warn("Revision requested but retry loop not yet implemented, escalating",
+			"slug", exec.Slug)
+		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseEscalated); err != nil {
+			c.logger.Error("Failed to write phase triple", "error", err)
+		}
+		exec.terminated = true
+		c.coordinationsFailed.Add(1)
+		c.cleanupExecutionLocked(exec)
+
+	default:
+		c.logger.Warn("Unknown reviewer verdict, treating as error",
+			"verdict", verdict, "slug", exec.Slug)
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("unknown reviewer verdict: %s", verdict))
+	}
+}
+
+// parseReviewerVerdict extracts verdict and summary from a reviewer result.
+func (c *Component) parseReviewerVerdict(result string) (verdict, summary string) {
+	var parsed struct {
+		Verdict string `json:"verdict"`
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		c.logger.Warn("Failed to parse reviewer result, defaulting to approved", "error", err)
+		return "approved", ""
+	}
+	if parsed.Verdict == "" {
+		return "approved", parsed.Summary
+	}
+	return parsed.Verdict, parsed.Summary
+}
+
+// ---------------------------------------------------------------------------
+// Planner prompt helpers
+// ---------------------------------------------------------------------------
 
 // buildPlannerPrompt constructs the prompt for a focused planner.
 func (c *Component) buildPlannerPrompt(exec *coordinationExecution, focus *FocusArea) string {
