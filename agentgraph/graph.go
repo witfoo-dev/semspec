@@ -437,7 +437,10 @@ func parseAgentFromTriples(agentID string, triples []message.Triple) *workflow.A
 func (h *Helper) ListAgentsByRole(ctx context.Context, role string) ([]*workflow.Agent, error) {
 	prefix := AgentTypePrefix()
 
-	keys, err := h.kv.KeysByPrefix(ctx, prefix)
+	// KeysByPrefix appends ">" to form a NATS wildcard pattern. The prefix must
+	// end with "." so the pattern becomes "...agent.>" (dot-separated wildcard)
+	// rather than "...agent>" (literal suffix that won't match sub-keys).
+	keys, err := h.kv.KeysByPrefix(ctx, prefix+".")
 	if err != nil {
 		return nil, fmt.Errorf("agentgraph: list agents by role: %w", err)
 	}
@@ -861,7 +864,10 @@ func parseTeamFromTriples(teamID string, triples []message.Triple) *workflow.Tea
 func (h *Helper) ListTeams(ctx context.Context) ([]*workflow.Team, error) {
 	prefix := TeamTypePrefix()
 
-	keys, err := h.kv.KeysByPrefix(ctx, prefix)
+	// KeysByPrefix appends ">" to form a NATS wildcard pattern. The prefix must
+	// end with "." so the pattern becomes "...team.>" (dot-separated wildcard)
+	// rather than "...team>" (literal suffix that won't match sub-keys).
+	keys, err := h.kv.KeysByPrefix(ctx, prefix+".")
 	if err != nil {
 		return nil, fmt.Errorf("agentgraph: list teams: %w", err)
 	}
