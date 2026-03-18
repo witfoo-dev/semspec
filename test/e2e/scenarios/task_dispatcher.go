@@ -150,9 +150,9 @@ func (s *TaskDispatcherScenario) stageCreatePlanWithTasks(ctx context.Context, r
 		return fmt.Errorf("plan creation failed: %s", resp.Error)
 	}
 
-	// Wait for plan.json to be created
-	if err := s.fs.WaitForPlanFile(ctx, s.planSlug, "plan.json"); err != nil {
-		return fmt.Errorf("wait for plan.json: %w", err)
+	// Wait for plan to be available via HTTP API
+	if _, err := s.http.WaitForPlanCreated(ctx, s.planSlug); err != nil {
+		return fmt.Errorf("wait for plan: %w", err)
 	}
 
 	// Create tasks with dependency chain:

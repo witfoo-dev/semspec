@@ -13,6 +13,28 @@ import (
 // executionOrchestratorSchema is the pre-generated schema for this component.
 var executionOrchestratorSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 
+// TeamsConfig configures the team-based execution mode.
+type TeamsConfig struct {
+	// Enabled activates team-based execution with red team challenges.
+	// When false (default), the pipeline uses the existing 4-stage individual mode.
+	Enabled bool `json:"enabled" schema:"type:bool,description:Enable team-based execution with red team challenges,category:basic,default:false"`
+
+	// Roster defines the teams and their member roles/models.
+	Roster []TeamRosterEntry `json:"roster,omitempty" schema:"type:array,description:Team definitions with member roles,category:basic"`
+}
+
+// TeamRosterEntry defines a single team in the roster.
+type TeamRosterEntry struct {
+	Name    string            `json:"name"`
+	Members []TeamMemberEntry `json:"members"`
+}
+
+// TeamMemberEntry defines a single agent member of a team.
+type TeamMemberEntry struct {
+	Role  string `json:"role"`  // "tester", "builder", "reviewer"
+	Model string `json:"model"` // model endpoint name
+}
+
 // Config holds the configuration for the execution-orchestrator component.
 type Config struct {
 	// MaxIterations is the maximum number of developer→validate→review cycles
@@ -50,6 +72,10 @@ type Config struct {
 
 	// Ports contains the input and output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
+
+	// Teams configures team-based execution. When Teams.Enabled is false (default),
+	// the pipeline uses the existing 4-stage individual agent mode.
+	Teams *TeamsConfig `json:"teams,omitempty" schema:"type:object,description:Team-based execution configuration,category:basic"`
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -129,6 +155,16 @@ func (c *Config) Validate() error {
 	if c.IndexingBudgetStr != "" {
 		if _, err := time.ParseDuration(c.IndexingBudgetStr); err != nil {
 			return fmt.Errorf("invalid indexing_budget %q: %w", c.IndexingBudgetStr, err)
+		}
+	}
+	if c.Teams != nil && c.Teams.Enabled {
+		if len(c.Teams.Roster) < 2 {
+			return fmt.Errorf("teams.roster must contain at least 2 teams when teams.enabled is true (need blue + red), got %d", len(c.Teams.Roster))
+		}
+		for i, team := range c.Teams.Roster {
+			if len(team.Members) == 0 {
+				return fmt.Errorf("teams.roster[%d] (%q) must have at least 1 member", i, team.Name)
+			}
 		}
 	}
 	return nil

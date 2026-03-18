@@ -1062,43 +1062,22 @@ func (s *ContextPressureScenario) stageCreatePlan(ctx context.Context, result *R
 	return nil
 }
 
-// stageWaitForPlan waits for the plan to be approved after the rejection cycle.
+// stageWaitForPlan waits for the plan to have a goal from the LLM, then polls
+// the API until the plan is approved after the rejection cycle.
 // This scenario has ONE rejection: reviewer rejects iter 1, approves iter 2.
 // The poll loop handles: planning → reviewing → needs_changes → planning → reviewing → approved.
 func (s *ContextPressureScenario) stageWaitForPlan(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	// Wait for plan directory and file to appear first
-	if err := s.fs.WaitForPlan(ctx, slug); err != nil {
-		return fmt.Errorf("plan directory not created: %w", err)
+	// Wait for the LLM to populate the plan goal via HTTP API.
+	initialPlan, err := s.http.WaitForPlanGoal(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("plan never received goal from LLM: %w", err)
 	}
-	if err := s.fs.WaitForPlanFile(ctx, slug, "plan.json"); err != nil {
-		return fmt.Errorf("plan.json not created: %w", err)
-	}
+	result.SetDetail("plan_file_exists", true)
+	result.SetDetail("plan_goal_preview", truncate(initialPlan.Goal, 100))
 
-	// Wait for the LLM to populate the plan
-	planPath := s.fs.DefaultProjectPlanPath(slug) + "/plan.json"
-	ticker := time.NewTicker(kvPollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("plan never received goal from LLM: %w", ctx.Err())
-		case <-ticker.C:
-			var plan map[string]any
-			if err := s.fs.ReadJSON(planPath, &plan); err != nil {
-				continue
-			}
-			if goal, ok := plan["goal"].(string); ok && goal != "" {
-				result.SetDetail("plan_file_exists", true)
-				result.SetDetail("plan_goal_preview", truncate(goal, 100))
-				goto planReady
-			}
-		}
-	}
-
-planReady:
+	// Now poll the API until the plan is approved (handles rejection cycle).
 	// Now poll the API until the plan is approved (handles rejection cycle).
 	reviewTimeout := time.Duration(maxReviewAttempts) * 4 * time.Minute
 	backoff := reviewRetryBackoff
@@ -1207,12 +1186,12 @@ func (s *ContextPressureScenario) stageGeneratePhases(ctx context.Context, resul
 	return nil
 }
 
-// stageWaitForPhases waits for phases.json to be created by the phase generator.
+// stageWaitForPhases waits for phases to be created via the HTTP API.
 func (s *ContextPressureScenario) stageWaitForPhases(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	if err := s.fs.WaitForPlanFile(ctx, slug, "phases.json"); err != nil {
-		return fmt.Errorf("phases.json not created: %w", err)
+	if _, err := s.http.WaitForPhasesGenerated(ctx, slug); err != nil {
+		return fmt.Errorf("phases not created: %w", err)
 	}
 
 	return nil
@@ -1286,12 +1265,12 @@ func (s *ContextPressureScenario) stageGenerateTasks(ctx context.Context, result
 	return nil
 }
 
-// stageWaitForTasks waits for tasks.json to be created by the LLM.
+// stageWaitForTasks waits for tasks to be created via the HTTP API.
 func (s *ContextPressureScenario) stageWaitForTasks(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	if err := s.fs.WaitForPlanFile(ctx, slug, "tasks.json"); err != nil {
-		return fmt.Errorf("tasks.json not created: %w", err)
+	if _, err := s.http.WaitForTasksGenerated(ctx, slug); err != nil {
+		return fmt.Errorf("tasks not created: %w", err)
 	}
 
 	return nil

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 )
 
 // taskExecution holds in-memory state for a single task execution pipeline.
@@ -112,6 +113,29 @@ type taskExecution struct {
 	// ScenarioBranch is the scenario branch this task merges into
 	// (e.g. "semspec/scenario-auth-refresh"). Set from the trigger payload.
 	ScenarioBranch string
+
+	// --- Team-mode fields (populated when teams are enabled) ---
+
+	// BlueTeamID is the team that did the implementation.
+	BlueTeamID string
+
+	// RedTeamID is the team that challenges the implementation.
+	RedTeamID string
+
+	// RedTeamAgentID is the specific agent from the red team doing the critique.
+	RedTeamAgentID string
+
+	// RedTeamTaskID is used for routing red-team loop completion events.
+	RedTeamTaskID string
+
+	// RedTeamChallenge holds the parsed red team challenge result.
+	RedTeamChallenge *payloads.RedTeamChallengeResult
+
+	// RedTeamKnowledge holds the team knowledge block pre-built for red team
+	// dispatch. Stored here because agentic.TaskMessage has no prompt field;
+	// future wiring will pass this via a dedicated RedTeamRequest payload.
+	// TODO: introduce RedTeamRequest payload and inject RedTeamKnowledge there.
+	RedTeamKnowledge string
 
 	// timeoutTimer holds the per-execution timeout.
 	timeoutTimer *timeoutHandle

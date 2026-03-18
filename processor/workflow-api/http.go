@@ -1058,11 +1058,11 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 		return
 	}
 
-	// For plans using the new status field, require tasks to be approved.
+	// For plans using the old phase/task model, require tasks to be approved.
 	// Legacy plans (Status empty) still work with just Approved=true.
-	// Note: once plan.Status is set to any value (e.g., by ApprovePlan or
-	// task-generator), the plan permanently requires task approval for execution.
-	if plan.Status != "" && !plan.TasksApproved {
+	// Reactive-mode plans (status=ready_for_execution) skip this guard because
+	// they use requirements/scenarios instead of tasks.
+	if plan.Status != "" && plan.Status != workflow.StatusReadyForExecution && !plan.TasksApproved {
 		http.Error(w, "Tasks must be approved before execution", http.StatusBadRequest)
 		return
 	}

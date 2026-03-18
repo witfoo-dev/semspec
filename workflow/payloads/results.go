@@ -282,6 +282,14 @@ type TaskCodeReviewResult struct {
 	Feedback      string          `json:"feedback,omitempty"`
 	Patterns      json.RawMessage `json:"patterns,omitempty"`
 	LLMRequestIDs []string        `json:"llm_request_ids,omitempty"`
+
+	// Red team scoring — populated only when teams are enabled and a red team
+	// challenge was included in the review context. Each score is 1-5.
+	// Zero values indicate the reviewer did not score the red team.
+	RedAccuracy     int    `json:"red_accuracy,omitempty"`     // Were the red team's issues real?
+	RedThoroughness int    `json:"red_thoroughness,omitempty"` // Did they find what matters?
+	RedFairness     int    `json:"red_fairness,omitempty"`     // Proportionate severity?
+	RedFeedback     string `json:"red_feedback,omitempty"`     // Feedback on critique quality
 }
 
 // Schema implements message.Payload.

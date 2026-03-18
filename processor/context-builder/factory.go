@@ -21,7 +21,7 @@ func Register(registry RegistryInterface) error {
 		Factory:     NewComponent,
 		Schema:      contextBuilderSchema,
 		Type:        "processor",
-		Protocol:    "nats",
+		Protocol:    "http",
 		Domain:      "semspec",
 		Description: "Builds relevant context for workflow tasks based on task type and token budget",
 		Version:     "0.1.0",

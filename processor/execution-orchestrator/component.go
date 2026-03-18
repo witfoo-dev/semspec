@@ -67,11 +67,16 @@ const (
 	// new 4-stage pipeline.
 	stageDevelop = "develop"
 
+	// stageRedTeam is the adversarial challenge stage inserted between
+	// validation and review when team-based execution is active.
+	stageRedTeam = "red-team"
+
 	// Phase values written to entity triples.
 	phaseTesting          = "testing"
 	phaseBuilding         = "building"
 	phaseValidating       = "validating"
 	phaseReviewing        = "reviewing"
+	phaseRedTeaming       = "red_teaming"
 	phaseApproved         = "approved"
 	phaseEscalated        = "escalated"
 	phaseError            = "error"
@@ -80,6 +85,9 @@ const (
 
 	// phaseDeveloping is kept for backward compatibility.
 	phaseDeveloping = "developing"
+
+	// subjectRedTeamTask is the dispatch subject for red team challenge tasks.
+	subjectRedTeamTask = "agent.task.red-team"
 
 	// Trigger subject.
 	subjectExecutionTrigger = "workflow.trigger.task-execution-loop"
@@ -379,6 +387,75 @@ func (c *Component) initAgentGraph() {
 
 	c.modelRegistry = model.NewDefaultRegistry()
 	c.logger.Info("Agent roster initialized")
+
+	c.seedTeams()
+}
+
+// teamsEnabled reports whether team-based execution is active. Both the
+// Enabled flag and a minimum of 2 roster entries (blue + red) are required.
+func (c *Component) teamsEnabled() bool {
+	return c.config.Teams != nil && c.config.Teams.Enabled && len(c.config.Teams.Roster) >= 2
+}
+
+// seedTeams creates team and agent entities in the graph for each roster entry.
+// It is idempotent: CreateTeam and CreateAgent are no-ops when the entity
+// already exists. Runs only when teamsEnabled() is true and agentHelper is
+// available; logs and returns on any individual failure so a single bad entry
+// does not abort the remaining roster.
+func (c *Component) seedTeams() {
+	if !c.teamsEnabled() {
+		return
+	}
+	if c.agentHelper == nil {
+		c.logger.Warn("Team seeding skipped — agent graph not available")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	for _, entry := range c.config.Teams.Roster {
+		// Collect member IDs upfront so the team entity has correct MemberIDs
+		// for team benching checks (checkTeamBenching iterates MemberIDs).
+		var memberIDs []string
+		for _, member := range entry.Members {
+			memberIDs = append(memberIDs, entry.Name+"-"+member.Role)
+		}
+
+		team := &workflow.Team{
+			ID:        entry.Name, // stable ID derived from name for idempotency
+			Name:      entry.Name,
+			Status:    workflow.TeamActive,
+			MemberIDs: memberIDs,
+		}
+		if err := c.agentHelper.CreateTeam(ctx, team); err != nil {
+			c.logger.Warn("seedTeams: failed to create team",
+				"team", entry.Name, "error", err)
+			continue
+		}
+
+		for _, member := range entry.Members {
+			agentID := entry.Name + "-" + member.Role
+			agent := workflow.Agent{
+				ID:    agentID,
+				Name:  agentID,
+				Role:  member.Role,
+				Model: member.Model,
+			}
+			if err := c.agentHelper.CreateAgent(ctx, agent); err != nil {
+				c.logger.Warn("seedTeams: failed to create agent",
+					"team", entry.Name, "role", member.Role, "error", err)
+				continue
+			}
+			if err := c.agentHelper.SetAgentTeam(ctx, agentID, team.ID); err != nil {
+				c.logger.Warn("seedTeams: failed to link agent to team",
+					"agent", agentID, "team", team.ID, "error", err)
+			}
+		}
+
+		c.logger.Info("seedTeams: seeded team",
+			"team", entry.Name, "members", len(entry.Members))
+	}
 }
 
 // selectReplacementAgent attempts to find a replacement agent after benching.
@@ -496,6 +573,22 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 		} else if agent != nil {
 			exec.AgentID = agent.ID
 			exec.Model = agent.Model
+		}
+	}
+
+	// Team mode: select a blue team for this execution. No-op in solo mode.
+	if c.teamsEnabled() && c.agentHelper != nil {
+		blueTeam, blueErr := c.agentHelper.SelectBlueTeam(ctx)
+		if blueErr != nil {
+			c.logger.Warn("Blue team selection failed, proceeding without team assignment",
+				"slug", trigger.Slug, "error", blueErr)
+		} else if blueTeam != nil {
+			exec.BlueTeamID = blueTeam.ID
+			c.logger.Info("Blue team assigned",
+				"slug", trigger.Slug,
+				"task_id", trigger.TaskID,
+				"blue_team", blueTeam.Name,
+			)
 		}
 	}
 
@@ -646,6 +739,8 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 		c.handleBuilderCompleteLocked(ctx, event, exec)
 	case stageValidate:
 		c.handleValidatorCompleteLocked(ctx, event, exec)
+	case stageRedTeam:
+		c.handleRedTeamCompleteLocked(ctx, event, exec)
 	case stageReview:
 		c.handleReviewerCompleteLocked(ctx, event, exec)
 	case stageDevelop:
@@ -780,16 +875,30 @@ func (c *Component) handleValidatorCompleteLocked(ctx context.Context, event *ag
 		return
 	}
 
-	c.logger.Info("Validation passed, dispatching reviewer",
-		"slug", exec.Slug,
-		"task_id", exec.TaskID,
-		"iteration", exec.Iteration,
-	)
-
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
+	if c.teamsEnabled() && exec.BlueTeamID != "" {
+		// Team mode: dispatch red team challenge before reviewer.
+		c.logger.Info("Validation passed, dispatching red team challenge",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"iteration", exec.Iteration,
+			"blue_team", exec.BlueTeamID,
+		)
+		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseRedTeaming); err != nil {
+			c.logger.Error("Failed to write phase triple", "phase", phaseRedTeaming, "error", err)
+		}
+		c.dispatchRedTeamLocked(ctx, exec)
+	} else {
+		// Solo mode: dispatch reviewer directly (existing behavior).
+		c.logger.Info("Validation passed, dispatching reviewer",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"iteration", exec.Iteration,
+		)
+		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
+			c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
+		}
+		c.dispatchReviewerLocked(ctx, exec)
 	}
-	c.dispatchReviewerLocked(ctx, exec)
 }
 
 // ---------------------------------------------------------------------------
@@ -829,6 +938,22 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 		"iteration", exec.Iteration,
 	)
 
+	// Team bookkeeping runs on BOTH approval and rejection so that red team
+	// critique quality scores and shared knowledge accumulate regardless of verdict.
+	if c.teamsEnabled() {
+		c.extractTeamInsights(ctx, exec, result.Feedback)
+
+		// Update red team stats atomically via UpdateTeamRedTeamStatsIncremental
+		// to avoid read-modify-write races when multiple reviews complete concurrently.
+		if exec.RedTeamID != "" && result.RedAccuracy > 0 {
+			if err := c.agentHelper.UpdateTeamRedTeamStatsIncremental(ctx, exec.RedTeamID,
+				result.RedAccuracy, result.RedThoroughness, result.RedFairness); err != nil {
+				c.logger.Warn("Failed to update red team stats",
+					"team_id", exec.RedTeamID, "error", err)
+			}
+		}
+	}
+
 	if result.Verdict == "approved" {
 		c.markApprovedLocked(ctx, exec)
 		return
@@ -841,6 +966,29 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 
 	// Phase B: Auto-classify feedback into error categories and check benching.
 	agentBenched := c.checkAgentBenching(ctx, exec, result.Feedback)
+
+	// Team mode: increment team error counts alongside agent error counts.
+	if c.teamsEnabled() && exec.BlueTeamID != "" {
+		if c.errorCategories != nil && result.Feedback != "" {
+			matches := c.errorCategories.MatchSignals(result.Feedback)
+			var cats []workflow.ErrorCategory
+			for _, m := range matches {
+				cats = append(cats, m.Category.ID)
+			}
+			if len(cats) > 0 {
+				if err := c.agentHelper.IncrementTeamErrorCounts(ctx, exec.BlueTeamID, cats); err != nil {
+					c.logger.Warn("Failed to increment team error counts",
+						"team_id", exec.BlueTeamID, "error", err)
+				}
+			}
+		}
+	}
+
+	// Check whether the blue team should be benched based on individual member
+	// benching status. Runs after agent benching so member states are up to date.
+	if c.teamsEnabled() && exec.BlueTeamID != "" {
+		c.checkTeamBenching(ctx, exec.BlueTeamID)
+	}
 
 	switch result.RejectionType {
 	case rejectionTypeMisscoped, rejectionTypeArchitectural, rejectionTypeTooBig:
@@ -1224,6 +1372,14 @@ func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecutio
 	// Tester always receives the original prompt. On retry the feedback is
 	// available in exec.Feedback but the tester prompt itself is unchanged —
 	// new tests should be grounded in the acceptance criteria, not prior code.
+	testerPrompt := exec.Prompt
+	if c.teamsEnabled() && exec.BlueTeamID != "" {
+		testerCategories := []string{errorCategoryMissingTests, errorCategoryEdgeCaseMissed}
+		if kb := c.buildTeamKnowledgeBlock(ctx, exec.BlueTeamID, "tester", testerCategories); kb != "" {
+			testerPrompt += kb
+		}
+	}
+
 	req := &payloads.DeveloperRequest{
 		ExecutionID:      exec.EntityID,
 		RequestID:        exec.RequestID,
@@ -1233,7 +1389,7 @@ func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecutio
 		ContextRequestID: exec.ContextRequestID,
 		TraceID:          exec.TraceID,
 		LoopID:           exec.LoopID,
-		Prompt:           exec.Prompt,
+		Prompt:           testerPrompt,
 	}
 
 	if c.sandbox != nil && exec.WorktreePath != "" {
@@ -1282,6 +1438,20 @@ func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecuti
 		prompt = exec.Prompt + builderSuffix + "\n\n---\n\nREVISION REQUEST: Your previous implementation was rejected.\n\n" + exec.Feedback
 	} else {
 		prompt = exec.Prompt + builderSuffix
+	}
+
+	// Inject team knowledge for builder-relevant lessons.
+	if c.teamsEnabled() && exec.BlueTeamID != "" {
+		builderCategories := []string{
+			"wrong_pattern",
+			"sop_violation",
+			"incomplete_implementation",
+			"api_contract_mismatch",
+			"scope_violation",
+		}
+		if kb := c.buildTeamKnowledgeBlock(ctx, exec.BlueTeamID, "builder", builderCategories); kb != "" {
+			prompt += kb
+		}
 	}
 
 	req := &payloads.DeveloperRequest{
@@ -1426,6 +1596,105 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 		"iteration", exec.Iteration,
 		"files_modified", len(exec.FilesModified),
 	)
+}
+
+// ---------------------------------------------------------------------------
+// Agent dispatch: Red Team (team-mode only — adversarial challenge before review)
+// ---------------------------------------------------------------------------
+
+// dispatchRedTeamLocked selects the red team and publishes a challenge task.
+// If no red team is available the function falls back to dispatchReviewerLocked
+// so the pipeline always makes forward progress.
+// Caller must hold exec.mu.
+func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecution) {
+	redTeam, err := c.agentHelper.SelectRedTeam(ctx, exec.BlueTeamID)
+	if err != nil || redTeam == nil {
+		c.logger.Warn("No red team available, falling back to direct reviewer",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"error", err,
+		)
+		// Graceful fallback: skip red team, go straight to reviewer.
+		if wtErr := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); wtErr != nil {
+			c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", wtErr)
+		}
+		c.dispatchReviewerLocked(ctx, exec)
+		return
+	}
+
+	exec.RedTeamID = redTeam.ID
+
+	// Pre-build the red team knowledge block. agentic.TaskMessage has no prompt
+	// field, so we store it on exec for future wiring via a dedicated payload.
+	// TODO: introduce RedTeamRequest payload and pass RedTeamKnowledge there.
+	if kb := c.buildTeamKnowledgeBlock(ctx, redTeam.ID, "red-team", nil); kb != "" {
+		exec.RedTeamKnowledge = kb
+	}
+
+	taskID := fmt.Sprintf("red-%s-%s", exec.EntityID, uuid.New().String())
+	exec.RedTeamTaskID = taskID
+	c.taskIDIndex.Store(taskID, exec.EntityID)
+
+	task := &agentic.TaskMessage{
+		TaskID:       taskID,
+		Role:         agentic.RoleDeveloper,
+		Model:        exec.Model,
+		WorkflowSlug: WorkflowSlugTaskExecution,
+		WorkflowStep: stageRedTeam,
+	}
+	c.publishTask(ctx, subjectRedTeamTask, task)
+
+	c.logger.Info("Dispatched red team challenge",
+		"slug", exec.Slug,
+		"task_id", exec.TaskID,
+		"iteration", exec.Iteration,
+		"red_team", redTeam.Name,
+		"red_team_task_id", taskID,
+	)
+}
+
+// ---------------------------------------------------------------------------
+// Stage: Red Team complete
+// ---------------------------------------------------------------------------
+
+// handleRedTeamCompleteLocked processes the red team challenge result and
+// transitions to the reviewer stage. Parse failures are tolerated — the
+// reviewer still runs, just without the red-team input.
+// Caller must hold exec.mu.
+func (c *Component) handleRedTeamCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
+	c.taskIDIndex.Delete(exec.RedTeamTaskID)
+
+	var challenge payloads.RedTeamChallengeResult
+	if err := json.Unmarshal([]byte(event.Result), &challenge); err != nil {
+		c.logger.Warn("Failed to parse red team challenge result, proceeding to reviewer",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"error", err,
+		)
+		// Continue without red-team input rather than blocking the pipeline.
+	} else {
+		exec.RedTeamChallenge = &challenge
+	}
+
+	issueCount := 0
+	testCount := 0
+	if exec.RedTeamChallenge != nil {
+		issueCount = len(exec.RedTeamChallenge.Issues)
+		testCount = len(exec.RedTeamChallenge.TestFiles)
+	}
+
+	c.logger.Info("Red team challenge complete, dispatching reviewer",
+		"slug", exec.Slug,
+		"task_id", exec.TaskID,
+		"iteration", exec.Iteration,
+		"issues_found", issueCount,
+		"tests_written", testCount,
+	)
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
+	}
+	c.dispatchReviewerLocked(ctx, exec)
 }
 
 // ---------------------------------------------------------------------------

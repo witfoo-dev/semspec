@@ -622,53 +622,45 @@ func (s *HelloWorldScenario) stageCreatePlan(ctx context.Context, result *Result
 	return nil
 }
 
-// stageWaitForPlan waits for the plan directory and plan.json to appear on disk
-// with a non-empty "goal" field, indicating the planner LLM has finished generating.
+// stageWaitForPlan waits for the plan to be created via the HTTP API with a
+// non-empty Goal field, indicating the planner LLM has finished generating.
 func (s *HelloWorldScenario) stageWaitForPlan(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	if err := s.fs.WaitForPlan(ctx, slug); err != nil {
-		return fmt.Errorf("plan directory not created: %w", err)
+	plan, err := s.http.WaitForPlanGoal(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("plan never received goal from LLM: %w", err)
 	}
 
-	if err := s.fs.WaitForPlanFile(ctx, slug, "plan.json"); err != nil {
-		return fmt.Errorf("plan.json not created: %w", err)
-	}
-
-	planPath := s.fs.DefaultProjectPlanPath(slug) + "/plan.json"
-	ticker := time.NewTicker(kvPollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("plan.json never received goal from LLM: %w", ctx.Err())
-		case <-ticker.C:
-			var plan map[string]any
-			if err := s.fs.ReadJSON(planPath, &plan); err != nil {
-				continue
-			}
-			if goal, ok := plan["goal"].(string); ok && goal != "" {
-				result.SetDetail("plan_file_exists", true)
-				return nil
-			}
-		}
-	}
+	result.SetDetail("plan_file_exists", true)
+	result.SetDetail("plan_data", plan)
+	return nil
 }
 
-// stageVerifyPlanSemantics reads plan.json and runs semantic validation checks.
-func (s *HelloWorldScenario) stageVerifyPlanSemantics(_ context.Context, result *Result) error {
+// stageVerifyPlanSemantics reads the plan from the API and runs semantic validation checks.
+func (s *HelloWorldScenario) stageVerifyPlanSemantics(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
-	planPath := s.fs.DefaultProjectPlanPath(slug) + "/plan.json"
 
-	var plan map[string]any
-	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
-		return fmt.Errorf("read plan.json: %w", err)
+	// Retrieve plan stored by stageWaitForPlan, falling back to API if not present.
+	var planTyped *client.Plan
+	if raw, ok := result.GetDetail("plan_data"); ok {
+		planTyped, _ = raw.(*client.Plan)
+	}
+	if planTyped == nil {
+		var err error
+		planTyped, err = s.http.GetPlan(ctx, slug)
+		if err != nil {
+			return fmt.Errorf("get plan: %w", err)
+		}
 	}
 
-	goal, _ := plan["goal"].(string)
-	planJSON, _ := json.Marshal(plan)
-	planStr := string(planJSON)
+	// Convert to map[string]any for helpers that require it.
+	planJSONBytes, _ := json.Marshal(planTyped)
+	var plan map[string]any
+	_ = json.Unmarshal(planJSONBytes, &plan)
+
+	goal := planTyped.Goal
+	planStr := string(planJSONBytes)
 
 	report := &SemanticReport{}
 
@@ -806,25 +798,34 @@ func (s *HelloWorldScenario) stageGeneratePhases(ctx context.Context, result *Re
 	return nil
 }
 
-// stageWaitForPhases waits for phases.json to be created by the phase generator.
+// stageWaitForPhases waits for phases to be created via the HTTP API.
 func (s *HelloWorldScenario) stageWaitForPhases(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	if err := s.fs.WaitForPlanFile(ctx, slug, "phases.json"); err != nil {
-		return fmt.Errorf("phases.json not created: %w", err)
+	phases, err := s.http.WaitForPhasesGenerated(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("phases not created: %w", err)
 	}
 
+	result.SetDetail("phases_data", phases)
 	return nil
 }
 
-// stageVerifyPhasesSemantics reads phases.json and runs semantic validation checks.
-func (s *HelloWorldScenario) stageVerifyPhasesSemantics(_ context.Context, result *Result) error {
+// stageVerifyPhasesSemantics reads phases from the API and runs semantic validation checks.
+func (s *HelloWorldScenario) stageVerifyPhasesSemantics(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
-	phasesPath := s.fs.DefaultProjectPlanPath(slug) + "/phases.json"
 
-	var phases []map[string]any
-	if err := s.fs.ReadJSON(phasesPath, &phases); err != nil {
-		return fmt.Errorf("read phases.json: %w", err)
+	// Retrieve phases stored by stageWaitForPhases, falling back to API if not present.
+	var phases []*client.Phase
+	if raw, ok := result.GetDetail("phases_data"); ok {
+		phases, _ = raw.([]*client.Phase)
+	}
+	if len(phases) == 0 {
+		var err error
+		phases, err = s.http.GetPhases(ctx, slug)
+		if err != nil {
+			return fmt.Errorf("get phases: %w", err)
+		}
 	}
 
 	report := &SemanticReport{}
@@ -837,8 +838,7 @@ func (s *HelloWorldScenario) stageVerifyPhasesSemantics(_ context.Context, resul
 	// Every phase has a name
 	allHaveNames := true
 	for i, phase := range phases {
-		name, _ := phase["name"].(string)
-		if name == "" {
+		if phase.Name == "" {
 			allHaveNames = false
 			report.Add(fmt.Sprintf("phase-%d-has-name", i), false, "missing name")
 			break
@@ -851,8 +851,7 @@ func (s *HelloWorldScenario) stageVerifyPhasesSemantics(_ context.Context, resul
 	// Every phase has a description
 	allHaveDesc := true
 	for i, phase := range phases {
-		desc, _ := phase["description"].(string)
-		if desc == "" {
+		if phase.Description == "" {
 			allHaveDesc = false
 			report.Add(fmt.Sprintf("phase-%d-has-description", i), false, "missing description")
 			break
@@ -865,8 +864,7 @@ func (s *HelloWorldScenario) stageVerifyPhasesSemantics(_ context.Context, resul
 	// Every phase has an ID
 	allHaveIDs := true
 	for i, phase := range phases {
-		id, _ := phase["id"].(string)
-		if id == "" {
+		if phase.ID == "" {
 			allHaveIDs = false
 			report.Add(fmt.Sprintf("phase-%d-has-id", i), false, "missing id")
 			break
@@ -964,26 +962,40 @@ func (s *HelloWorldScenario) stageGenerateTasks(ctx context.Context, result *Res
 	return nil
 }
 
-// stageWaitForTasks waits for tasks.json to be created by the LLM.
+// stageWaitForTasks waits for tasks to be created via the HTTP API.
 func (s *HelloWorldScenario) stageWaitForTasks(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	if err := s.fs.WaitForPlanFile(ctx, slug, "tasks.json"); err != nil {
-		return fmt.Errorf("tasks.json not created: %w", err)
+	tasks, err := s.http.WaitForTasksGenerated(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("tasks not created: %w", err)
 	}
 
+	result.SetDetail("tasks_data", tasks)
 	return nil
 }
 
-// stageVerifyTasksSemantics reads tasks.json and runs semantic validation checks.
-func (s *HelloWorldScenario) stageVerifyTasksSemantics(_ context.Context, result *Result) error {
+// stageVerifyTasksSemantics reads tasks from the API and runs semantic validation checks.
+func (s *HelloWorldScenario) stageVerifyTasksSemantics(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
-	tasksPath := s.fs.DefaultProjectPlanPath(slug) + "/tasks.json"
 
-	var tasks []map[string]any
-	if err := s.fs.ReadJSON(tasksPath, &tasks); err != nil {
-		return fmt.Errorf("read tasks.json: %w", err)
+	// Retrieve tasks stored by stageWaitForTasks, falling back to API if not present.
+	var typedTasks []*client.Task
+	if raw, ok := result.GetDetail("tasks_data"); ok {
+		typedTasks, _ = raw.([]*client.Task)
 	}
+	if len(typedTasks) == 0 {
+		var err error
+		typedTasks, err = s.http.GetTasks(ctx, slug)
+		if err != nil {
+			return fmt.Errorf("get tasks: %w", err)
+		}
+	}
+
+	// Convert to []map[string]any for validation helpers.
+	tasksJSONBytes, _ := json.Marshal(typedTasks)
+	var tasks []map[string]any
+	_ = json.Unmarshal(tasksJSONBytes, &tasks)
 
 	report := &SemanticReport{}
 
@@ -1441,6 +1453,7 @@ func (s *HelloWorldScenario) stageWaitForTaskExecution(ctx context.Context, resu
 // stageVerifyFilesModified checks that the expected code changes were made.
 // For the /goodbye endpoint, we verify api/app.py contains the route.
 func (s *HelloWorldScenario) stageVerifyFilesModified(_ context.Context, result *Result) error {
+	// TODO: use workspace API when available (sandbox file access)
 	appPath := filepath.Join(s.config.WorkspacePath, "api", "app.py")
 	content, err := s.fs.ReadFile(appPath)
 	if err != nil {

@@ -25,7 +25,6 @@ type AgentRosterScenario struct {
 	description string
 	config      *config.Config
 	http        *client.HTTPClient
-	fs          *client.FilesystemClient
 	nats        *client.NATSClient
 }
 
@@ -42,11 +41,6 @@ func (s *AgentRosterScenario) Name() string        { return s.name }
 func (s *AgentRosterScenario) Description() string  { return s.description }
 
 func (s *AgentRosterScenario) Setup(ctx context.Context) error {
-	s.fs = client.NewFilesystemClient(s.config.WorkspacePath)
-	if err := s.fs.SetupWorkspace(); err != nil {
-		return fmt.Errorf("setup workspace: %w", err)
-	}
-
 	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
 	if err := s.http.WaitForHealthy(ctx); err != nil {
 		return fmt.Errorf("service not healthy: %w", err)
@@ -178,8 +172,8 @@ func (s *AgentRosterScenario) stageVerifyPlanLifecycle(ctx context.Context, resu
 		return fmt.Errorf("create plan returned empty slug")
 	}
 
-	if err := s.fs.WaitForPlan(ctx, slug); err != nil {
-		return fmt.Errorf("plan directory not created: %w", err)
+	if _, err := s.http.WaitForPlanCreated(ctx, slug); err != nil {
+		return fmt.Errorf("plan not created: %w", err)
 	}
 
 	promoteResp, err := s.http.PromotePlan(ctx, slug)

@@ -18,7 +18,6 @@ type PlanWorkflowScenario struct {
 	description string
 	config      *config.Config
 	http        *client.HTTPClient
-	fs          *client.FilesystemClient
 }
 
 // NewPlanWorkflowScenario creates a new plan workflow scenario.
@@ -42,12 +41,6 @@ func (s *PlanWorkflowScenario) Description() string {
 
 // Setup prepares the scenario environment.
 func (s *PlanWorkflowScenario) Setup(ctx context.Context) error {
-	// Create filesystem client and setup workspace
-	s.fs = client.NewFilesystemClient(s.config.WorkspacePath)
-	if err := s.fs.SetupWorkspace(); err != nil {
-		return fmt.Errorf("setup workspace: %w", err)
-	}
-
 	// Create HTTP client
 	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
 
@@ -143,58 +136,33 @@ func (s *PlanWorkflowScenario) stagePlanCreate(ctx context.Context, result *Resu
 	return nil
 }
 
-// stagePlanVerify verifies the plan was created on the filesystem.
+// stagePlanVerify verifies the plan was created via the HTTP API.
 func (s *PlanWorkflowScenario) stagePlanVerify(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	// Wait for plan directory to exist
-	if err := s.fs.WaitForPlan(ctx, expectedSlug); err != nil {
-		return fmt.Errorf("plan directory not created: %w", err)
-	}
-
-	// Verify plan.json exists
-	if err := s.fs.WaitForPlanFile(ctx, expectedSlug, "plan.json"); err != nil {
-		return fmt.Errorf("plan.json not created: %w", err)
-	}
-
-	// Load and verify plan.json
-	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
-	var plan map[string]any
-	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
-		return fmt.Errorf("read plan.json: %w", err)
+	// Wait for plan to exist via HTTP API
+	plan, err := s.http.WaitForPlanCreated(ctx, expectedSlug)
+	if err != nil {
+		return fmt.Errorf("plan not created: %w", err)
 	}
 
 	result.SetDetail("plan_verified", true)
-	result.SetDetail("plan_id", plan["id"])
+	result.SetDetail("plan_id", plan.ID)
 	return nil
 }
 
-// stagePlanUpdateScope updates the plan with goal/context/scope fields.
-func (s *PlanWorkflowScenario) stagePlanUpdateScope(_ context.Context, result *Result) error {
+// stagePlanUpdateScope updates the plan with goal/context fields via HTTP API.
+func (s *PlanWorkflowScenario) stagePlanUpdateScope(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	// Load current plan
-	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
-	var plan map[string]any
-	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
-		return fmt.Errorf("read plan.json: %w", err)
+	// Update plan via PATCH /plans/{slug}
+	updates := map[string]any{
+		"goal":    "Explore OAuth, JWT, and session-based auth approaches",
+		"context": "Need to evaluate authentication options for the API",
 	}
 
-	// Add plan content for a realistic test
-	plan["goal"] = "Explore OAuth, JWT, and session-based auth approaches"
-	plan["context"] = "Need to evaluate authentication options for the API"
-	plan["scope"] = map[string]any{
-		"include": []string{"api/auth/*", "docs/auth.md"},
-		"exclude": []string{"api/legacy/*"},
-	}
-
-	// Save updated plan
-	data, err := json.MarshalIndent(plan, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal plan: %w", err)
-	}
-	if err := s.fs.WriteFile(planPath, string(data)); err != nil {
-		return fmt.Errorf("write plan.json: %w", err)
+	if _, err := s.http.UpdatePlan(ctx, expectedSlug, updates); err != nil {
+		return fmt.Errorf("update plan: %w", err)
 	}
 
 	result.SetDetail("scope_updated", true)
@@ -219,74 +187,47 @@ func (s *PlanWorkflowScenario) stageApprove(ctx context.Context, result *Result)
 	return nil
 }
 
-// stageApproveVerify verifies the plan is now approved.
-func (s *PlanWorkflowScenario) stageApproveVerify(_ context.Context, result *Result) error {
+// stageApproveVerify verifies the plan is now approved via the HTTP API.
+func (s *PlanWorkflowScenario) stageApproveVerify(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	// Load plan.json
-	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
-	var plan map[string]any
-	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
-		return fmt.Errorf("read plan.json: %w", err)
+	// Load plan via HTTP API
+	plan, err := s.http.GetPlan(ctx, expectedSlug)
+	if err != nil {
+		return fmt.Errorf("get plan: %w", err)
 	}
 
 	// Verify plan is now approved
-	approved, ok := plan["approved"].(bool)
-	if !ok {
-		// Fall back to committed for backwards compatibility
-		approved, ok = plan["committed"].(bool)
-		if !ok {
-			return fmt.Errorf("plan.json missing 'approved' field")
-		}
-	}
-	if !approved {
+	if !plan.Approved {
 		return fmt.Errorf("plan should be approved after promote, but approved=false")
 	}
 
 	// Verify approved_at is set
-	if plan["approved_at"] == nil && plan["committed_at"] == nil {
-		return fmt.Errorf("plan.json missing 'approved_at' field")
+	if plan.ApprovedAt == nil {
+		return fmt.Errorf("plan missing 'approved_at' field")
 	}
 
 	result.SetDetail("approve_verified", true)
 	return nil
 }
 
-// stageCreateTasks creates tasks.json for the plan before execution.
-func (s *PlanWorkflowScenario) stageCreateTasks(_ context.Context, result *Result) error {
+// stageCreateTasks creates tasks for the plan via HTTP API before execution.
+func (s *PlanWorkflowScenario) stageCreateTasks(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	// Create tasks manually for execution test
-	tasks := []map[string]any{
-		{
-			"id":          fmt.Sprintf("task.%s.1", expectedSlug),
-			"plan_id":     fmt.Sprintf("plan.%s", expectedSlug),
-			"sequence":    1,
-			"description": "Research OAuth 2.0 implementation options",
-			"type":        "research",
-			"status":      "pending",
-		},
-		{
-			"id":          fmt.Sprintf("task.%s.2", expectedSlug),
-			"plan_id":     fmt.Sprintf("plan.%s", expectedSlug),
-			"sequence":    2,
-			"description": "Evaluate JWT library options",
-			"type":        "research",
-			"status":      "pending",
-		},
+	// Create tasks via REST API
+	taskDefs := []client.CreateTaskRequest{
+		{Description: "Research OAuth 2.0 implementation options", Type: "implement"},
+		{Description: "Evaluate JWT library options", Type: "implement"},
 	}
 
-	// Write tasks.json
-	tasksPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/tasks.json"
-	data, err := json.MarshalIndent(tasks, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal tasks: %w", err)
-	}
-	if err := s.fs.WriteFile(tasksPath, string(data)); err != nil {
-		return fmt.Errorf("write tasks.json: %w", err)
+	for _, def := range taskDefs {
+		if _, err := s.http.CreateTask(ctx, expectedSlug, &def); err != nil {
+			return fmt.Errorf("create task %q: %w", def.Description, err)
+		}
 	}
 
-	result.SetDetail("tasks_created", len(tasks))
+	result.SetDetail("tasks_created", len(taskDefs))
 	return nil
 }
 
@@ -322,20 +263,14 @@ func (s *PlanWorkflowScenario) stageExecuteDryRun(ctx context.Context, result *R
 	return nil
 }
 
-// stageExecuteVerify verifies tasks.json exists and execution was triggered.
-func (s *PlanWorkflowScenario) stageExecuteVerify(_ context.Context, result *Result) error {
+// stageExecuteVerify verifies tasks exist and execution was triggered.
+func (s *PlanWorkflowScenario) stageExecuteVerify(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	// Verify tasks.json exists (we created it in stageCreateTasks)
-	tasksPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/tasks.json"
-	if !s.fs.FileExists(tasksPath) {
-		return fmt.Errorf("tasks.json not found")
-	}
-
-	// Load and verify tasks
-	var tasks []map[string]any
-	if err := s.fs.ReadJSON(tasksPath, &tasks); err != nil {
-		return fmt.Errorf("read tasks.json: %w", err)
+	// Load and verify tasks via HTTP API
+	tasks, err := s.http.GetTasks(ctx, expectedSlug)
+	if err != nil {
+		return fmt.Errorf("get tasks: %w", err)
 	}
 
 	// Should have 2 tasks from stageCreateTasks

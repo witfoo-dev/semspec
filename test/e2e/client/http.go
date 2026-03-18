@@ -3626,3 +3626,132 @@ func (c *HTTPClient) RejectChangeProposal(ctx context.Context, slug, proposalID,
 
 	return &proposal, resp.StatusCode, nil
 }
+
+// UpdatePlan sends a PATCH request to update plan fields.
+func (c *HTTPClient) UpdatePlan(ctx context.Context, slug string, updates map[string]any) (*Plan, error) {
+	data, err := json.Marshal(updates)
+	if err != nil {
+		return nil, fmt.Errorf("marshal updates: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/workflow-api/plans/%s", c.baseURL, slug)
+	httpReq, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var plan Plan
+	if err := json.Unmarshal(body, &plan); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &plan, nil
+}
+
+// WaitForPlanCreated polls GetPlan until the plan exists (non-404).
+// Replaces s.fs.WaitForPlan which polled for the plan directory on disk.
+func (c *HTTPClient) WaitForPlanCreated(ctx context.Context, slug string) (*Plan, error) {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timeout waiting for plan %q to be created: %w", slug, ctx.Err())
+		case <-ticker.C:
+			plan, err := c.GetPlan(ctx, slug)
+			if err == nil {
+				return plan, nil
+			}
+			// Keep polling on 404; surface any other HTTP errors immediately.
+			if !strings.HasPrefix(err.Error(), "HTTP 404") {
+				return nil, fmt.Errorf("unexpected error waiting for plan %q: %w", slug, err)
+			}
+		}
+	}
+}
+
+// WaitForPlanGoal polls GetPlan until the plan has a non-empty Goal field.
+// Replaces the pattern: WaitForPlanFile + ReadJSON + poll until Goal != "".
+func (c *HTTPClient) WaitForPlanGoal(ctx context.Context, slug string) (*Plan, error) {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timeout waiting for plan %q to have a goal: %w", slug, ctx.Err())
+		case <-ticker.C:
+			plan, err := c.GetPlan(ctx, slug)
+			if err != nil {
+				// Transient errors (404, network) — keep polling.
+				continue
+			}
+			if plan.Goal != "" {
+				return plan, nil
+			}
+		}
+	}
+}
+
+// WaitForPhasesGenerated polls GetPhases until at least one phase exists.
+// Replaces s.fs.WaitForPlanFile(ctx, slug, "phases.json").
+func (c *HTTPClient) WaitForPhasesGenerated(ctx context.Context, slug string) ([]*Phase, error) {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timeout waiting for phases to be generated for plan %q: %w", slug, ctx.Err())
+		case <-ticker.C:
+			phases, err := c.GetPhases(ctx, slug)
+			if err != nil {
+				// Transient errors — keep polling.
+				continue
+			}
+			if len(phases) > 0 {
+				return phases, nil
+			}
+		}
+	}
+}
+
+// WaitForTasksGenerated polls GetTasks until at least one task exists.
+// Replaces s.fs.WaitForPlanFile(ctx, slug, "tasks.json").
+func (c *HTTPClient) WaitForTasksGenerated(ctx context.Context, slug string) ([]*Task, error) {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timeout waiting for tasks to be generated for plan %q: %w", slug, ctx.Err())
+		case <-ticker.C:
+			tasks, err := c.GetTasks(ctx, slug)
+			if err != nil {
+				// Transient errors — keep polling.
+				continue
+			}
+			if len(tasks) > 0 {
+				return tasks, nil
+			}
+		}
+	}
+}

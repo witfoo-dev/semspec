@@ -51,7 +51,6 @@ type ChangeProposalScenario struct {
 	description string
 	config      *config.Config
 	http        *client.HTTPClient
-	fs          *client.FilesystemClient
 }
 
 // NewChangeProposalScenario creates a new change proposal scenario.
@@ -71,11 +70,6 @@ func (s *ChangeProposalScenario) Description() string { return s.description }
 
 // Setup prepares the scenario environment.
 func (s *ChangeProposalScenario) Setup(ctx context.Context) error {
-	s.fs = client.NewFilesystemClient(s.config.WorkspacePath)
-	if err := s.fs.SetupWorkspace(); err != nil {
-		return fmt.Errorf("setup workspace: %w", err)
-	}
-
 	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
 	if err := s.http.WaitForHealthy(ctx); err != nil {
 		return fmt.Errorf("service not healthy: %w", err)
@@ -212,8 +206,8 @@ func (s *ChangeProposalScenario) stageCreatePlan(ctx context.Context, result *Re
 
 	result.SetDetail("plan_slug", slug)
 
-	if err := s.fs.WaitForPlan(ctx, slug); err != nil {
-		return fmt.Errorf("plan directory not created: %w", err)
+	if _, err := s.http.WaitForPlanCreated(ctx, slug); err != nil {
+		return fmt.Errorf("plan not created: %w", err)
 	}
 
 	return nil
@@ -423,8 +417,9 @@ func (s *ChangeProposalScenario) stageProposalAccept(ctx context.Context, result
 	if err != nil {
 		return fmt.Errorf("accept change proposal: %w", err)
 	}
-	if status != 200 {
-		return fmt.Errorf("expected HTTP 200, got %d", status)
+	// Accept returns 202 (async cascade triggered), not 200.
+	if status != 200 && status != 202 {
+		return fmt.Errorf("expected HTTP 200 or 202, got %d", status)
 	}
 	if acceptResp.Proposal.Status != "accepted" {
 		return fmt.Errorf("expected status=accepted, got %q", acceptResp.Proposal.Status)

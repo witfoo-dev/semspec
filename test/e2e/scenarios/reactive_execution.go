@@ -44,7 +44,6 @@ type ReactiveExecutionScenario struct {
 	description string
 	config      *config.Config
 	http        *client.HTTPClient
-	fs          *client.FilesystemClient
 	nats        *client.NATSClient
 }
 
@@ -69,11 +68,6 @@ func (s *ReactiveExecutionScenario) Description() string {
 
 // Setup prepares the scenario environment.
 func (s *ReactiveExecutionScenario) Setup(ctx context.Context) error {
-	s.fs = client.NewFilesystemClient(s.config.WorkspacePath)
-	if err := s.fs.SetupWorkspace(); err != nil {
-		return fmt.Errorf("setup workspace: %w", err)
-	}
-
 	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
 	if err := s.http.WaitForHealthy(ctx); err != nil {
 		return fmt.Errorf("service not healthy: %w", err)
@@ -214,9 +208,8 @@ func (s *ReactiveExecutionScenario) stageCreatePlan(ctx context.Context, result 
 
 	result.SetDetail("plan_slug", slug)
 
-	// Wait for the plan directory to appear on the filesystem before proceeding.
-	if err := s.fs.WaitForPlan(ctx, slug); err != nil {
-		return fmt.Errorf("plan directory not created: %w", err)
+	if _, err := s.http.WaitForPlanCreated(ctx, slug); err != nil {
+		return fmt.Errorf("plan not created: %w", err)
 	}
 
 	return nil

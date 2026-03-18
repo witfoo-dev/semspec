@@ -61,6 +61,8 @@ func registerRequestPayloads() {
 		{ChangeProposalAcceptedEventType, "Change proposal accepted event with cascade summary", func() any { return &ChangeProposalAcceptedEvent{} }},
 		// Scenario execution (Phase 4)
 		{ScenarioExecutionRequestType, "Scenario execution request from scenario-orchestrator", func() any { return &ScenarioExecutionRequest{} }},
+		// Red-team challenge results
+		{RedTeamChallengeResultType, "Red-team challenge result with issues and optional adversarial tests", func() any { return &RedTeamChallengeResult{} }},
 	}
 
 	for _, p := range payloads {

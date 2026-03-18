@@ -25,6 +25,8 @@ const (
 	TypeAgent          = "agent"
 	TypeReview         = "review"
 	TypeErrorCategory  = "error-category"
+	TypeTeam           = "team"
+	TypeTeamInsight    = "team-insight"
 
 	// SourceSemspec is the source identifier stamped on triples created by Semspec.
 	// It enables provenance filtering when querying the graph.
@@ -236,4 +238,55 @@ func ErrorCategoryTypePrefix() string {
 		Type:     TypeErrorCategory,
 		Instance: "_",
 	}.TypePrefix()
+}
+
+// TeamEntityID returns the full 6-part graph entity ID string for a team.
+// Format: semspec.local.agentic.orchestrator.team.<teamID>
+// Panics if teamID is empty or contains dots.
+func TeamEntityID(teamID string) string {
+	if err := ValidateInstanceID(teamID); err != nil {
+		panic(err)
+	}
+	return types.EntityID{
+		Org:      OrgDefault,
+		Platform: PlatformDefault,
+		Domain:   DomainAgentic,
+		System:   SystemOrchestrator,
+		Type:     TypeTeam,
+		Instance: teamID,
+	}.String()
+}
+
+// TeamTypePrefix returns the 5-part prefix that identifies the team entity type.
+// Use this prefix with EntityManager.ListWithPrefix to enumerate all team entities.
+// Format: semspec.local.agentic.orchestrator.team
+func TeamTypePrefix() string {
+	return types.EntityID{
+		Org:      OrgDefault,
+		Platform: PlatformDefault,
+		Domain:   DomainAgentic,
+		System:   SystemOrchestrator,
+		Type:     TypeTeam,
+		Instance: "_",
+	}.TypePrefix()
+}
+
+// TeamInsightEntityID returns the full 6-part graph entity ID string for a team insight.
+// Format: semspec.local.agentic.orchestrator.team-insight.<teamID>-<insightID>
+// Panics if teamID or insightID is empty or contains dots.
+func TeamInsightEntityID(teamID, insightID string) string {
+	if err := ValidateInstanceID(teamID); err != nil {
+		panic(fmt.Errorf("teamID: %w", err))
+	}
+	if err := ValidateInstanceID(insightID); err != nil {
+		panic(fmt.Errorf("insightID: %w", err))
+	}
+	return types.EntityID{
+		Org:      OrgDefault,
+		Platform: PlatformDefault,
+		Domain:   DomainAgentic,
+		System:   SystemOrchestrator,
+		Type:     TypeTeamInsight,
+		Instance: teamID + "-" + insightID,
+	}.String()
 }
