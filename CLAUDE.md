@@ -480,13 +480,13 @@ curl -s http://localhost:8180/message-logger/kv/AGENT_LOOPS > /tmp/e2e-loops.jso
 
 Ports are offset to avoid conflicts with semdragon and native Ollama on the same machine.
 
-| Stack | NATS | NATS Monitor | HTTP | Graph | Mock LLM | Other |
-|-------|------|-------------|------|-------|----------|-------|
-| **Backend E2E** | 4322 | 8322 | 8180 | 8182 | 11535 | sandbox: 8190 |
-| **UI E2E** | 4223 | 8223 | — | — | 11534 | caddy: 3000 |
-| **Semdragon** | 4222 | 8222 | 8081 | — | 9090 | caddy: 80 |
-| **Ollama (native)** | — | — | — | — | 11434 | — |
-| **Production** | 4222 | 8222 | 8080 | — | — | — |
+| Stack | NATS | NATS Monitor | HTTP | Mock LLM | Other |
+|-------|------|-------------|------|----------|-------|
+| **Backend E2E** | 4322 | 8322 | 8180 | 11535 | sandbox: 8190 |
+| **UI E2E** | 4223 | 8223 | — | 11534 | caddy: 3000 |
+| **Semdragon** | 4222 | 8222 | 8081 | 9090 | caddy: 80 |
+| **Ollama (native)** | — | — | — | 11434 | — |
+| **Production** | 4222 | 8222 | 8080 | — | — |
 
 ## Debugging Workflow
 
@@ -840,8 +840,7 @@ test/e2e/
 |---------|----------|----------|---------|
 | NATS JetStream | 4222 | 4322 | Messaging |
 | NATS Monitoring | 8222 | 8322 | HTTP monitoring |
-| Semspec HTTP | 8080 | 8180 | Gateway / API |
-| Graph API | 8082 | 8182 | Graph queries |
+| Semspec HTTP | 8080 | 8180 | Gateway / API (includes graph-gateway at /graph-gateway) |
 | Sandbox | 8090 | 8190 | Code execution |
 | Mock LLM | — | 11535 | Deterministic test fixtures |
 | Ollama (native) | 11434 | — | LLM inference |

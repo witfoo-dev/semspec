@@ -8,7 +8,7 @@ import "time"
 const (
 	DefaultNATSURL    = "nats://localhost:4322"
 	DefaultHTTPURL    = "http://localhost:8180"
-	DefaultGraphURL   = "http://localhost:8182"
+	DefaultGraphURL   = "http://localhost:8180/graph-gateway"
 	DefaultMetricsURL = "http://localhost:9190"
 	DefaultMockLLMURL = "http://localhost:11535"
 	DefaultSandboxURL = "http://localhost:8190"

@@ -31,7 +31,7 @@ tasks:
       - |
         echo "[CHECK] Verifying backend E2E ports are available..."
         STALE=false
-        for port in 4322 8322 8180 8182 11535; do
+        for port in 4322 8322 8180 11535; do
           if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
             STALE=true
             break
@@ -44,7 +44,7 @@ tasks:
           docker network ls -q --filter name=semspec-e2e | xargs -r docker network rm 2>/dev/null || true
           sleep 2
           # Verify ports are now free
-          for port in 4322 8322 8180 8182 11535; do
+          for port in 4322 8322 8180 11535; do
             if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
               echo "[ERROR] Port $port still in use after cleanup:"
               lsof -Pi :$port -sTCP:LISTEN
@@ -55,7 +55,7 @@ tasks:
           done
           echo "[OK] Stale containers cleaned, ports now available"
         else
-          echo "[OK] All backend E2E ports available (4322, 8322, 8180, 8182, 11535)"
+          echo "[OK] All backend E2E ports available (4322, 8322, 8180, 11535)"
         fi
 
   check-ports:ui:
@@ -354,7 +354,7 @@ tasks:
         echo "[NUKE] Waiting for ports to release..."
         for i in 1 2 3; do
           ALL_FREE=true
-          for port in 4322 8322 8180 8182; do
+          for port in 4322 8322 8180 11535; do
             if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
               ALL_FREE=false
               break
@@ -588,7 +588,7 @@ tasks:
           echo "║  Backend E2E (semspec-e2e):    ● RUNNING                   ║"
           echo "║    NATS:       localhost:4322                               ║"
           echo "║    HTTP API:   localhost:8180                               ║"
-          echo "║    Graph GW:   localhost:8182                               ║"
+          echo "║    Graph GW:   localhost:8180/graph-gateway                 ║"
         else
           echo "║  Backend E2E (semspec-e2e):    ○ stopped                   ║"
         fi
@@ -628,7 +628,7 @@ tasks:
         echo "║                                                            ║"
         echo "╠══════════════════════════════════════════════════════════════╣"
         echo "║  Port allocation (no conflicts between stacks):            ║"
-        echo "║    Backend E2E:  4322, 8322, 8180, 8182, 11535             ║"
+        echo "║    Backend E2E:  4322, 8322, 8180, 11535                   ║"
         echo "║    UI E2E:       3000, 4223, 8223, 11534                   ║"
         echo "║    Production:   4222, 8222, 8080                          ║"
         echo "╚══════════════════════════════════════════════════════════════╝"
