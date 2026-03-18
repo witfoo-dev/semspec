@@ -81,6 +81,22 @@ func DefaultConfig() Config {
 					Description: "Receive agent completion events (LoopCompletedEvent)",
 					Required:    true,
 				},
+				{
+					Name:        "requirements-generated",
+					Type:        "jetstream",
+					Subject:     "workflow.events.requirements.generated",
+					StreamName:  "WORKFLOW",
+					Description: "Receive requirement generator completion events",
+					Required:    true,
+				},
+				{
+					Name:        "scenarios-generated",
+					Type:        "jetstream",
+					Subject:     "workflow.events.scenarios.generated",
+					StreamName:  "WORKFLOW",
+					Description: "Receive scenario generator completion events",
+					Required:    true,
+				},
 			},
 			Outputs: []component.PortDefinition{
 				{

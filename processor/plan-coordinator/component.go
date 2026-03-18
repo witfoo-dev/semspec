@@ -78,10 +78,14 @@ const (
 	subjectLoopCompleted       = "agent.complete.>"
 
 	// Downstream dispatch: typed requests to processing components.
-	subjectPlannerAsync      = "workflow.async.planner"
-	subjectReqGeneratorAsync = "workflow.async.requirement-generator"
+	subjectPlannerAsync       = "workflow.async.planner"
+	subjectReqGeneratorAsync  = "workflow.async.requirement-generator"
 	subjectScenGeneratorAsync = "workflow.async.scenario-generator"
-	subjectReviewerAsync     = "workflow.async.plan-reviewer"
+	subjectReviewerAsync      = "workflow.async.plan-reviewer"
+
+	// Upstream completion events from generators (WORKFLOW stream).
+	subjectReqsGenerated     = "workflow.events.requirements.generated"
+	subjectScenariosGenerated = "workflow.events.scenarios.generated"
 
 	// TaskID separator for encoding role::entityID.
 	taskIDSep = "::"
@@ -116,6 +120,10 @@ type Component struct {
 
 	// activeCoordinations maps entityID → *coordinationExecution.
 	activeCoordinations sync.Map
+
+	// slugIndex maps slug → entityID for routing generator completion events
+	// (generators publish events with slug, not entityID).
+	slugIndex sync.Map
 
 	// Lifecycle
 	shutdown      chan struct{}
@@ -247,12 +255,25 @@ func (c *Component) Start(ctx context.Context) error {
 			continue
 		}
 
+		generatorEventHandler := func(ctx context.Context, msg *nats.Msg) {
+			c.wg.Add(1)
+			defer c.wg.Done()
+			select {
+			case <-c.shutdown:
+				return
+			default:
+			}
+			c.handleGeneratorEvent(ctx, msg)
+		}
+
 		var handler func(context.Context, *nats.Msg)
 		switch subject {
 		case subjectCoordinationTrigger:
 			handler = triggerHandler
 		case subjectLoopCompleted:
 			handler = completionHandler
+		case subjectReqsGenerated, subjectScenariosGenerated:
+			handler = generatorEventHandler
 		default:
 			c.logger.Debug("Skipping unrecognized input port", "subject", subject)
 			continue
@@ -381,6 +402,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 	}
 
 	// Deduplicate: if a coordination for this entityID already exists, skip.
+	c.slugIndex.Store(trigger.Slug, entityID)
 	if _, loaded := c.activeCoordinations.LoadOrStore(entityID, exec); loaded {
 		c.logger.Debug("Duplicate trigger for active coordination, skipping",
 			"entity_id", entityID,
@@ -485,13 +507,11 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 	switch role {
 	case rolePlanner:
 		c.handlePlannerCompleteLocked(ctx, event, exec)
-	case roleReqGenerator:
-		c.handleReqGeneratorCompleteLocked(ctx, event, exec)
-	case roleScenGenerator:
-		c.handleScenGeneratorCompleteLocked(ctx, event, exec)
 	case roleReviewer:
 		c.handleReviewerCompleteLocked(ctx, event, exec)
 	default:
+		// Requirement/scenario generators signal via workflow.events.* subjects
+		// (not LoopCompletedEvent), so they're handled by handleGeneratorEvent.
 		c.logger.Debug("Unknown completion role", "role", role, "entity_id", entityID)
 	}
 }
@@ -649,6 +669,7 @@ func (c *Component) cleanupExecutionLocked(exec *coordinationExecution) {
 	if exec.timeoutTimer != nil {
 		exec.timeoutTimer.stop()
 	}
+	c.slugIndex.Delete(exec.Slug)
 	c.activeCoordinations.Delete(exec.EntityID)
 }
 
@@ -739,23 +760,15 @@ func (c *Component) dispatchRequirementGeneratorLocked(ctx context.Context, exec
 		return
 	}
 
-	taskID := fmt.Sprintf("%s%s%s", roleReqGenerator, taskIDSep, exec.EntityID)
-
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseGeneratingRequirements); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseGeneratingRequirements, "error", err)
 	}
 
-	req := &payloads.PlannerRequest{
-		ExecutionID:  exec.EntityID,
-		TaskID:       taskID,
-		WorkflowSlug: WorkflowSlugPlan,
-		RequestID:    exec.RequestID,
-		Slug:         exec.Slug,
-		Title:        exec.Title,
-		Description:  exec.Description,
-		ProjectID:    exec.ProjectID,
-		TraceID:      exec.TraceID,
-		LoopID:       exec.LoopID,
+	req := &payloads.RequirementGeneratorRequest{
+		ExecutionID: exec.EntityID,
+		Slug:        exec.Slug,
+		Title:       exec.Title,
+		TraceID:     exec.TraceID,
 	}
 
 	if err := c.publishBaseMessage(ctx, subjectReqGeneratorAsync, req); err != nil {
@@ -764,8 +777,7 @@ func (c *Component) dispatchRequirementGeneratorLocked(ctx context.Context, exec
 		return
 	}
 
-	c.logger.Info("Dispatched requirement-generator",
-		"slug", exec.Slug, "task_id", taskID)
+	c.logger.Info("Dispatched requirement-generator", "slug", exec.Slug)
 }
 
 // dispatchScenarioGeneratorLocked dispatches the scenario generator
@@ -775,33 +787,49 @@ func (c *Component) dispatchScenarioGeneratorLocked(ctx context.Context, exec *c
 		return
 	}
 
-	taskID := fmt.Sprintf("%s%s%s", roleScenGenerator, taskIDSep, exec.EntityID)
-
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseGeneratingScenarios); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseGeneratingScenarios, "error", err)
 	}
 
-	req := &payloads.PlannerRequest{
-		ExecutionID:  exec.EntityID,
-		TaskID:       taskID,
-		WorkflowSlug: WorkflowSlugPlan,
-		RequestID:    exec.RequestID,
-		Slug:         exec.Slug,
-		Title:        exec.Title,
-		Description:  exec.Description,
-		ProjectID:    exec.ProjectID,
-		TraceID:      exec.TraceID,
-		LoopID:       exec.LoopID,
+	// Load requirements from disk to fan out one scenario-generator per requirement.
+	repoPath := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoPath == "" {
+		repoPath = "."
 	}
-
-	if err := c.publishBaseMessage(ctx, subjectScenGeneratorAsync, req); err != nil {
-		c.logger.Error("Failed to dispatch scenario generator", "error", err)
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch scenario-generator failed: %v", err))
+	manager := workflow.NewManager(repoPath)
+	requirements, err := manager.LoadRequirements(ctx, exec.Slug)
+	if err != nil || len(requirements) == 0 {
+		c.logger.Warn("No requirements found, dispatching single scenario generator",
+			"slug", exec.Slug, "error", err)
+		// Fallback: dispatch with empty requirement ID — generator handles it.
+		req := &payloads.ScenarioGeneratorRequest{
+			ExecutionID: exec.EntityID,
+			Slug:        exec.Slug,
+			TraceID:     exec.TraceID,
+		}
+		if err := c.publishBaseMessage(ctx, subjectScenGeneratorAsync, req); err != nil {
+			c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch scenario-generator failed: %v", err))
+		}
 		return
 	}
 
-	c.logger.Info("Dispatched scenario-generator",
-		"slug", exec.Slug, "task_id", taskID)
+	for _, requirement := range requirements {
+		req := &payloads.ScenarioGeneratorRequest{
+			ExecutionID:   exec.EntityID,
+			Slug:          exec.Slug,
+			RequirementID: requirement.ID,
+			TraceID:       exec.TraceID,
+		}
+		if err := c.publishBaseMessage(ctx, subjectScenGeneratorAsync, req); err != nil {
+			c.logger.Error("Failed to dispatch scenario generator",
+				"requirement_id", requirement.ID, "error", err)
+			c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch scenario-generator failed: %v", err))
+			return
+		}
+	}
+
+	c.logger.Info("Dispatched scenario-generators",
+		"slug", exec.Slug, "requirement_count", len(requirements))
 }
 
 // dispatchReviewerLocked dispatches the plan reviewer (el jefe) after
@@ -849,16 +877,71 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *coordinati
 // Pipeline step completion handlers
 // ---------------------------------------------------------------------------
 
-// handleReqGeneratorCompleteLocked processes requirement generator completion.
-func (c *Component) handleReqGeneratorCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *coordinationExecution) {
+// handleGeneratorEvent routes generator completion events (from WORKFLOW stream)
+// to the appropriate handler based on subject.
+func (c *Component) handleGeneratorEvent(ctx context.Context, msg *nats.Msg) {
+	c.updateLastActivity()
+
+	// Extract slug from payload to look up active coordination.
+	var envelope struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(msg.Data, &envelope); err != nil {
+		c.logger.Debug("Failed to unmarshal generator event envelope", "error", err)
+		return
+	}
+
+	var slugHolder struct {
+		Slug string `json:"slug"`
+	}
+	if err := json.Unmarshal(envelope.Payload, &slugHolder); err != nil || slugHolder.Slug == "" {
+		c.logger.Debug("Generator event missing slug", "subject", msg.Subject)
+		return
+	}
+
+	entityIDVal, ok := c.slugIndex.Load(slugHolder.Slug)
+	if !ok {
+		c.logger.Debug("No active coordination for slug", "slug", slugHolder.Slug)
+		return
+	}
+	entityID := entityIDVal.(string)
+
+	execVal, ok := c.activeCoordinations.Load(entityID)
+	if !ok {
+		return
+	}
+	exec := execVal.(*coordinationExecution)
+
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+
 	if exec.terminated {
 		return
 	}
 
-	c.logger.Info("Requirement generator completed",
-		"entity_id", exec.EntityID, "slug", exec.Slug)
+	switch msg.Subject {
+	case subjectReqsGenerated:
+		c.handleReqsGeneratedLocked(ctx, exec, envelope.Payload)
+	case subjectScenariosGenerated:
+		c.handleScenariosGeneratedLocked(ctx, exec, envelope.Payload)
+	default:
+		c.logger.Debug("Unknown generator event subject", "subject", msg.Subject)
+	}
+}
 
-	// TODO: Parse requirements from event.Result and write to disk/triples.
+// handleReqsGeneratedLocked processes the RequirementsGeneratedEvent.
+// Requirements are already saved to disk by the requirement-generator component.
+func (c *Component) handleReqsGeneratedLocked(ctx context.Context, exec *coordinationExecution, payload json.RawMessage) {
+	var event workflow.RequirementsGeneratedEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		c.logger.Warn("Failed to parse RequirementsGeneratedEvent", "error", err)
+	}
+
+	c.logger.Info("Requirements generated",
+		"entity_id", exec.EntityID,
+		"slug", exec.Slug,
+		"requirement_count", event.RequirementCount,
+	)
 
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseRequirementsGenerated); err != nil {
 		c.logger.Error("Failed to write phase triple", "error", err)
@@ -868,16 +951,19 @@ func (c *Component) handleReqGeneratorCompleteLocked(ctx context.Context, event 
 	c.dispatchScenarioGeneratorLocked(ctx, exec)
 }
 
-// handleScenGeneratorCompleteLocked processes scenario generator completion.
-func (c *Component) handleScenGeneratorCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *coordinationExecution) {
-	if exec.terminated {
-		return
+// handleScenariosGeneratedLocked processes the ScenariosGeneratedEvent.
+// Scenarios are already saved to disk by the scenario-generator component.
+func (c *Component) handleScenariosGeneratedLocked(ctx context.Context, exec *coordinationExecution, payload json.RawMessage) {
+	var event workflow.ScenariosGeneratedEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		c.logger.Warn("Failed to parse ScenariosGeneratedEvent", "error", err)
 	}
 
-	c.logger.Info("Scenario generator completed",
-		"entity_id", exec.EntityID, "slug", exec.Slug)
-
-	// TODO: Parse scenarios from event.Result and write to disk/triples.
+	c.logger.Info("Scenarios generated",
+		"entity_id", exec.EntityID,
+		"slug", exec.Slug,
+		"scenario_count", event.ScenarioCount,
+	)
 
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseScenariosGenerated); err != nil {
 		c.logger.Error("Failed to write phase triple", "error", err)
