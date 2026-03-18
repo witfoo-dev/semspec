@@ -290,15 +290,15 @@ func TestDefaultConfig_InputPorts(t *testing.T) {
 	if cfg.Ports == nil {
 		t.Fatal("DefaultConfig Ports should not be nil")
 	}
-	if len(cfg.Ports.Inputs) != 2 {
-		t.Fatalf("DefaultConfig should have 2 input ports, got %d", len(cfg.Ports.Inputs))
+	if len(cfg.Ports.Inputs) != 4 {
+		t.Fatalf("DefaultConfig should have 4 input ports, got %d", len(cfg.Ports.Inputs))
 	}
 
 	names := make(map[string]bool)
 	for _, p := range cfg.Ports.Inputs {
 		names[p.Name] = true
 	}
-	for _, want := range []string{"coordination-trigger", "loop-completions"} {
+	for _, want := range []string{"coordination-trigger", "loop-completions", "requirements-generated", "scenarios-generated"} {
 		if !names[want] {
 			t.Errorf("missing input port %q", want)
 		}

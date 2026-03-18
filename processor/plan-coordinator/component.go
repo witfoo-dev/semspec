@@ -504,10 +504,10 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
 
-	switch role {
-	case rolePlanner:
+	switch {
+	case strings.HasPrefix(role, rolePlanner):
 		c.handlePlannerCompleteLocked(ctx, event, exec)
-	case roleReviewer:
+	case role == roleReviewer:
 		c.handleReviewerCompleteLocked(ctx, event, exec)
 	default:
 		// Requirement/scenario generators signal via workflow.events.* subjects
@@ -713,9 +713,10 @@ func (c *Component) dispatchPlannersLocked(ctx context.Context, exec *coordinati
 	exec.ExpectedPlanners = len(exec.FocusAreas)
 	exec.PlannerTaskIDs = make([]string, 0, exec.ExpectedPlanners)
 
-	for _, focus := range exec.FocusAreas {
+	for i, focus := range exec.FocusAreas {
 		// TaskID encodes role::entityID for completion routing.
-		taskID := fmt.Sprintf("planner%s%s", taskIDSep, exec.EntityID)
+		// Include index to ensure uniqueness when multiple planners run in parallel.
+		taskID := fmt.Sprintf("planner.%d%s%s", i, taskIDSep, exec.EntityID)
 		exec.PlannerTaskIDs = append(exec.PlannerTaskIDs, taskID)
 
 		// Build the planner request payload with TaskID for LoopCompletedEvent routing.
@@ -796,18 +797,12 @@ func (c *Component) dispatchScenarioGeneratorLocked(ctx context.Context, exec *c
 	}
 	manager := workflow.NewManager(repoPath)
 	requirements, err := manager.LoadRequirements(ctx, exec.Slug)
-	if err != nil || len(requirements) == 0 {
-		c.logger.Warn("No requirements found, dispatching single scenario generator",
-			"slug", exec.Slug, "error", err)
-		// Fallback: dispatch with empty requirement ID — generator handles it.
-		req := &payloads.ScenarioGeneratorRequest{
-			ExecutionID: exec.EntityID,
-			Slug:        exec.Slug,
-			TraceID:     exec.TraceID,
-		}
-		if err := c.publishBaseMessage(ctx, subjectScenGeneratorAsync, req); err != nil {
-			c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch scenario-generator failed: %v", err))
-		}
+	if err != nil {
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("load requirements for scenario generation: %v", err))
+		return
+	}
+	if len(requirements) == 0 {
+		c.markErrorLocked(ctx, exec, "no requirements found — cannot generate scenarios")
 		return
 	}
 
@@ -1045,16 +1040,37 @@ func (c *Component) publishPlanApprovedEvent(ctx context.Context, exec *coordina
 		Summary: summary,
 	}
 
-	data, err := json.Marshal(event)
+	subject := workflow.PlanApproved.Pattern
+
+	// Wrap event in BaseMessage envelope for ParseReactivePayload compatibility.
+	// We construct the envelope manually because PlanApprovedEvent doesn't implement
+	// message.Payload. The ParseReactivePayload function only reads the "payload" field.
+	payloadData, err := json.Marshal(event)
 	if err != nil {
 		c.logger.Error("Failed to marshal PlanApprovedEvent", "error", err)
 		return
 	}
 
-	// Wrap in BaseMessage for ParseReactivePayload compatibility.
 	envelope := struct {
+		ID      string          `json:"id"`
+		Type    message.Type    `json:"type"`
 		Payload json.RawMessage `json:"payload"`
-	}{Payload: data}
+		Meta    struct {
+			CreatedAt int64  `json:"created_at"`
+			Source    string `json:"source"`
+		} `json:"meta"`
+	}{
+		ID:      fmt.Sprintf("plan-approved-%s", exec.Slug),
+		Type:    message.Type{Domain: "workflow", Category: "plan-approved", Version: "v1"},
+		Payload: payloadData,
+		Meta: struct {
+			CreatedAt int64  `json:"created_at"`
+			Source    string `json:"source"`
+		}{
+			CreatedAt: time.Now().UnixMilli(),
+			Source:    componentName,
+		},
+	}
 
 	envelopeData, err := json.Marshal(envelope)
 	if err != nil {
@@ -1062,7 +1078,6 @@ func (c *Component) publishPlanApprovedEvent(ctx context.Context, exec *coordina
 		return
 	}
 
-	subject := workflow.PlanApproved.Pattern
 	if err := c.natsClient.PublishToStream(ctx, subject, envelopeData); err != nil {
 		c.logger.Error("Failed to publish PlanApprovedEvent",
 			"subject", subject, "slug", exec.Slug, "error", err)
