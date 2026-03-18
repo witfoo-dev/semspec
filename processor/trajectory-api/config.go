@@ -12,31 +12,30 @@ var trajectoryAPISchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}
 
 // Config holds configuration for the trajectory-api component.
 type Config struct {
-	// LLMCallsBucket is the KV bucket name for LLM call records.
-	LLMCallsBucket string `json:"llm_calls_bucket" schema:"type:string,description:KV bucket for LLM call records,category:basic,default:LLM_CALLS"`
-
-	// ToolCallsBucket is the KV bucket name for tool call records.
-	ToolCallsBucket string `json:"tool_calls_bucket" schema:"type:string,description:KV bucket for tool call records,category:basic,default:TOOL_CALLS"`
-
 	// LoopsBucket is the KV bucket name for agent loop state.
 	LoopsBucket string `json:"loops_bucket" schema:"type:string,description:KV bucket for agent loop state,category:basic,default:AGENT_LOOPS"`
 
-	// ArtifactAPISubject is the NATS subject for the ObjectStore API that stores full LLM call artifacts.
-	// When set, the /calls/ endpoint can retrieve complete CallRecords (with Messages and Response).
-	ArtifactAPISubject string `json:"artifact_api_subject,omitempty" schema:"type:string,description:NATS subject for LLM artifact ObjectStore API,category:basic"`
+	// ContentBucket is the ObjectStore bucket name for step content (tool arguments, results, model responses).
+	// When set, detailed content is fetched for format=json requests.
+	ContentBucket string `json:"content_bucket,omitempty" schema:"type:string,description:ObjectStore bucket for step content,category:basic,default:AGENT_CONTENT"`
 
 	// RepoRoot is the repository root path for accessing plan data.
 	// If empty, defaults to SEMSPEC_REPO_PATH env var or current working directory.
 	RepoRoot string `json:"repo_root,omitempty" schema:"type:string,description:Repository root path for plan access,category:basic"`
 
 	// GraphGatewayURL is the URL for the graph gateway service.
-	// Used to query LLM call entities from the knowledge graph.
-	GraphGatewayURL string `json:"graph_gateway_url,omitempty" schema:"type:string,description:Graph gateway URL for LLM call queries,category:basic,default:http://localhost:8082"`
+	// Used to query step entities from the knowledge graph.
+	GraphGatewayURL string `json:"graph_gateway_url,omitempty" schema:"type:string,description:Graph gateway URL for step entity queries,category:basic,default:http://localhost:8082"`
 
-	// EntityPrefix is the entity ID prefix for LLM call entities in the graph.
-	// Format: {org}.semspec.llm.call.{project} — must match the org/project used
-	// by the LLM call store that publishes entities to the graph.
-	EntityPrefix string `json:"entity_prefix,omitempty" schema:"type:string,description:Entity ID prefix for LLM call queries,category:basic,default:local.semspec.llm.call.semspec"`
+	// Org is the organization identifier used to construct loop and step entity IDs.
+	// Must match the org value configured in the semstreams platform identity.
+	// Example: "semspec"
+	Org string `json:"org,omitempty" schema:"type:string,description:Organization identifier for entity ID construction,category:basic"`
+
+	// Platform is the platform identifier used to construct loop and step entity IDs.
+	// Must match the platform ID configured in the semstreams platform identity.
+	// Example: "semspec-dev"
+	Platform string `json:"platform,omitempty" schema:"type:string,description:Platform identifier for entity ID construction,category:basic"`
 
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
@@ -45,22 +44,14 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		LLMCallsBucket:  "LLM_CALLS",
-		ToolCallsBucket: "TOOL_CALLS",
 		LoopsBucket:     "AGENT_LOOPS",
+		ContentBucket:   "AGENT_CONTENT",
 		GraphGatewayURL: "http://localhost:8082",
-		EntityPrefix:    "local.semspec.llm.call.semspec",
 	}
 }
 
 // Validate validates the configuration.
 func (c *Config) Validate() error {
-	if c.LLMCallsBucket == "" {
-		return fmt.Errorf("llm_calls_bucket is required")
-	}
-	if c.ToolCallsBucket == "" {
-		return fmt.Errorf("tool_calls_bucket is required")
-	}
 	if c.LoopsBucket == "" {
 		return fmt.Errorf("loops_bucket is required")
 	}

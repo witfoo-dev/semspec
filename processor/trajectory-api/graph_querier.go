@@ -7,40 +7,35 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/c360studio/semspec/llm"
-	"github.com/c360studio/semspec/vocabulary/semspec"
+	agvocab "github.com/c360studio/semstreams/vocabulary/agentic"
 )
 
 const (
 	// maxGraphErrorBodySize limits the size of error response bodies.
 	maxGraphErrorBodySize = 4096
-
-	// defaultEntityLimit caps the number of entities returned by prefix queries.
-	defaultEntityLimit = 500
 )
 
-// LLMCallQuerier queries LLM call entities from the knowledge graph.
-type LLMCallQuerier struct {
-	gatewayURL   string
-	entityPrefix string
-	httpClient   *http.Client
+// StepQuerier queries trajectory step entities from the knowledge graph.
+// Semstreams alpha.53 writes step entities with agent.step.* predicates on loop completion.
+type StepQuerier struct {
+	gatewayURL string
+	httpClient *http.Client
 }
 
-// NewLLMCallQuerier creates a new querier.
-// entityPrefix is the entity ID prefix for LLM call entities (e.g., "local.semspec.llm.call.semspec").
-func NewLLMCallQuerier(gatewayURL, entityPrefix string) *LLMCallQuerier {
-	return &LLMCallQuerier{
-		gatewayURL:   gatewayURL,
-		entityPrefix: entityPrefix,
-		httpClient:   &http.Client{Timeout: 10 * time.Second},
+// NewStepQuerier creates a new step querier for the given graph gateway URL.
+func NewStepQuerier(gatewayURL string) *StepQuerier {
+	return &StepQuerier{
+		gatewayURL: gatewayURL,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-// graphQLResponse represents a GraphQL response.
+// graphQLResponse represents a GraphQL response envelope.
 type graphQLResponse struct {
 	Data   map[string]any `json:"data"`
 	Errors []struct {
@@ -48,117 +43,153 @@ type graphQLResponse struct {
 	} `json:"errors"`
 }
 
-// graphEntity represents a graph entity with triples.
+// graphEntity represents a graph entity with its triples.
 type graphEntity struct {
 	ID      string        `json:"id"`
 	Triples []graphTriple `json:"triples,omitempty"`
 }
 
-// graphTriple is a predicate-object pair.
+// graphTriple is a predicate-object pair on a graph entity.
 type graphTriple struct {
 	Predicate string `json:"predicate"`
 	Object    any    `json:"object"`
 }
 
-// QueryByLoopID returns all LLM calls for a specific agent loop.
-func (q *LLMCallQuerier) QueryByLoopID(ctx context.Context, loopID string) ([]*llm.CallRecord, error) {
-	loopID = sanitizeGraphQLString(loopID)
+// StepRecord is a parsed trajectory step entity from the graph.
+// All fields map directly to agent.step.* predicates written by semstreams alpha.53.
+type StepRecord struct {
+	// EntityID is the graph entity ID for this step.
+	EntityID string
 
-	entities, err := q.fetchAllLLMCallEntities(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("query by loop_id: %w", err)
-	}
+	// Type is the step category: "model_call" or "tool_call".
+	Type string
 
-	records := make([]*llm.CallRecord, 0, len(entities))
-	for _, entity := range entities {
-		if !isLLMCallEntity(entity) {
-			continue
-		}
-		if getTripleValue(entity, semspec.ActivityLoop) == loopID {
-			records = append(records, entityToCallRecord(entity))
-		}
-	}
+	// Index is the zero-based position in the loop trajectory.
+	Index int
 
-	llm.SortByStartTime(records)
-	return records, nil
+	// LoopEntityID is the entity ID of the parent loop.
+	LoopEntityID string
+
+	// Timestamp is when this step occurred.
+	Timestamp time.Time
+
+	// DurationMs is the step execution time in milliseconds.
+	DurationMs int64
+
+	// --- tool_call fields ---
+
+	// ToolName is the tool function name (tool_call steps only).
+	ToolName string
+
+	// --- model_call fields ---
+
+	// Model is the model name (model_call steps only).
+	Model string
+
+	// TokensIn is the input token count (model_call steps only).
+	TokensIn int
+
+	// TokensOut is the output token count (model_call steps only).
+	TokensOut int
+
+	// --- common optional fields ---
+
+	// Capability is the role or purpose of this step.
+	Capability string
+
+	// Provider is the LLM provider (model_call steps only).
+	Provider string
+
+	// Retries is the number of retries before this step succeeded.
+	Retries int
 }
 
-// QueryByTraceID returns all LLM calls for a specific trace.
-func (q *LLMCallQuerier) QueryByTraceID(ctx context.Context, traceID string) ([]*llm.CallRecord, error) {
-	traceID = sanitizeGraphQLString(traceID)
+// QueryStepsByLoopEntityID returns all trajectory step entities for a loop entity ID.
+// It uses entitiesByPredicate with agent.step.loop predicate to find all steps.
+func (q *StepQuerier) QueryStepsByLoopEntityID(ctx context.Context, loopEntityID string) ([]*StepRecord, error) {
+	loopEntityID = sanitizeGraphQLString(loopEntityID)
 
-	entities, err := q.fetchAllLLMCallEntities(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("query by trace_id: %w", err)
-	}
-
-	records := make([]*llm.CallRecord, 0, len(entities))
-	for _, entity := range entities {
-		if !isLLMCallEntity(entity) {
-			continue
-		}
-		if getTripleValue(entity, semspec.DCIdentifier) == traceID {
-			records = append(records, entityToCallRecord(entity))
-		}
-	}
-
-	llm.SortByStartTime(records)
-	return records, nil
-}
-
-// QueryByRequestID returns a single LLM call by its request ID.
-func (q *LLMCallQuerier) QueryByRequestID(ctx context.Context, requestID string) (*llm.CallRecord, error) {
-	requestID = sanitizeGraphQLString(requestID)
-
-	// Construct the exact entity ID: {prefix}.{requestID}
-	entityID := q.entityPrefix + "." + requestID
-
-	entity, err := q.fetchEntityByID(ctx, entityID)
-	if err != nil {
-		return nil, fmt.Errorf("query by request_id: %w", err)
-	}
-
-	if entity == nil {
-		return nil, nil
-	}
-
-	return entityToCallRecord(*entity), nil
-}
-
-// fetchAllLLMCallEntities retrieves all LLM call entities using the configured prefix.
-func (q *LLMCallQuerier) fetchAllLLMCallEntities(ctx context.Context) ([]graphEntity, error) {
-	query := `query($prefix: String!, $limit: Int) {
-		entitiesByPrefix(prefix: $prefix, limit: $limit) {
+	const gql = `query($predicate: String!, $value: String) {
+		entitiesByPredicate(predicate: $predicate, value: $value) {
 			id
 			triples { predicate object }
 		}
 	}`
 
 	variables := map[string]any{
-		"prefix": q.entityPrefix,
-		"limit":  defaultEntityLimit,
+		"predicate": agvocab.StepLoop,
+		"value":     loopEntityID,
 	}
 
-	data, err := q.executeGraphQL(ctx, query, variables)
+	data, err := q.executeGraphQL(ctx, gql, variables)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query steps by loop entity: %w", err)
 	}
 
-	return parseEntitiesFromData(data, "entitiesByPrefix"), nil
+	entities := parseEntitiesFromData(data, "entitiesByPredicate")
+	records := make([]*StepRecord, 0, len(entities))
+	for _, entity := range entities {
+		records = append(records, entityToStepRecord(entity))
+	}
+
+	sortStepsByIndex(records)
+	return records, nil
 }
 
-// fetchEntityByID retrieves a single entity by exact ID.
-func (q *LLMCallQuerier) fetchEntityByID(ctx context.Context, entityID string) (*graphEntity, error) {
-	query := `query($id: String!) {
+// QueryStepsByLoopRelationships fetches steps for a loop via its LoopHasStep
+// relationships. This is a two-step query: first fetch the loop entity to get
+// step entity IDs, then fetch each step entity individually.
+//
+// This is a fallback path when entitiesByPredicate with value filtering is not
+// supported by the graph gateway.
+func (q *StepQuerier) QueryStepsByLoopRelationships(ctx context.Context, loopEntityID string) ([]*StepRecord, error) {
+	loopEntityID = sanitizeGraphQLString(loopEntityID)
+
+	// Step 1: fetch the loop entity's relationships to find step entity IDs.
+	const relQuery = `query($entityId: String!) {
+		relationships(entityId: $entityId) {
+			predicate
+			object
+		}
+	}`
+
+	relData, err := q.executeGraphQL(ctx, relQuery, map[string]any{"entityId": loopEntityID})
+	if err != nil {
+		return nil, fmt.Errorf("query loop relationships: %w", err)
+	}
+
+	stepEntityIDs := extractRelationshipObjects(relData, agvocab.LoopHasStep)
+	if len(stepEntityIDs) == 0 {
+		return nil, nil
+	}
+
+	// Step 2: fetch each step entity.
+	records := make([]*StepRecord, 0, len(stepEntityIDs))
+	for _, stepID := range stepEntityIDs {
+		entity, err := q.fetchEntityByID(ctx, stepID)
+		if err != nil {
+			// Log but continue — partial results are better than none.
+			continue
+		}
+		if entity != nil {
+			records = append(records, entityToStepRecord(*entity))
+		}
+	}
+
+	sortStepsByIndex(records)
+	return records, nil
+}
+
+// fetchEntityByID retrieves a single entity by its exact ID.
+func (q *StepQuerier) fetchEntityByID(ctx context.Context, entityID string) (*graphEntity, error) {
+	const gql = `query($id: String!) {
 		entity(id: $id) {
 			id
 			triples { predicate object }
 		}
 	}`
 
-	variables := map[string]any{"id": entityID}
-
-	data, err := q.executeGraphQL(ctx, query, variables)
+	data, err := q.executeGraphQL(ctx, gql, map[string]any{"id": entityID})
 	if err != nil {
 		return nil, err
 	}
@@ -177,8 +208,8 @@ func (q *LLMCallQuerier) fetchEntityByID(ctx context.Context, entityID string) (
 	return &entity, nil
 }
 
-// executeGraphQL runs a GraphQL query and returns the data map.
-func (q *LLMCallQuerier) executeGraphQL(ctx context.Context, query string, variables map[string]any) (map[string]any, error) {
+// executeGraphQL runs a GraphQL query against the gateway and returns the data map.
+func (q *StepQuerier) executeGraphQL(ctx context.Context, query string, variables map[string]any) (map[string]any, error) {
 	reqBody := map[string]any{"query": query}
 	if variables != nil {
 		reqBody["variables"] = variables
@@ -218,7 +249,38 @@ func (q *LLMCallQuerier) executeGraphQL(ctx context.Context, query string, varia
 	return result.Data, nil
 }
 
-// parseEntitiesFromData extracts entities from a GraphQL response data map.
+// entityToStepRecord converts a graph entity with agent.step.* triples to a StepRecord.
+func entityToStepRecord(entity graphEntity) *StepRecord {
+	record := &StepRecord{EntityID: entity.ID}
+
+	// Build a fast lookup map; multi-valued predicates are not expected for steps.
+	predicates := make(map[string]any, len(entity.Triples))
+	for _, t := range entity.Triples {
+		predicates[t.Predicate] = t.Object
+	}
+
+	record.Type = getString(predicates, agvocab.StepType)
+	record.Index = getInt(predicates, agvocab.StepIndex)
+	record.LoopEntityID = getString(predicates, agvocab.StepLoop)
+	record.DurationMs = getInt64(predicates, agvocab.StepDuration)
+	record.ToolName = getString(predicates, agvocab.StepToolName)
+	record.Model = getString(predicates, agvocab.StepModel)
+	record.TokensIn = getInt(predicates, agvocab.StepTokensIn)
+	record.TokensOut = getInt(predicates, agvocab.StepTokensOut)
+	record.Capability = getString(predicates, agvocab.StepCapability)
+	record.Provider = getString(predicates, agvocab.StepProvider)
+	record.Retries = getInt(predicates, agvocab.StepRetries)
+
+	if ts := getString(predicates, agvocab.StepTimestamp); ts != "" {
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			record.Timestamp = t
+		}
+	}
+
+	return record
+}
+
+// parseEntitiesFromData extracts a slice of entities from a GraphQL response data map.
 func parseEntitiesFromData(data map[string]any, key string) []graphEntity {
 	entitiesRaw, ok := data[key].([]any)
 	if !ok {
@@ -237,7 +299,7 @@ func parseEntitiesFromData(data map[string]any, key string) []graphEntity {
 	return entities
 }
 
-// parseGraphEntity parses a single entity from a map.
+// parseGraphEntity parses a single entity from a raw map.
 func parseGraphEntity(entityMap map[string]any) graphEntity {
 	entity := graphEntity{}
 
@@ -263,6 +325,31 @@ func parseGraphEntity(entityMap map[string]any) graphEntity {
 	return entity
 }
 
+// extractRelationshipObjects returns the object values for all triples with the
+// given predicate in the relationships query response.
+func extractRelationshipObjects(data map[string]any, predicate string) []string {
+	relsRaw, ok := data["relationships"].([]any)
+	if !ok {
+		return nil
+	}
+
+	var objects []string
+	for _, r := range relsRaw {
+		relMap, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		pred, _ := relMap["predicate"].(string)
+		if pred != predicate {
+			continue
+		}
+		if obj, ok := relMap["object"].(string); ok && obj != "" {
+			objects = append(objects, obj)
+		}
+	}
+	return objects
+}
+
 // getTripleValue returns the string value of a specific predicate in an entity.
 func getTripleValue(entity graphEntity, predicate string) string {
 	for _, t := range entity.Triples {
@@ -273,65 +360,6 @@ func getTripleValue(entity graphEntity, predicate string) string {
 		}
 	}
 	return ""
-}
-
-// isLLMCallEntity checks if an entity is an LLM call (type=model_call).
-func isLLMCallEntity(entity graphEntity) bool {
-	return getTripleValue(entity, semspec.PredicateActivityType) == "model_call"
-}
-
-// entityToCallRecord converts graph entity triples to CallRecord.
-func entityToCallRecord(entity graphEntity) *llm.CallRecord {
-	record := &llm.CallRecord{}
-
-	// Build a map for easier lookup
-	predicates := make(map[string]any)
-	var fallbacks []string
-
-	for _, t := range entity.Triples {
-		// Handle multi-value predicates
-		if t.Predicate == semspec.LLMFallback {
-			if val, ok := t.Object.(string); ok {
-				fallbacks = append(fallbacks, val)
-			}
-			continue
-		}
-		predicates[t.Predicate] = t.Object
-	}
-
-	// Map predicates to CallRecord fields
-	record.LoopID = getString(predicates, semspec.ActivityLoop)
-	record.TraceID = getString(predicates, semspec.DCIdentifier)
-	record.RequestID = getString(predicates, semspec.LLMRequestID)
-	record.Capability = getString(predicates, semspec.LLMCapability)
-	record.Model = getString(predicates, semspec.ActivityModel)
-	record.Provider = getString(predicates, semspec.LLMProvider)
-	record.PromptTokens = getInt(predicates, semspec.ActivityTokensIn)
-	record.CompletionTokens = getInt(predicates, semspec.ActivityTokensOut)
-	record.TotalTokens = record.PromptTokens + record.CompletionTokens
-	record.DurationMs = getInt64(predicates, semspec.ActivityDuration)
-	record.FinishReason = getString(predicates, semspec.LLMFinishReason)
-	record.Error = getString(predicates, semspec.ActivityError)
-	record.ContextBudget = getInt(predicates, semspec.LLMContextBudget)
-	record.ContextTruncated = getBool(predicates, semspec.LLMContextTruncated)
-	record.Retries = getInt(predicates, semspec.LLMRetries)
-	record.FallbacksUsed = fallbacks
-	record.MessagesCount = getInt(predicates, semspec.LLMMessagesCount)
-	record.ResponsePreview = getString(predicates, semspec.LLMResponsePreview)
-
-	// Parse timestamps
-	if startedAt := getString(predicates, semspec.ActivityStartedAt); startedAt != "" {
-		if t, err := time.Parse(time.RFC3339, startedAt); err == nil {
-			record.StartedAt = t
-		}
-	}
-	if endedAt := getString(predicates, semspec.ActivityEndedAt); endedAt != "" {
-		if t, err := time.Parse(time.RFC3339, endedAt); err == nil {
-			record.CompletedAt = t
-		}
-	}
-
-	return record
 }
 
 // getString extracts a string value from the predicates map.
@@ -383,17 +411,15 @@ func getInt64(predicates map[string]any, key string) int64 {
 	return 0
 }
 
-// getBool extracts a bool value from the predicates map.
-func getBool(predicates map[string]any, key string) bool {
-	if val, ok := predicates[key]; ok {
-		switch v := val.(type) {
-		case bool:
-			return v
-		case string:
-			return strings.ToLower(v) == "true"
+// sortStepsByIndex sorts step records by their StepIndex in ascending order.
+func sortStepsByIndex(steps []*StepRecord) {
+	sort.Slice(steps, func(i, j int) bool {
+		if steps[i].Index != steps[j].Index {
+			return steps[i].Index < steps[j].Index
 		}
-	}
-	return false
+		// Tiebreak by timestamp for deterministic ordering.
+		return steps[i].Timestamp.Before(steps[j].Timestamp)
+	})
 }
 
 // sanitizeGraphQLString removes potentially dangerous characters from GraphQL string inputs.

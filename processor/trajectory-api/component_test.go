@@ -97,8 +97,7 @@ func TestComponent_Initialize(t *testing.T) {
 	c := &Component{
 		logger: slog.Default(),
 		config: Config{
-			LLMCallsBucket: "LLM_CALLS",
-			LoopsBucket:    "AGENT_LOOPS",
+			LoopsBucket: "AGENT_LOOPS",
 		},
 	}
 
@@ -113,8 +112,7 @@ func TestComponent_StartWithoutNATSClient(t *testing.T) {
 		name:   "trajectory-api",
 		logger: slog.Default(),
 		config: Config{
-			LLMCallsBucket: "LLM_CALLS",
-			LoopsBucket:    "AGENT_LOOPS",
+			LoopsBucket: "AGENT_LOOPS",
 		},
 		// natsClient is nil
 	}
@@ -251,11 +249,14 @@ func TestComponent_UptimeCalculation(t *testing.T) {
 func TestConfig_DefaultValues(t *testing.T) {
 	defaults := DefaultConfig()
 
-	if defaults.LLMCallsBucket != "LLM_CALLS" {
-		t.Errorf("DefaultConfig().LLMCallsBucket = %q, want %q", defaults.LLMCallsBucket, "LLM_CALLS")
-	}
 	if defaults.LoopsBucket != "AGENT_LOOPS" {
 		t.Errorf("DefaultConfig().LoopsBucket = %q, want %q", defaults.LoopsBucket, "AGENT_LOOPS")
+	}
+	if defaults.ContentBucket != "AGENT_CONTENT" {
+		t.Errorf("DefaultConfig().ContentBucket = %q, want %q", defaults.ContentBucket, "AGENT_CONTENT")
+	}
+	if defaults.GraphGatewayURL != "http://localhost:8082" {
+		t.Errorf("DefaultConfig().GraphGatewayURL = %q, want %q", defaults.GraphGatewayURL, "http://localhost:8082")
 	}
 }
 
@@ -266,44 +267,27 @@ func TestConfig_Validate(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid config",
+			name: "valid config with all fields",
 			config: Config{
-				LLMCallsBucket:  "LLM_CALLS",
-				ToolCallsBucket: "TOOL_CALLS",
 				LoopsBucket:     "AGENT_LOOPS",
+				ContentBucket:   "AGENT_CONTENT",
+				GraphGatewayURL: "http://localhost:8082",
+				Org:             "semspec",
+				Platform:        "semspec-dev",
 			},
 			wantErr: false,
 		},
 		{
-			name: "missing tool_calls_bucket",
+			name: "valid config with only required fields",
 			config: Config{
-				LLMCallsBucket:  "LLM_CALLS",
-				ToolCallsBucket: "",
-				LoopsBucket:     "AGENT_LOOPS",
+				LoopsBucket: "AGENT_LOOPS",
 			},
-			wantErr: true,
-		},
-		{
-			name: "missing llm_calls_bucket",
-			config: Config{
-				LLMCallsBucket: "",
-				LoopsBucket:    "AGENT_LOOPS",
-			},
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name: "missing loops_bucket",
 			config: Config{
-				LLMCallsBucket: "LLM_CALLS",
-				LoopsBucket:    "",
-			},
-			wantErr: true,
-		},
-		{
-			name: "both missing",
-			config: Config{
-				LLMCallsBucket: "",
-				LoopsBucket:    "",
+				LoopsBucket: "",
 			},
 			wantErr: true,
 		},
@@ -321,11 +305,11 @@ func TestConfig_Validate(t *testing.T) {
 
 func TestNewComponent_ValidConfig(t *testing.T) {
 	rawConfig := json.RawMessage(`{
-		"llm_calls_bucket": "CUSTOM_LLM_CALLS",
-		"loops_bucket": "CUSTOM_LOOPS"
+		"loops_bucket": "CUSTOM_LOOPS",
+		"org": "myorg",
+		"platform": "myplatform"
 	}`)
 
-	// Create dependencies with required fields
 	deps := component.Dependencies{
 		Logger: slog.Default(),
 	}
@@ -340,16 +324,19 @@ func TestNewComponent_ValidConfig(t *testing.T) {
 		t.Fatal("NewComponent() did not return *Component")
 	}
 
-	if c.config.LLMCallsBucket != "CUSTOM_LLM_CALLS" {
-		t.Errorf("config.LLMCallsBucket = %q, want %q", c.config.LLMCallsBucket, "CUSTOM_LLM_CALLS")
-	}
 	if c.config.LoopsBucket != "CUSTOM_LOOPS" {
 		t.Errorf("config.LoopsBucket = %q, want %q", c.config.LoopsBucket, "CUSTOM_LOOPS")
+	}
+	if c.config.Org != "myorg" {
+		t.Errorf("config.Org = %q, want %q", c.config.Org, "myorg")
+	}
+	if c.config.Platform != "myplatform" {
+		t.Errorf("config.Platform = %q, want %q", c.config.Platform, "myplatform")
 	}
 }
 
 func TestNewComponent_DefaultsApplied(t *testing.T) {
-	// Empty config - defaults should be applied
+	// Empty config — defaults should be applied.
 	rawConfig := json.RawMessage(`{}`)
 
 	deps := component.Dependencies{
@@ -366,11 +353,11 @@ func TestNewComponent_DefaultsApplied(t *testing.T) {
 		t.Fatal("NewComponent() did not return *Component")
 	}
 
-	if c.config.LLMCallsBucket != "LLM_CALLS" {
-		t.Errorf("config.LLMCallsBucket = %q, want default %q", c.config.LLMCallsBucket, "LLM_CALLS")
-	}
 	if c.config.LoopsBucket != "AGENT_LOOPS" {
 		t.Errorf("config.LoopsBucket = %q, want default %q", c.config.LoopsBucket, "AGENT_LOOPS")
+	}
+	if c.config.ContentBucket != "AGENT_CONTENT" {
+		t.Errorf("config.ContentBucket = %q, want default %q", c.config.ContentBucket, "AGENT_CONTENT")
 	}
 }
 
@@ -392,8 +379,7 @@ func TestComponent_DoubleStart(t *testing.T) {
 		name:   "trajectory-api",
 		logger: slog.Default(),
 		config: Config{
-			LLMCallsBucket: "LLM_CALLS",
-			LoopsBucket:    "AGENT_LOOPS",
+			LoopsBucket: "AGENT_LOOPS",
 		},
 	}
 

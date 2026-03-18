@@ -157,7 +157,7 @@
         "timeout": "120s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
-        "trajectories_bucket": "AGENT_TRAJECTORIES"
+        "content_bucket": "AGENT_CONTENT"
       }
     },
     "agentic-model": {
@@ -361,10 +361,11 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "llm_calls_bucket": "LLM_CALLS",
         "loops_bucket": "AGENT_LOOPS",
         "graph_gateway_url": "http://localhost:8082",
-        "entity_prefix": "semspec.semspec.llm.call.semspec-e2e"
+        "content_bucket": "AGENT_CONTENT",
+        "org": "semspec",
+        "platform": "semspec-e2e"
       }
     },
     "workflow-api": {

@@ -4,259 +4,269 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c360studio/semspec/vocabulary/semspec"
+	agvocab "github.com/c360studio/semstreams/vocabulary/agentic"
 )
 
-func TestEntityToCallRecord(t *testing.T) {
-	startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
-	endTime := time.Date(2024, 1, 15, 10, 30, 5, 0, time.UTC)
+func TestEntityToStepRecord_ModelCall(t *testing.T) {
+	timestamp := time.Date(2026, 3, 17, 10, 30, 0, 0, time.UTC)
 
 	entity := graphEntity{
-		ID: "local.semspec.llm.call.project.req-123",
+		ID: "semspec.semspec-dev.agent.agentic-loop.step.loop-456-0",
 		Triples: []graphTriple{
-			{Predicate: semspec.PredicateActivityType, Object: "model_call"},
-			{Predicate: semspec.ActivityLoop, Object: "loop-456"},
-			{Predicate: semspec.DCIdentifier, Object: "trace-789"},
-			{Predicate: semspec.LLMRequestID, Object: "req-123"},
-			{Predicate: semspec.LLMCapability, Object: "planning"},
-			{Predicate: semspec.ActivityModel, Object: "claude-3-sonnet"},
-			{Predicate: semspec.LLMProvider, Object: "anthropic"},
-			{Predicate: semspec.ActivityTokensIn, Object: float64(1000)},
-			{Predicate: semspec.ActivityTokensOut, Object: float64(500)},
-			{Predicate: semspec.ActivityDuration, Object: float64(5000)},
-			{Predicate: semspec.LLMFinishReason, Object: "stop"},
-			{Predicate: semspec.LLMContextBudget, Object: float64(128000)},
-			{Predicate: semspec.LLMContextTruncated, Object: true},
-			{Predicate: semspec.LLMRetries, Object: float64(1)},
-			{Predicate: semspec.LLMFallback, Object: "claude-3-haiku"},
-			{Predicate: semspec.LLMMessagesCount, Object: float64(5)},
-			{Predicate: semspec.LLMResponsePreview, Object: "Here is the plan..."},
-			{Predicate: semspec.ActivityStartedAt, Object: startTime.Format(time.RFC3339)},
-			{Predicate: semspec.ActivityEndedAt, Object: endTime.Format(time.RFC3339)},
+			{Predicate: agvocab.StepType, Object: "model_call"},
+			{Predicate: agvocab.StepIndex, Object: float64(0)},
+			{Predicate: agvocab.StepLoop, Object: "semspec.semspec-dev.agent.agentic-loop.execution.loop-456"},
+			{Predicate: agvocab.StepTimestamp, Object: timestamp.Format(time.RFC3339)},
+			{Predicate: agvocab.StepDuration, Object: float64(5000)},
+			{Predicate: agvocab.StepModel, Object: "claude-sonnet"},
+			{Predicate: agvocab.StepTokensIn, Object: float64(1000)},
+			{Predicate: agvocab.StepTokensOut, Object: float64(500)},
+			{Predicate: agvocab.StepCapability, Object: "planning"},
+			{Predicate: agvocab.StepProvider, Object: "anthropic"},
+			{Predicate: agvocab.StepRetries, Object: float64(1)},
 		},
 	}
 
-	record := entityToCallRecord(entity)
+	record := entityToStepRecord(entity)
 
-	// Verify all fields are correctly extracted
-	if record.LoopID != "loop-456" {
-		t.Errorf("LoopID = %q, want %q", record.LoopID, "loop-456")
+	if record.EntityID != entity.ID {
+		t.Errorf("EntityID = %q, want %q", record.EntityID, entity.ID)
 	}
-	if record.TraceID != "trace-789" {
-		t.Errorf("TraceID = %q, want %q", record.TraceID, "trace-789")
+	if record.Type != "model_call" {
+		t.Errorf("Type = %q, want %q", record.Type, "model_call")
 	}
-	if record.RequestID != "req-123" {
-		t.Errorf("RequestID = %q, want %q", record.RequestID, "req-123")
+	if record.Index != 0 {
+		t.Errorf("Index = %d, want 0", record.Index)
+	}
+	if record.LoopEntityID != "semspec.semspec-dev.agent.agentic-loop.execution.loop-456" {
+		t.Errorf("LoopEntityID = %q", record.LoopEntityID)
+	}
+	if !record.Timestamp.Equal(timestamp) {
+		t.Errorf("Timestamp = %v, want %v", record.Timestamp, timestamp)
+	}
+	if record.DurationMs != 5000 {
+		t.Errorf("DurationMs = %d, want 5000", record.DurationMs)
+	}
+	if record.Model != "claude-sonnet" {
+		t.Errorf("Model = %q, want %q", record.Model, "claude-sonnet")
+	}
+	if record.TokensIn != 1000 {
+		t.Errorf("TokensIn = %d, want 1000", record.TokensIn)
+	}
+	if record.TokensOut != 500 {
+		t.Errorf("TokensOut = %d, want 500", record.TokensOut)
 	}
 	if record.Capability != "planning" {
 		t.Errorf("Capability = %q, want %q", record.Capability, "planning")
 	}
-	if record.Model != "claude-3-sonnet" {
-		t.Errorf("Model = %q, want %q", record.Model, "claude-3-sonnet")
-	}
 	if record.Provider != "anthropic" {
 		t.Errorf("Provider = %q, want %q", record.Provider, "anthropic")
 	}
-	if record.PromptTokens != 1000 {
-		t.Errorf("PromptTokens = %d, want %d", record.PromptTokens, 1000)
-	}
-	if record.CompletionTokens != 500 {
-		t.Errorf("CompletionTokens = %d, want %d", record.CompletionTokens, 500)
-	}
-	if record.TotalTokens != 1500 {
-		t.Errorf("TotalTokens = %d, want %d", record.TotalTokens, 1500)
-	}
-	if record.DurationMs != 5000 {
-		t.Errorf("DurationMs = %d, want %d", record.DurationMs, 5000)
-	}
-	if record.FinishReason != "stop" {
-		t.Errorf("FinishReason = %q, want %q", record.FinishReason, "stop")
-	}
-	if record.ContextBudget != 128000 {
-		t.Errorf("ContextBudget = %d, want %d", record.ContextBudget, 128000)
-	}
-	if !record.ContextTruncated {
-		t.Error("ContextTruncated = false, want true")
-	}
 	if record.Retries != 1 {
-		t.Errorf("Retries = %d, want %d", record.Retries, 1)
-	}
-	if len(record.FallbacksUsed) != 1 || record.FallbacksUsed[0] != "claude-3-haiku" {
-		t.Errorf("FallbacksUsed = %v, want [claude-3-haiku]", record.FallbacksUsed)
-	}
-	if record.MessagesCount != 5 {
-		t.Errorf("MessagesCount = %d, want %d", record.MessagesCount, 5)
-	}
-	if record.ResponsePreview != "Here is the plan..." {
-		t.Errorf("ResponsePreview = %q, want %q", record.ResponsePreview, "Here is the plan...")
-	}
-	if !record.StartedAt.Equal(startTime) {
-		t.Errorf("StartedAt = %v, want %v", record.StartedAt, startTime)
-	}
-	if !record.CompletedAt.Equal(endTime) {
-		t.Errorf("CompletedAt = %v, want %v", record.CompletedAt, endTime)
+		t.Errorf("Retries = %d, want 1", record.Retries)
 	}
 }
 
-func TestIsLLMCallEntity(t *testing.T) {
-	tests := []struct {
-		name   string
-		entity graphEntity
-		want   bool
-	}{
-		{
-			name: "model_call entity",
-			entity: graphEntity{
-				Triples: []graphTriple{
-					{Predicate: semspec.PredicateActivityType, Object: "model_call"},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "tool_call entity",
-			entity: graphEntity{
-				Triples: []graphTriple{
-					{Predicate: semspec.PredicateActivityType, Object: "tool_call"},
-				},
-			},
-			want: false,
-		},
-		{
-			name: "entity without type",
-			entity: graphEntity{
-				Triples: []graphTriple{
-					{Predicate: semspec.ActivityModel, Object: "claude-3"},
-				},
-			},
-			want: false,
-		},
-		{
-			name: "empty entity",
-			entity: graphEntity{
-				Triples: []graphTriple{},
-			},
-			want: false,
-		},
-	}
+func TestEntityToStepRecord_ToolCall(t *testing.T) {
+	timestamp := time.Date(2026, 3, 17, 10, 30, 5, 0, time.UTC)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isLLMCallEntity(tt.entity)
-			if got != tt.want {
-				t.Errorf("isLLMCallEntity() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestGetTripleValue(t *testing.T) {
 	entity := graphEntity{
+		ID: "semspec.semspec-dev.agent.agentic-loop.step.loop-456-1",
 		Triples: []graphTriple{
-			{Predicate: "test.string", Object: "hello"},
-			{Predicate: "test.number", Object: float64(42)},
-			{Predicate: "test.bool", Object: true},
+			{Predicate: agvocab.StepType, Object: "tool_call"},
+			{Predicate: agvocab.StepIndex, Object: float64(1)},
+			{Predicate: agvocab.StepLoop, Object: "semspec.semspec-dev.agent.agentic-loop.execution.loop-456"},
+			{Predicate: agvocab.StepTimestamp, Object: timestamp.Format(time.RFC3339)},
+			{Predicate: agvocab.StepDuration, Object: float64(250)},
+			{Predicate: agvocab.StepToolName, Object: "file_read"},
+			{Predicate: agvocab.StepCapability, Object: "coding"},
 		},
 	}
 
-	if got := getTripleValue(entity, "test.string"); got != "hello" {
-		t.Errorf("getTripleValue(test.string) = %q, want %q", got, "hello")
+	record := entityToStepRecord(entity)
+
+	if record.Type != "tool_call" {
+		t.Errorf("Type = %q, want %q", record.Type, "tool_call")
 	}
-	if got := getTripleValue(entity, "test.number"); got != "" {
-		t.Errorf("getTripleValue(test.number) = %q, want empty (not a string)", got)
+	if record.Index != 1 {
+		t.Errorf("Index = %d, want 1", record.Index)
 	}
-	if got := getTripleValue(entity, "nonexistent"); got != "" {
-		t.Errorf("getTripleValue(nonexistent) = %q, want empty", got)
+	if record.ToolName != "file_read" {
+		t.Errorf("ToolName = %q, want %q", record.ToolName, "file_read")
+	}
+	if record.DurationMs != 250 {
+		t.Errorf("DurationMs = %d, want 250", record.DurationMs)
+	}
+	if record.Capability != "coding" {
+		t.Errorf("Capability = %q, want %q", record.Capability, "coding")
+	}
+	// Tool-call-only fields should be zero.
+	if record.Model != "" {
+		t.Errorf("Model = %q, want empty (tool_call has no model)", record.Model)
+	}
+	if record.TokensIn != 0 {
+		t.Errorf("TokensIn = %d, want 0 (tool_call has no tokens)", record.TokensIn)
 	}
 }
 
-func TestParseGraphEntity(t *testing.T) {
-	entityMap := map[string]any{
-		"id": "test.entity.123",
-		"triples": []any{
-			map[string]any{
-				"predicate": "test.predicate",
-				"object":    "test value",
-			},
-			map[string]any{
-				"predicate": "test.number",
-				"object":    float64(42),
-			},
+func TestEntityToStepRecord_MissingTimestamp(t *testing.T) {
+	entity := graphEntity{
+		ID: "semspec.semspec-dev.agent.agentic-loop.step.loop-456-0",
+		Triples: []graphTriple{
+			{Predicate: agvocab.StepType, Object: "model_call"},
+			{Predicate: agvocab.StepIndex, Object: float64(0)},
 		},
 	}
 
-	entity := parseGraphEntity(entityMap)
+	record := entityToStepRecord(entity)
 
-	if entity.ID != "test.entity.123" {
-		t.Errorf("ID = %q, want %q", entity.ID, "test.entity.123")
+	if !record.Timestamp.IsZero() {
+		t.Errorf("Timestamp should be zero when missing, got %v", record.Timestamp)
 	}
-	if len(entity.Triples) != 2 {
-		t.Fatalf("len(Triples) = %d, want %d", len(entity.Triples), 2)
+}
+
+func TestSortStepsByIndex(t *testing.T) {
+	now := time.Now()
+	steps := []*StepRecord{
+		{Index: 3, Timestamp: now.Add(3 * time.Second)},
+		{Index: 1, Timestamp: now.Add(1 * time.Second)},
+		{Index: 0, Timestamp: now},
+		{Index: 2, Timestamp: now.Add(2 * time.Second)},
 	}
-	if entity.Triples[0].Predicate != "test.predicate" {
-		t.Errorf("Triples[0].Predicate = %q, want %q", entity.Triples[0].Predicate, "test.predicate")
-	}
-	if entity.Triples[0].Object != "test value" {
-		t.Errorf("Triples[0].Object = %v, want %v", entity.Triples[0].Object, "test value")
+
+	sortStepsByIndex(steps)
+
+	for i, step := range steps {
+		if step.Index != i {
+			t.Errorf("steps[%d].Index = %d, want %d (not sorted correctly)", i, step.Index, i)
+		}
 	}
 }
 
 func TestParseEntitiesFromData(t *testing.T) {
 	data := map[string]any{
-		"entitiesByPrefix": []any{
+		"entitiesByPredicate": []any{
 			map[string]any{
-				"id": "entity.1",
+				"id": "semspec.semspec-dev.agent.agentic-loop.step.loop-1-0",
 				"triples": []any{
 					map[string]any{
-						"predicate": semspec.PredicateActivityType,
+						"predicate": agvocab.StepType,
 						"object":    "model_call",
 					},
 					map[string]any{
-						"predicate": semspec.ActivityLoop,
-						"object":    "loop-1",
+						"predicate": agvocab.StepLoop,
+						"object":    "semspec.semspec-dev.agent.agentic-loop.execution.loop-1",
 					},
 				},
 			},
 			map[string]any{
-				"id": "entity.2",
+				"id": "semspec.semspec-dev.agent.agentic-loop.step.loop-1-1",
 				"triples": []any{
 					map[string]any{
-						"predicate": semspec.PredicateActivityType,
-						"object":    "model_call",
-					},
-					map[string]any{
-						"predicate": semspec.ActivityLoop,
-						"object":    "loop-2",
+						"predicate": agvocab.StepType,
+						"object":    "tool_call",
 					},
 				},
 			},
 		},
 	}
 
-	entities := parseEntitiesFromData(data, "entitiesByPrefix")
+	entities := parseEntitiesFromData(data, "entitiesByPredicate")
 	if len(entities) != 2 {
 		t.Fatalf("parseEntitiesFromData() returned %d entities, want 2", len(entities))
 	}
-	if entities[0].ID != "entity.1" {
-		t.Errorf("entities[0].ID = %q, want %q", entities[0].ID, "entity.1")
+	if entities[0].ID != "semspec.semspec-dev.agent.agentic-loop.step.loop-1-0" {
+		t.Errorf("entities[0].ID = %q", entities[0].ID)
 	}
-	if entities[1].ID != "entity.2" {
-		t.Errorf("entities[1].ID = %q, want %q", entities[1].ID, "entity.2")
+	if entities[1].ID != "semspec.semspec-dev.agent.agentic-loop.step.loop-1-1" {
+		t.Errorf("entities[1].ID = %q", entities[1].ID)
 	}
 
-	// Test nil data
+	// Non-existent key returns nil.
 	nilEntities := parseEntitiesFromData(data, "nonexistent")
 	if nilEntities != nil {
 		t.Errorf("parseEntitiesFromData(nonexistent) = %v, want nil", nilEntities)
 	}
 }
 
+func TestParseGraphEntity(t *testing.T) {
+	entityMap := map[string]any{
+		"id": "semspec.semspec-dev.agent.agentic-loop.step.loop-1-0",
+		"triples": []any{
+			map[string]any{
+				"predicate": agvocab.StepType,
+				"object":    "model_call",
+			},
+			map[string]any{
+				"predicate": agvocab.StepTokensIn,
+				"object":    float64(4096),
+			},
+		},
+	}
+
+	entity := parseGraphEntity(entityMap)
+
+	if entity.ID != "semspec.semspec-dev.agent.agentic-loop.step.loop-1-0" {
+		t.Errorf("ID = %q", entity.ID)
+	}
+	if len(entity.Triples) != 2 {
+		t.Fatalf("len(Triples) = %d, want 2", len(entity.Triples))
+	}
+	if entity.Triples[0].Predicate != agvocab.StepType {
+		t.Errorf("Triples[0].Predicate = %q, want %q", entity.Triples[0].Predicate, agvocab.StepType)
+	}
+	if entity.Triples[0].Object != "model_call" {
+		t.Errorf("Triples[0].Object = %v, want model_call", entity.Triples[0].Object)
+	}
+}
+
+func TestExtractRelationshipObjects(t *testing.T) {
+	loopEntityID := "semspec.semspec-dev.agent.agentic-loop.execution.loop-1"
+	step0EntityID := "semspec.semspec-dev.agent.agentic-loop.step.loop-1-0"
+	step1EntityID := "semspec.semspec-dev.agent.agentic-loop.step.loop-1-1"
+
+	data := map[string]any{
+		"relationships": []any{
+			map[string]any{
+				"predicate": agvocab.LoopHasStep,
+				"object":    step0EntityID,
+			},
+			map[string]any{
+				"predicate": agvocab.LoopHasStep,
+				"object":    step1EntityID,
+			},
+			map[string]any{
+				"predicate": "agent.loop.outcome",
+				"object":    "success",
+			},
+		},
+	}
+
+	_ = loopEntityID // entityId is passed as query variable, not in response
+
+	objects := extractRelationshipObjects(data, agvocab.LoopHasStep)
+	if len(objects) != 2 {
+		t.Fatalf("extractRelationshipObjects() returned %d objects, want 2", len(objects))
+	}
+	if objects[0] != step0EntityID {
+		t.Errorf("objects[0] = %q, want %q", objects[0], step0EntityID)
+	}
+	if objects[1] != step1EntityID {
+		t.Errorf("objects[1] = %q, want %q", objects[1], step1EntityID)
+	}
+
+	// Non-matching predicate returns nil.
+	objects = extractRelationshipObjects(data, "agent.loop.parent")
+	if len(objects) != 0 {
+		t.Errorf("extractRelationshipObjects(non-matching) = %v, want empty", objects)
+	}
+}
+
 func TestGetString(t *testing.T) {
 	predicates := map[string]any{
-		"string_val":  "hello",
-		"float_val":   float64(123.45),
-		"int_val":     42,
-		"missing_key": nil,
+		"string_val": "hello",
+		"float_val":  float64(123.45),
+		"int_val":    42,
 	}
 
 	if got := getString(predicates, "string_val"); got != "hello" {
@@ -278,86 +288,37 @@ func TestGetInt(t *testing.T) {
 	}
 
 	if got := getInt(predicates, "float_val"); got != 42 {
-		t.Errorf("getInt(float_val) = %d, want %d", got, 42)
+		t.Errorf("getInt(float_val) = %d, want 42", got)
 	}
 	if got := getInt(predicates, "int_val"); got != 100 {
-		t.Errorf("getInt(int_val) = %d, want %d", got, 100)
+		t.Errorf("getInt(int_val) = %d, want 100", got)
 	}
 	if got := getInt(predicates, "string_val"); got != 200 {
-		t.Errorf("getInt(string_val) = %d, want %d", got, 200)
+		t.Errorf("getInt(string_val) = %d, want 200", got)
 	}
 	if got := getInt(predicates, "nonexistent"); got != 0 {
-		t.Errorf("getInt(nonexistent) = %d, want %d", got, 0)
+		t.Errorf("getInt(nonexistent) = %d, want 0", got)
 	}
 }
 
-func TestGetBool(t *testing.T) {
+func TestGetInt64(t *testing.T) {
 	predicates := map[string]any{
-		"bool_true":   true,
-		"bool_false":  false,
-		"string_true": "true",
-		"string_TRUE": "TRUE",
+		"float_val":  float64(9999),
+		"int64_val":  int64(123456789),
+		"string_val": "42",
 	}
 
-	if got := getBool(predicates, "bool_true"); !got {
-		t.Error("getBool(bool_true) = false, want true")
+	if got := getInt64(predicates, "float_val"); got != 9999 {
+		t.Errorf("getInt64(float_val) = %d, want 9999", got)
 	}
-	if got := getBool(predicates, "bool_false"); got {
-		t.Error("getBool(bool_false) = true, want false")
+	if got := getInt64(predicates, "int64_val"); got != 123456789 {
+		t.Errorf("getInt64(int64_val) = %d, want 123456789", got)
 	}
-	if got := getBool(predicates, "string_true"); !got {
-		t.Error("getBool(string_true) = false, want true")
+	if got := getInt64(predicates, "string_val"); got != 42 {
+		t.Errorf("getInt64(string_val) = %d, want 42", got)
 	}
-	if got := getBool(predicates, "string_TRUE"); !got {
-		t.Error("getBool(string_TRUE) = false, want true")
-	}
-	if got := getBool(predicates, "nonexistent"); got {
-		t.Error("getBool(nonexistent) = true, want false")
-	}
-}
-
-func TestEntityToCallRecord_WithError(t *testing.T) {
-	entity := graphEntity{
-		ID: "local.semspec.llm.call.project.req-err",
-		Triples: []graphTriple{
-			{Predicate: semspec.PredicateActivityType, Object: "model_call"},
-			{Predicate: semspec.LLMRequestID, Object: "req-err"},
-			{Predicate: semspec.ActivityError, Object: "rate limit exceeded"},
-			{Predicate: semspec.ActivitySuccess, Object: false},
-		},
-	}
-
-	record := entityToCallRecord(entity)
-
-	if record.Error != "rate limit exceeded" {
-		t.Errorf("Error = %q, want %q", record.Error, "rate limit exceeded")
-	}
-	if record.RequestID != "req-err" {
-		t.Errorf("RequestID = %q, want %q", record.RequestID, "req-err")
-	}
-}
-
-func TestEntityToCallRecord_MultipleFallbacks(t *testing.T) {
-	entity := graphEntity{
-		ID: "local.semspec.llm.call.project.req-multi",
-		Triples: []graphTriple{
-			{Predicate: semspec.PredicateActivityType, Object: "model_call"},
-			{Predicate: semspec.LLMFallback, Object: "claude-3-haiku"},
-			{Predicate: semspec.LLMFallback, Object: "gpt-4"},
-			{Predicate: semspec.LLMFallback, Object: "llama-3"},
-		},
-	}
-
-	record := entityToCallRecord(entity)
-
-	if len(record.FallbacksUsed) != 3 {
-		t.Fatalf("len(FallbacksUsed) = %d, want %d", len(record.FallbacksUsed), 3)
-	}
-	expected := []string{"claude-3-haiku", "gpt-4", "llama-3"}
-	for i, want := range expected {
-		if record.FallbacksUsed[i] != want {
-			t.Errorf("FallbacksUsed[%d] = %q, want %q", i, record.FallbacksUsed[i], want)
-		}
+	if got := getInt64(predicates, "nonexistent"); got != 0 {
+		t.Errorf("getInt64(nonexistent) = %d, want 0", got)
 	}
 }
 
@@ -393,9 +354,9 @@ func TestSanitizeGraphQLString(t *testing.T) {
 			want:  "",
 		},
 		{
-			name:  "uuid format unchanged",
-			input: "550e8400-e29b-41d4-a716-446655440000",
-			want:  "550e8400-e29b-41d4-a716-446655440000",
+			name:  "entity id format unchanged",
+			input: "semspec.semspec-dev.agent.agentic-loop.execution.abc123",
+			want:  "semspec.semspec-dev.agent.agentic-loop.execution.abc123",
 		},
 	}
 
@@ -406,5 +367,25 @@ func TestSanitizeGraphQLString(t *testing.T) {
 				t.Errorf("sanitizeGraphQLString(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGetTripleValue(t *testing.T) {
+	entity := graphEntity{
+		Triples: []graphTriple{
+			{Predicate: agvocab.StepType, Object: "model_call"},
+			{Predicate: agvocab.StepTokensIn, Object: float64(4096)},
+		},
+	}
+
+	if got := getTripleValue(entity, agvocab.StepType); got != "model_call" {
+		t.Errorf("getTripleValue(StepType) = %q, want %q", got, "model_call")
+	}
+	// Non-string values return empty.
+	if got := getTripleValue(entity, agvocab.StepTokensIn); got != "" {
+		t.Errorf("getTripleValue(StepTokensIn) = %q, want empty (not a string)", got)
+	}
+	if got := getTripleValue(entity, "nonexistent"); got != "" {
+		t.Errorf("getTripleValue(nonexistent) = %q, want empty", got)
 	}
 }

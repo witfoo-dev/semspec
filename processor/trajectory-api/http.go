@@ -7,12 +7,9 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semstreams/message"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -26,11 +23,10 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	mux.HandleFunc(prefix+"loops/", c.handleGetLoopTrajectory)
 	mux.HandleFunc(prefix+"traces/", c.handleGetTraceTrajectory)
 	mux.HandleFunc(prefix+"workflows/", c.handleGetWorkflowTrajectory)
-	mux.HandleFunc(prefix+"calls/", c.handleGetCall)
 	mux.HandleFunc(prefix+"context-stats", c.handleGetContextStats)
 }
 
-// Trajectory represents aggregated data about an agent loop's LLM interactions.
+// Trajectory represents aggregated data about an agent loop's interactions.
 type Trajectory struct {
 	// LoopID is the agent loop identifier.
 	LoopID string `json:"loop_id"`
@@ -41,16 +37,16 @@ type Trajectory struct {
 	// Steps is the total number of iterations in the loop.
 	Steps int `json:"steps"`
 
-	// ToolCalls is the number of tool calls made.
+	// ToolCalls is the number of tool call steps.
 	ToolCalls int `json:"tool_calls"`
 
-	// ModelCalls is the number of LLM calls made.
+	// ModelCalls is the number of model call steps.
 	ModelCalls int `json:"model_calls"`
 
-	// TokensIn is the total input tokens across all calls.
+	// TokensIn is the total input tokens across all model call steps.
 	TokensIn int `json:"tokens_in"`
 
-	// TokensOut is the total output tokens across all calls.
+	// TokensOut is the total output tokens across all model call steps.
 	TokensOut int `json:"tokens_out"`
 
 	// DurationMs is the total duration in milliseconds.
@@ -69,64 +65,48 @@ type Trajectory struct {
 	Entries []TrajectoryEntry `json:"entries,omitempty"`
 }
 
-// TrajectoryEntry represents a single event in the trajectory.
+// TrajectoryEntry represents a single step in the agent loop trajectory.
 type TrajectoryEntry struct {
-	// Type is the entry type (model_call, tool_call).
+	// Type is the entry type ("model_call" or "tool_call").
 	Type string `json:"type"`
 
-	// Timestamp is when this entry occurred.
+	// Timestamp is when this step occurred.
 	Timestamp time.Time `json:"timestamp"`
 
-	// DurationMs is how long this entry took.
+	// DurationMs is how long this step took in milliseconds.
 	DurationMs int64 `json:"duration_ms,omitempty"`
 
-	// RequestID uniquely identifies this LLM call for drill-down to full record.
-	RequestID string `json:"request_id,omitempty"`
-
-	// Model is the model used (for model_call).
+	// Model is the model used (for model_call steps).
 	Model string `json:"model,omitempty"`
 
-	// Provider is the provider used (for model_call).
+	// Provider is the provider used (for model_call steps).
 	Provider string `json:"provider,omitempty"`
 
-	// Capability is the requested capability (for model_call).
+	// Capability is the role or purpose of this step.
 	Capability string `json:"capability,omitempty"`
 
-	// TokensIn is input tokens (for model_call).
+	// TokensIn is input tokens (for model_call steps).
 	TokensIn int `json:"tokens_in,omitempty"`
 
-	// TokensOut is output tokens (for model_call).
+	// TokensOut is output tokens (for model_call steps).
 	TokensOut int `json:"tokens_out,omitempty"`
 
-	// FinishReason is why the model stopped (for model_call).
-	FinishReason string `json:"finish_reason,omitempty"`
+	// Retries is the number of retries before this step succeeded.
+	Retries int `json:"retries,omitempty"`
 
 	// Error is any error message.
 	Error string `json:"error,omitempty"`
 
-	// Retries is number of retry attempts (for model_call).
-	Retries int `json:"retries,omitempty"`
-
-	// MessagesCount is the number of messages sent (for model_call).
-	MessagesCount int `json:"messages_count,omitempty"`
-
-	// ResponsePreview is a truncated preview of the response (for model_call).
+	// ResponsePreview is a truncated preview of the model response (for model_call, format=json).
 	ResponsePreview string `json:"response_preview,omitempty"`
 
-	// StorageRef points to the full CallRecord in ObjectStore (for model_call).
-	// Present when the call data has been offloaded to ObjectStore.
-	StorageRef *message.StorageReference `json:"storage_ref,omitempty"`
-
-	// ToolName is the tool that was executed (for tool_call).
+	// ToolName is the tool that was executed (for tool_call steps).
 	ToolName string `json:"tool_name,omitempty"`
 
-	// ToolArguments is the JSON-encoded tool arguments (for tool_call).
+	// ToolArguments is the JSON-encoded tool arguments (for tool_call, format=json).
 	ToolArguments string `json:"tool_arguments,omitempty"`
 
-	// Status is the execution result status (for tool_call: "success", "error").
-	Status string `json:"status,omitempty"`
-
-	// ResultPreview is a truncated preview of the tool result (for tool_call).
+	// ResultPreview is a truncated preview of the tool result (for tool_call, format=json).
 	ResultPreview string `json:"result_preview,omitempty"`
 }
 
@@ -182,6 +162,10 @@ func (c *Component) handleGetLoopTrajectory(w http.ResponseWriter, r *http.Reque
 
 // handleGetTraceTrajectory handles GET /traces/{trace_id}?format={summary|json}
 // Returns aggregated trajectory data for the given trace ID.
+//
+// Note: With the step entity model, trace-level queries are not directly supported
+// because step entities do not have a trace_id predicate. This endpoint uses the
+// loop state to find loops matching the trace, then aggregates their steps.
 func (c *Component) handleGetTraceTrajectory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -220,7 +204,7 @@ func (c *Component) handleGetTraceTrajectory(w http.ResponseWriter, r *http.Requ
 
 // getTrajectoryByLoopID retrieves trajectory data for a specific loop.
 func (c *Component) getTrajectoryByLoopID(ctx context.Context, loopID string, includeEntries bool) (*Trajectory, error) {
-	// Get loop state to find trace_id
+	// Get loop state for metadata (status, trace_id, start/end time).
 	loopState, err := c.getLoopState(ctx, loopID)
 	if err != nil {
 		return nil, err
@@ -229,75 +213,40 @@ func (c *Component) getTrajectoryByLoopID(ctx context.Context, loopID string, in
 		return nil, nil
 	}
 
-	// Get LLM calls for this loop
-	calls, err := c.getLLMCallsByLoopID(ctx, loopID)
+	// Query step entities from the knowledge graph.
+	steps, err := c.getStepsByLoopID(ctx, loopID)
 	if err != nil {
-		// Log but continue - we can still return loop state
-		c.logger.Warn("Failed to get LLM calls", "loop_id", loopID, "error", err)
-		calls = []*llm.CallRecord{}
+		// Log but continue — loop state alone is still useful.
+		c.logger.Warn("Failed to get step entities", "loop_id", loopID, "error", err)
+		steps = nil
 	}
 
-	// Get tool calls for this loop
-	toolCalls, err := c.getToolCallsByLoopID(ctx, loopID)
-	if err != nil {
-		// Log but continue - tool calls are supplementary
-		c.logger.Warn("Failed to get tool calls", "loop_id", loopID, "error", err)
-		toolCalls = []*llm.ToolCallRecord{}
-	}
-
-	return c.buildTrajectory(loopState, calls, toolCalls, includeEntries), nil
+	return c.buildTrajectory(loopState, steps, includeEntries), nil
 }
 
 // getTrajectoryByTraceID retrieves trajectory data for a specific trace.
+// This scans the AGENT_LOOPS bucket for loops matching the trace ID, then
+// aggregates step data across all matching loops.
 func (c *Component) getTrajectoryByTraceID(ctx context.Context, traceID string, includeEntries bool) (*Trajectory, error) {
-	// Get LLM calls for this trace
-	calls, err := c.getLLMCallsByTraceID(ctx, traceID)
+	// Find the loop state for this trace (first matching loop).
+	loopState, err := c.findLoopStateByTraceID(ctx, traceID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get tool calls for this trace
-	toolCalls, err := c.getToolCallsByTraceID(ctx, traceID)
-	if err != nil {
-		// Log but continue - tool calls are supplementary
-		c.logger.Warn("Failed to get tool calls", "trace_id", traceID, "error", err)
-		toolCalls = []*llm.ToolCallRecord{}
-	}
-
-	if len(calls) == 0 && len(toolCalls) == 0 {
+	if loopState == nil {
+		// Return empty trajectory scoped to the trace — no loops found yet.
 		return nil, nil
 	}
 
-	// Try to find loop state if any call has a loop_id
-	var loopState *LoopState
-	for _, call := range calls {
-		if call.LoopID != "" {
-			loopState, _ = c.getLoopState(ctx, call.LoopID)
-			if loopState != nil {
-				break
-			}
-		}
-	}
-	// Also check tool calls for loop_id if we haven't found one yet
-	if loopState == nil {
-		for _, tc := range toolCalls {
-			if tc.LoopID != "" {
-				loopState, _ = c.getLoopState(ctx, tc.LoopID)
-				if loopState != nil {
-					break
-				}
-			}
-		}
+	// Query steps for the found loop.
+	steps, err := c.getStepsByLoopID(ctx, loopState.ID)
+	if err != nil {
+		c.logger.Warn("Failed to get step entities for trace", "trace_id", traceID, "loop_id", loopState.ID, "error", err)
+		steps = nil
 	}
 
-	// Build trajectory without loop state if not found
-	if loopState == nil {
-		loopState = &LoopState{
-			TraceID: traceID,
-		}
-	}
-
-	return c.buildTrajectory(loopState, calls, toolCalls, includeEntries), nil
+	return c.buildTrajectory(loopState, steps, includeEntries), nil
 }
 
 // getLoopState retrieves the loop state from the AGENT_LOOPS bucket.
@@ -323,49 +272,9 @@ func (c *Component) getLoopState(ctx context.Context, loopID string) (*LoopState
 	return &state, nil
 }
 
-// getLLMCallsByLoopID retrieves LLM call records for a loop from the knowledge graph.
-func (c *Component) getLLMCallsByLoopID(ctx context.Context, loopID string) ([]*llm.CallRecord, error) {
-	c.mu.RLock()
-	querier := c.llmCallQuerier
-	c.mu.RUnlock()
-
-	if querier == nil {
-		c.logger.Debug("Graph querier not initialized, returning empty LLM calls")
-		return []*llm.CallRecord{}, nil
-	}
-
-	records, err := querier.QueryByLoopID(ctx, loopID)
-	if err != nil {
-		c.logger.Warn("Failed to query LLM calls by loop ID", "loop_id", loopID, "error", err)
-		return []*llm.CallRecord{}, nil // Graceful degradation
-	}
-
-	return records, nil
-}
-
-// getLLMCallsByTraceID retrieves LLM call records for a trace from the knowledge graph.
-func (c *Component) getLLMCallsByTraceID(ctx context.Context, traceID string) ([]*llm.CallRecord, error) {
-	c.mu.RLock()
-	querier := c.llmCallQuerier
-	c.mu.RUnlock()
-
-	if querier == nil {
-		c.logger.Debug("Graph querier not initialized, returning empty LLM calls")
-		return []*llm.CallRecord{}, nil
-	}
-
-	records, err := querier.QueryByTraceID(ctx, traceID)
-	if err != nil {
-		c.logger.Warn("Failed to query LLM calls by trace ID", "trace_id", traceID, "error", err)
-		return []*llm.CallRecord{}, nil // Graceful degradation
-	}
-
-	return records, nil
-}
-
-// getToolCallsByLoopID retrieves tool call records for a loop.
-func (c *Component) getToolCallsByLoopID(ctx context.Context, loopID string) ([]*llm.ToolCallRecord, error) {
-	bucket, err := c.getToolCallsBucket(ctx)
+// findLoopStateByTraceID scans the AGENT_LOOPS bucket for the first loop matching a trace ID.
+func (c *Component) findLoopStateByTraceID(ctx context.Context, traceID string) (*LoopState, error) {
+	bucket, err := c.getLoopsBucket(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -373,180 +282,117 @@ func (c *Component) getToolCallsByLoopID(ctx context.Context, loopID string) ([]
 	keys, err := bucket.Keys(ctx)
 	if err != nil {
 		if errors.Is(err, jetstream.ErrNoKeysFound) {
-			return []*llm.ToolCallRecord{}, nil
+			return nil, nil
 		}
 		return nil, err
 	}
 
-	var records []*llm.ToolCallRecord
 	for _, key := range keys {
 		entry, err := bucket.Get(ctx, key)
 		if err != nil {
 			if !errors.Is(err, jetstream.ErrKeyDeleted) && !errors.Is(err, jetstream.ErrKeyNotFound) {
-				c.logger.Warn("Failed to get tool call key", "key", key, "error", err)
+				c.logger.Warn("Failed to get loop key", "key", key, "error", err)
 			}
 			continue
 		}
 
-		var record llm.ToolCallRecord
-		if err := json.Unmarshal(entry.Value(), &record); err != nil {
-			c.logger.Warn("Failed to unmarshal tool call record", "key", key, "error", err)
+		var state LoopState
+		if err := json.Unmarshal(entry.Value(), &state); err != nil {
 			continue
 		}
 
-		if record.LoopID == loopID {
-			recordCopy := record
-			records = append(records, &recordCopy)
+		if state.TraceID == traceID {
+			return &state, nil
 		}
 	}
 
-	llm.SortToolCallsByStartTime(records)
-	return records, nil
+	return nil, nil
 }
 
-// getToolCallsByTraceID retrieves tool call records for a trace.
-func (c *Component) getToolCallsByTraceID(ctx context.Context, traceID string) ([]*llm.ToolCallRecord, error) {
-	bucket, err := c.getToolCallsBucket(ctx)
+// getStepsByLoopID fetches step entities for a loop from the knowledge graph.
+// Returns nil when the step querier is not configured or org/platform are missing.
+func (c *Component) getStepsByLoopID(ctx context.Context, loopID string) ([]*StepRecord, error) {
+	c.mu.RLock()
+	querier := c.stepQuerier
+	c.mu.RUnlock()
+
+	if querier == nil {
+		c.logger.Debug("Step querier not initialized, returning empty steps")
+		return nil, nil
+	}
+
+	entityID := c.loopEntityID(loopID)
+	if entityID == "" {
+		c.logger.Debug("Org/platform not configured, cannot construct loop entity ID",
+			"loop_id", loopID)
+		return nil, nil
+	}
+
+	steps, err := querier.QueryStepsByLoopEntityID(ctx, entityID)
 	if err != nil {
 		return nil, err
 	}
 
-	keys, err := bucket.Keys(ctx)
-	if err != nil {
-		if errors.Is(err, jetstream.ErrNoKeysFound) {
-			return []*llm.ToolCallRecord{}, nil
-		}
-		return nil, err
-	}
-
-	prefix := traceID + "."
-	var records []*llm.ToolCallRecord
-
-	for _, key := range keys {
-		if !strings.HasPrefix(key, prefix) {
-			continue
-		}
-
-		entry, err := bucket.Get(ctx, key)
-		if err != nil {
-			if !errors.Is(err, jetstream.ErrKeyDeleted) && !errors.Is(err, jetstream.ErrKeyNotFound) {
-				c.logger.Warn("Failed to get tool call key", "key", key, "error", err)
-			}
-			continue
-		}
-
-		var record llm.ToolCallRecord
-		if err := json.Unmarshal(entry.Value(), &record); err != nil {
-			c.logger.Warn("Failed to unmarshal tool call record", "key", key, "error", err)
-			continue
-		}
-
-		recordCopy := record
-		records = append(records, &recordCopy)
-	}
-
-	llm.SortToolCallsByStartTime(records)
-	return records, nil
+	return steps, nil
 }
 
-// buildTrajectory constructs a Trajectory from loop state, LLM calls, and tool calls.
-func (c *Component) buildTrajectory(loopState *LoopState, calls []*llm.CallRecord, toolCalls []*llm.ToolCallRecord, includeEntries bool) *Trajectory {
+// buildTrajectory constructs a Trajectory from loop state and step entity records.
+func (c *Component) buildTrajectory(loopState *LoopState, steps []*StepRecord, includeEntries bool) *Trajectory {
 	t := &Trajectory{
-		LoopID:     loopState.ID,
-		TraceID:    loopState.TraceID,
-		Status:     loopState.Status,
-		Steps:      loopState.Iteration,
-		ModelCalls: len(calls),
-		ToolCalls:  len(toolCalls),
-		StartedAt:  loopState.StartedAt,
-		EndedAt:    loopState.EndedAt,
+		LoopID:    loopState.ID,
+		TraceID:   loopState.TraceID,
+		Status:    loopState.Status,
+		Steps:     loopState.Iteration,
+		StartedAt: loopState.StartedAt,
+		EndedAt:   loopState.EndedAt,
 	}
 
-	// Aggregate metrics from LLM calls
-	for _, call := range calls {
-		t.TokensIn += call.PromptTokens
-		t.TokensOut += call.CompletionTokens
-		t.DurationMs += call.DurationMs
+	// Aggregate metrics from step records.
+	for _, step := range steps {
+		switch step.Type {
+		case "model_call":
+			t.ModelCalls++
+			t.TokensIn += step.TokensIn
+			t.TokensOut += step.TokensOut
+			t.DurationMs += step.DurationMs
+		case "tool_call":
+			t.ToolCalls++
+			t.DurationMs += step.DurationMs
+		}
 	}
 
-	// Add tool call durations
-	for _, tc := range toolCalls {
-		t.DurationMs += tc.DurationMs
-	}
-
-	// Calculate total duration from loop state if available
+	// Calculate total duration from loop state timestamps if available.
 	if loopState.StartedAt != nil && loopState.EndedAt != nil {
 		t.DurationMs = loopState.EndedAt.Sub(*loopState.StartedAt).Milliseconds()
 	}
 
-	// Build entries if requested — interleave model and tool calls chronologically
+	// Build detailed entries if requested.
 	if includeEntries {
-		t.Entries = make([]TrajectoryEntry, 0, len(calls)+len(toolCalls))
-
-		// Add model call entries
-		for _, call := range calls {
+		t.Entries = make([]TrajectoryEntry, 0, len(steps))
+		for _, step := range steps {
 			entry := TrajectoryEntry{
-				Type:         "model_call",
-				Timestamp:    call.StartedAt,
-				DurationMs:   call.DurationMs,
-				RequestID:    call.RequestID,
-				Model:        call.Model,
-				Provider:     call.Provider,
-				Capability:   call.Capability,
-				TokensIn:     call.PromptTokens,
-				TokensOut:    call.CompletionTokens,
-				FinishReason: call.FinishReason,
-				Error:        call.Error,
-				Retries:      call.Retries,
-				StorageRef:   call.StorageRef,
+				Type:       step.Type,
+				Timestamp:  step.Timestamp,
+				DurationMs: step.DurationMs,
+				Retries:    step.Retries,
+				Capability: step.Capability,
 			}
 
-			// Use MessagesCount from index if available, otherwise count from inline Messages
-			if call.MessagesCount > 0 {
-				entry.MessagesCount = call.MessagesCount
-			} else {
-				entry.MessagesCount = len(call.Messages)
-			}
-
-			// Use ResponsePreview from index if available, otherwise truncate inline Response
-			if call.ResponsePreview != "" {
-				entry.ResponsePreview = call.ResponsePreview
-			} else if call.Response != "" {
-				preview := call.Response
-				if len(preview) > 200 {
-					preview = preview[:200] + "..."
-				}
-				entry.ResponsePreview = preview
+			switch step.Type {
+			case "model_call":
+				entry.Model = step.Model
+				entry.Provider = step.Provider
+				entry.TokensIn = step.TokensIn
+				entry.TokensOut = step.TokensOut
+			case "tool_call":
+				entry.ToolName = step.ToolName
 			}
 
 			t.Entries = append(t.Entries, entry)
 		}
 
-		// Add tool call entries
-		for _, tc := range toolCalls {
-			entry := TrajectoryEntry{
-				Type:          "tool_call",
-				Timestamp:     tc.StartedAt,
-				DurationMs:    tc.DurationMs,
-				ToolName:      tc.ToolName,
-				ToolArguments: tc.Parameters,
-				Status:        tc.Status,
-				Error:         tc.Error,
-			}
-
-			// Add result preview (truncated)
-			if tc.Result != "" {
-				preview := tc.Result
-				if len(preview) > 200 {
-					preview = preview[:200] + "..."
-				}
-				entry.ResultPreview = preview
-			}
-
-			t.Entries = append(t.Entries, entry)
-		}
-
-		// Sort all entries chronologically
+		// Steps are already sorted by index from the querier, but ensure
+		// chronological ordering by timestamp as a tiebreaker.
 		sortEntriesByTimestamp(t.Entries)
 	}
 
@@ -578,7 +424,7 @@ func extractIDFromPath(path, prefix string) string {
 }
 
 // handleGetWorkflowTrajectory handles GET /workflows/{slug}?format={summary|json}
-// Returns aggregated trajectory data for all LLM calls in the workflow.
+// Returns aggregated trajectory data for all loops in the workflow.
 func (c *Component) handleGetWorkflowTrajectory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -614,15 +460,14 @@ func (c *Component) handleGetWorkflowTrajectory(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Collect all LLM calls across trace IDs with bounded concurrency
-	allCalls := c.collectLLMCallsForTraces(r.Context(), plan.ExecutionTraceIDs)
+	// Collect all step records across trace IDs with bounded concurrency.
+	allSteps := c.collectStepsForTraces(r.Context(), plan.ExecutionTraceIDs)
 
-	// Build workflow trajectory response
 	wt := c.buildWorkflowTrajectory(
 		slug,
 		string(plan.EffectiveStatus()),
 		plan.ExecutionTraceIDs,
-		allCalls,
+		allSteps,
 		&plan.CreatedAt,
 		plan.ReviewedAt,
 	)
@@ -633,60 +478,42 @@ func (c *Component) handleGetWorkflowTrajectory(w http.ResponseWriter, r *http.R
 	}
 }
 
-// collectLLMCallsForTraces fetches LLM calls for multiple trace IDs with bounded concurrency.
-// It respects context cancellation for early termination.
-func (c *Component) collectLLMCallsForTraces(ctx context.Context, traceIDs []string) []*llm.CallRecord {
+// collectStepsForTraces fetches steps for multiple trace IDs by mapping them through
+// the AGENT_LOOPS bucket to find matching loop IDs, then querying step entities.
+// Uses bounded concurrency to avoid overwhelming the graph gateway.
+func (c *Component) collectStepsForTraces(ctx context.Context, traceIDs []string) []*StepRecord {
 	if len(traceIDs) == 0 {
 		return nil
 	}
 
-	const maxConcurrent = 5
-	sem := make(chan struct{}, maxConcurrent)
-
-	var (
-		mu       sync.Mutex
-		allCalls []*llm.CallRecord
-		wg       sync.WaitGroup
-	)
-
+	var allSteps []*StepRecord
 	for _, traceID := range traceIDs {
-		// Check context cancellation before spawning goroutine
 		if ctx.Err() != nil {
-			c.logger.Debug("Request cancelled during trace collection")
 			break
 		}
 
-		wg.Add(1)
-		go func(tid string) {
-			defer wg.Done()
+		loopState, err := c.findLoopStateByTraceID(ctx, traceID)
+		if err != nil || loopState == nil {
+			continue
+		}
 
-			// Acquire semaphore
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				return
-			}
+		steps, err := c.getStepsByLoopID(ctx, loopState.ID)
+		if err != nil {
+			c.logger.Warn("Failed to get steps for trace", "trace_id", traceID, "error", err)
+			continue
+		}
 
-			calls, err := c.getLLMCallsByTraceID(ctx, tid)
-			if err != nil {
-				c.logger.Warn("Failed to get LLM calls for trace",
-					"trace_id", tid, "error", err)
-				return
-			}
-
-			mu.Lock()
-			allCalls = append(allCalls, calls...)
-			mu.Unlock()
-		}(traceID)
+		allSteps = append(allSteps, steps...)
 	}
 
-	wg.Wait()
-	return allCalls
+	return allSteps
 }
 
 // handleGetContextStats handles GET /context-stats?trace_id=X&workflow=Y&capability=Z
-// Returns context utilization statistics for proving context management effectiveness.
+// Returns context utilization statistics.
+//
+// Note: The new step entity model does not include context budget or truncation data.
+// This endpoint returns structural metrics (call counts, token totals) only.
 func (c *Component) handleGetContextStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -703,14 +530,24 @@ func (c *Component) handleGetContextStats(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Get LLM calls based on filters
-	var calls []*llm.CallRecord
-	var err error
+	var steps []*StepRecord
 
 	if traceID != "" {
-		calls, err = c.getLLMCallsByTraceID(r.Context(), traceID)
+		loopState, err := c.findLoopStateByTraceID(r.Context(), traceID)
+		if err != nil {
+			c.logger.Error("Failed to find loop for trace", "trace_id", traceID, "error", err)
+			http.Error(w, "Failed to retrieve trace data", http.StatusInternalServerError)
+			return
+		}
+
+		if loopState != nil {
+			var err error
+			steps, err = c.getStepsByLoopID(r.Context(), loopState.ID)
+			if err != nil {
+				c.logger.Warn("Failed to get steps for context stats", "trace_id", traceID, "error", err)
+			}
+		}
 	} else {
-		// Get trace IDs from workflow manager
 		c.mu.RLock()
 		manager := c.workflowManager
 		c.mu.RUnlock()
@@ -731,30 +568,21 @@ func (c *Component) handleGetContextStats(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		// Collect calls from all trace IDs with bounded concurrency
-		calls = c.collectLLMCallsForTraces(r.Context(), plan.ExecutionTraceIDs)
-	}
-
-	if err != nil {
-		c.logger.Error("Failed to get LLM calls", "error", err)
-		http.Error(w, "Failed to retrieve call data", http.StatusInternalServerError)
-		return
+		steps = c.collectStepsForTraces(r.Context(), plan.ExecutionTraceIDs)
 	}
 
 	// Filter by capability if requested
 	if capability != "" {
-		filtered := make([]*llm.CallRecord, 0)
-		for _, call := range calls {
-			if call.Capability == capability {
-				filtered = append(filtered, call)
+		filtered := make([]*StepRecord, 0)
+		for _, step := range steps {
+			if step.Capability == capability {
+				filtered = append(filtered, step)
 			}
 		}
-		calls = filtered
+		steps = filtered
 	}
 
-	// Build context stats
-	includeDetails := r.URL.Query().Get("format") == "json"
-	stats := c.buildContextStats(calls, includeDetails)
+	stats := c.buildContextStats(steps)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
@@ -762,8 +590,8 @@ func (c *Component) handleGetContextStats(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// buildWorkflowTrajectory aggregates LLM calls into a workflow-level trajectory.
-func (c *Component) buildWorkflowTrajectory(slug, status string, traceIDs []string, calls []*llm.CallRecord, startedAt, completedAt *time.Time) *WorkflowTrajectory {
+// buildWorkflowTrajectory aggregates step records into a workflow-level trajectory.
+func (c *Component) buildWorkflowTrajectory(slug, status string, traceIDs []string, steps []*StepRecord, startedAt, completedAt *time.Time) *WorkflowTrajectory {
 	wt := &WorkflowTrajectory{
 		Slug:        slug,
 		Status:      status,
@@ -774,91 +602,42 @@ func (c *Component) buildWorkflowTrajectory(slug, status string, traceIDs []stri
 		CompletedAt: completedAt,
 	}
 
-	// Track truncation stats
-	truncatedCount := 0
-	totalWithBudget := 0
-	capabilityTruncation := make(map[string]*struct {
-		total     int
-		truncated int
-	})
+	// Only model_call steps have token and phase data.
+	for _, step := range steps {
+		if step.Type != "model_call" {
+			continue
+		}
 
-	// Aggregate by phase and capability
-	for _, call := range calls {
-		// Determine phase from capability
-		phase := determinePhase(call.Capability)
+		phase := determinePhase(step.Capability)
 
-		// Initialize phase if needed
 		if wt.Phases[phase] == nil {
 			wt.Phases[phase] = &PhaseMetrics{
 				Capabilities: make(map[string]*CapabilityMetrics),
 			}
 		}
 
-		// Initialize capability if needed
-		if wt.Phases[phase].Capabilities[call.Capability] == nil {
-			wt.Phases[phase].Capabilities[call.Capability] = &CapabilityMetrics{}
+		if wt.Phases[phase].Capabilities[step.Capability] == nil {
+			wt.Phases[phase].Capabilities[step.Capability] = &CapabilityMetrics{}
 		}
 
-		// Update phase metrics
 		pm := wt.Phases[phase]
-		pm.TokensIn += call.PromptTokens
-		pm.TokensOut += call.CompletionTokens
+		pm.TokensIn += step.TokensIn
+		pm.TokensOut += step.TokensOut
 		pm.CallCount++
-		pm.DurationMs += call.DurationMs
+		pm.DurationMs += step.DurationMs
 
-		// Update capability metrics
-		cm := pm.Capabilities[call.Capability]
-		cm.TokensIn += call.PromptTokens
-		cm.TokensOut += call.CompletionTokens
+		cm := pm.Capabilities[step.Capability]
+		cm.TokensIn += step.TokensIn
+		cm.TokensOut += step.TokensOut
 		cm.CallCount++
-		if call.ContextTruncated {
-			cm.TruncatedCount++
-		}
 
-		// Update totals
-		wt.Totals.TokensIn += call.PromptTokens
-		wt.Totals.TokensOut += call.CompletionTokens
+		wt.Totals.TokensIn += step.TokensIn
+		wt.Totals.TokensOut += step.TokensOut
 		wt.Totals.CallCount++
-		wt.Totals.DurationMs += call.DurationMs
-
-		// Track truncation for summary
-		if call.ContextBudget > 0 {
-			totalWithBudget++
-			if call.ContextTruncated {
-				truncatedCount++
-			}
-
-			// Track by capability
-			if capabilityTruncation[call.Capability] == nil {
-				capabilityTruncation[call.Capability] = &struct {
-					total     int
-					truncated int
-				}{}
-			}
-			capabilityTruncation[call.Capability].total++
-			if call.ContextTruncated {
-				capabilityTruncation[call.Capability].truncated++
-			}
-		}
+		wt.Totals.DurationMs += step.DurationMs
 	}
 
 	wt.Totals.TotalTokens = wt.Totals.TokensIn + wt.Totals.TokensOut
-
-	// Build truncation summary
-	if totalWithBudget > 0 {
-		wt.TruncationSummary = &TruncationSummary{
-			TotalCalls:     totalWithBudget,
-			TruncatedCalls: truncatedCount,
-			TruncationRate: float64(truncatedCount) / float64(totalWithBudget) * 100.0,
-			ByCapability:   make(map[string]float64),
-		}
-
-		for cap, stats := range capabilityTruncation {
-			if stats.total > 0 {
-				wt.TruncationSummary.ByCapability[cap] = float64(stats.truncated) / float64(stats.total) * 100.0
-			}
-		}
-	}
 
 	return wt
 }
@@ -873,160 +652,54 @@ func determinePhase(capability string) string {
 	case "coding", "writing":
 		return "execution"
 	default:
-		// Default to execution for unknown capabilities
 		return "execution"
 	}
 }
 
-// buildContextStats calculates context utilization metrics.
-func (c *Component) buildContextStats(calls []*llm.CallRecord, includeDetails bool) *ContextStats {
+// buildContextStats calculates context utilization metrics from step records.
+// Note: Context budget and truncation are not available in the step entity model.
+// This returns token totals and call counts only.
+func (c *Component) buildContextStats(steps []*StepRecord) *ContextStats {
 	stats := &ContextStats{
 		Summary:      &ContextSummary{},
 		ByCapability: make(map[string]*CapabilityContextStats),
 	}
 
-	if includeDetails {
-		stats.Calls = make([]CallContextDetail, 0, len(calls))
-	}
-
-	// Track per-capability stats
 	capabilityData := make(map[string]*struct {
-		totalBudget int
-		totalUsed   int
-		callCount   int
-		truncated   int
-		maxUtil     float64
+		totalTokensIn  int
+		totalTokensOut int
+		callCount      int
 	})
 
-	totalBudget := 0
-	totalUsed := 0
-	callsWithBudget := 0
-	truncatedCalls := 0
+	for _, step := range steps {
+		if step.Type != "model_call" {
+			continue
+		}
 
-	for _, call := range calls {
 		stats.Summary.TotalCalls++
 
-		if call.ContextBudget > 0 {
-			callsWithBudget++
-			totalBudget += call.ContextBudget
-			totalUsed += call.PromptTokens
-
-			if call.ContextTruncated {
-				truncatedCalls++
-			}
-
-			utilization := float64(call.PromptTokens) / float64(call.ContextBudget) * 100.0
-
-			// Track capability stats
-			if capabilityData[call.Capability] == nil {
-				capabilityData[call.Capability] = &struct {
-					totalBudget int
-					totalUsed   int
-					callCount   int
-					truncated   int
-					maxUtil     float64
-				}{}
-			}
-			cd := capabilityData[call.Capability]
-			cd.totalBudget += call.ContextBudget
-			cd.totalUsed += call.PromptTokens
-			cd.callCount++
-			if call.ContextTruncated {
-				cd.truncated++
-			}
-			if utilization > cd.maxUtil {
-				cd.maxUtil = utilization
-			}
-
-			// Add detail if requested
-			if includeDetails {
-				stats.Calls = append(stats.Calls, CallContextDetail{
-					RequestID:   call.RequestID,
-					TraceID:     call.TraceID,
-					Capability:  call.Capability,
-					Model:       call.Model,
-					Budget:      call.ContextBudget,
-					Used:        call.PromptTokens,
-					Utilization: utilization,
-					Truncated:   call.ContextTruncated,
-					Timestamp:   call.StartedAt,
-				})
-			}
+		if capabilityData[step.Capability] == nil {
+			capabilityData[step.Capability] = &struct {
+				totalTokensIn  int
+				totalTokensOut int
+				callCount      int
+			}{}
 		}
+		cd := capabilityData[step.Capability]
+		cd.totalTokensIn += step.TokensIn
+		cd.totalTokensOut += step.TokensOut
+		cd.callCount++
 	}
 
-	// Calculate summary metrics
-	stats.Summary.CallsWithBudget = callsWithBudget
-	stats.Summary.TotalBudget = totalBudget
-	stats.Summary.TotalUsed = totalUsed
-
-	if callsWithBudget > 0 {
-		stats.Summary.AvgUtilization = float64(totalUsed) / float64(totalBudget) * 100.0
-		stats.Summary.TruncationRate = float64(truncatedCalls) / float64(callsWithBudget) * 100.0
-	}
-
-	// Build capability breakdown
+	// Build capability breakdown.
 	for cap, cd := range capabilityData {
-		capStats := &CapabilityContextStats{
-			CallCount:      cd.callCount,
-			MaxUtilization: cd.maxUtil,
+		stats.ByCapability[cap] = &CapabilityContextStats{
+			CallCount: cd.callCount,
 		}
-
 		if cd.callCount > 0 {
-			capStats.AvgBudget = cd.totalBudget / cd.callCount
-			capStats.AvgUsed = cd.totalUsed / cd.callCount
-			capStats.AvgUtilization = float64(cd.totalUsed) / float64(cd.totalBudget) * 100.0
-			capStats.TruncationRate = float64(cd.truncated) / float64(cd.callCount) * 100.0
+			stats.ByCapability[cap].AvgUsed = (cd.totalTokensIn + cd.totalTokensOut) / cd.callCount
 		}
-
-		stats.ByCapability[cap] = capStats
 	}
 
 	return stats
-}
-
-// handleGetCall returns the LLM call record for a specific request ID.
-// GET /trajectory-api/calls/{request_id}
-//
-// NOTE: LLM calls are stored in the knowledge graph. This endpoint returns
-// the CallRecord reconstructed from graph entity triples. Messages and full
-// Response content are not stored in the graph (only MessagesCount and
-// ResponsePreview are available).
-func (c *Component) handleGetCall(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	requestID := extractIDFromPath(r.URL.Path, "/calls/")
-	if requestID == "" {
-		http.Error(w, "request_id required", http.StatusBadRequest)
-		return
-	}
-
-	c.mu.RLock()
-	querier := c.llmCallQuerier
-	c.mu.RUnlock()
-
-	if querier == nil {
-		http.Error(w, "Graph querier not available", http.StatusServiceUnavailable)
-		return
-	}
-
-	record, err := querier.QueryByRequestID(r.Context(), requestID)
-	if err != nil {
-		c.logger.Error("Failed to query LLM call", "request_id", requestID, "error", err)
-		http.Error(w, "Failed to query call", http.StatusInternalServerError)
-		return
-	}
-
-	if record == nil {
-		http.Error(w, "Call not found", http.StatusNotFound)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(record); err != nil {
-		c.logger.Warn("Failed to encode response", "error", err)
-	}
 }

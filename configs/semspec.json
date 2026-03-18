@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "platform": {
     "org": "semspec",
     "id": "semspec-dev",
@@ -9,28 +9,54 @@
     "capabilities": {
       "planning": {
         "description": "High-level reasoning, architecture decisions",
-        "preferred": ["claude-opus", "claude-sonnet"],
-        "fallback": ["qwen3", "qwen"]
+        "preferred": [
+          "claude-opus",
+          "claude-sonnet"
+        ],
+        "fallback": [
+          "qwen3",
+          "qwen"
+        ]
       },
       "writing": {
         "description": "Documentation, proposals, specifications",
-        "preferred": ["claude-sonnet"],
-        "fallback": ["qwen3", "qwen"]
+        "preferred": [
+          "claude-sonnet"
+        ],
+        "fallback": [
+          "qwen3",
+          "qwen"
+        ]
       },
       "coding": {
         "description": "Code generation, implementation",
-        "preferred": ["claude-sonnet"],
-        "fallback": ["qwen", "qwen3"]
+        "preferred": [
+          "claude-sonnet"
+        ],
+        "fallback": [
+          "qwen",
+          "qwen3"
+        ]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
-        "preferred": ["claude-sonnet"],
-        "fallback": ["qwen3", "qwen"]
+        "preferred": [
+          "claude-sonnet"
+        ],
+        "fallback": [
+          "qwen3",
+          "qwen"
+        ]
       },
       "fast": {
         "description": "Quick responses, simple tasks",
-        "preferred": ["claude-haiku"],
-        "fallback": ["qwen3-fast", "qwen"]
+        "preferred": [
+          "claude-haiku"
+        ],
+        "fallback": [
+          "qwen3-fast",
+          "qwen"
+        ]
       }
     },
     "endpoints": {
@@ -75,17 +101,12 @@
         "model": "qwen3:1.7b",
         "max_tokens": 32768
       },
-      "llama3.2": {
+      "ollama-coder": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://localhost:11434}/v1",
-        "model": "llama3.2",
-        "max_tokens": 128000
-      },
-      "codellama": {
-        "provider": "ollama",
-        "url": "${LLM_API_URL:-http://localhost:11434}/v1",
-        "model": "codellama",
-        "max_tokens": 16384
+        "model": "qwen2.5-coder:7b",
+        "max_tokens": 32768,
+        "supports_tools": true
       }
     },
     "defaults": {
@@ -93,7 +114,9 @@
     }
   },
   "nats": {
-    "urls": ["${NATS_URL:-nats://localhost:4222}"],
+    "urls": [
+      "${NATS_URL:-nats://localhost:4222}"
+    ],
     "max_reconnects": -1,
     "reconnect_wait": "2s",
     "jetstream": {
@@ -123,7 +146,14 @@
       "enabled": true,
       "config": {
         "buffer_size": 10000,
-        "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>", "context.>", "workflow.>"]
+        "monitor_subjects": [
+          "user.>",
+          "agent.>",
+          "tool.>",
+          "graph.>",
+          "context.>",
+          "workflow.>"
+        ]
       }
     }
   },
@@ -138,11 +168,19 @@
         "auto_continue": false,
         "stream_name": "USER",
         "permissions": {
-          "view": ["*"],
-          "submit_task": ["*"],
+          "view": [
+            "*"
+          ],
+          "submit_task": [
+            "*"
+          ],
           "cancel_own": true,
-          "cancel_any": ["admin"],
-          "approve": ["*"]
+          "cancel_any": [
+            "admin"
+          ],
+          "approve": [
+            "*"
+          ]
         }
       }
     },
@@ -155,7 +193,7 @@
         "timeout": "300s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
-        "trajectories_bucket": "AGENT_TRAJECTORIES",
+        "content_bucket": "AGENT_CONTENT",
         "context": {
           "summarization_model": "fast"
         }
@@ -361,9 +399,11 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "llm_calls_bucket": "LLM_CALLS",
         "loops_bucket": "AGENT_LOOPS",
-        "graph_gateway_url": "http://localhost:8082"
+        "content_bucket": "AGENT_CONTENT",
+        "graph_gateway_url": "http://localhost:8082",
+        "org": "semspec",
+        "platform": "semspec-dev"
       }
     },
     "workflow-validator": {
@@ -423,14 +463,54 @@
         "model": "default",
         "ports": {
           "inputs": [
-            {"name": "plan-review-trigger", "subject": "workflow.trigger.plan-review-loop", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive plan review loop triggers", "required": true},
-            {"name": "phase-review-trigger", "subject": "workflow.trigger.phase-review-loop", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive phase review loop triggers", "required": true},
-            {"name": "task-review-trigger", "subject": "workflow.trigger.task-review-loop", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive task review loop triggers", "required": true},
-            {"name": "loop-completions", "subject": "agentic.loop_completed.v1", "type": "jetstream", "stream_name": "AGENT", "description": "Receive agentic loop completion events", "required": true}
+            {
+              "name": "plan-review-trigger",
+              "subject": "workflow.trigger.plan-review-loop",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Receive plan review loop triggers",
+              "required": true
+            },
+            {
+              "name": "phase-review-trigger",
+              "subject": "workflow.trigger.phase-review-loop",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Receive phase review loop triggers",
+              "required": true
+            },
+            {
+              "name": "task-review-trigger",
+              "subject": "workflow.trigger.task-review-loop",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Receive task review loop triggers",
+              "required": true
+            },
+            {
+              "name": "loop-completions",
+              "subject": "agentic.loop_completed.v1",
+              "type": "jetstream",
+              "stream_name": "AGENT",
+              "description": "Receive agentic loop completion events",
+              "required": true
+            }
           ],
           "outputs": [
-            {"name": "entity-triples", "subject": "graph.mutation.triple.add", "type": "nats", "description": "Publish entity state triples", "required": false},
-            {"name": "agent-tasks", "subject": "agent.task.>", "type": "nats", "description": "Dispatch agent tasks for generation and review", "required": false}
+            {
+              "name": "entity-triples",
+              "subject": "graph.mutation.triple.add",
+              "type": "nats",
+              "description": "Publish entity state triples",
+              "required": false
+            },
+            {
+              "name": "agent-tasks",
+              "subject": "agent.task.>",
+              "type": "nats",
+              "description": "Dispatch agent tasks for generation and review",
+              "required": false
+            }
           ]
         }
       }
@@ -443,15 +523,30 @@
         "rules_dir": "configs/rules/semspec-review",
         "entity": {
           "pattern": "local.semspec.workflow.*-review.execution.*",
-          "watch_buckets": ["ENTITY_STATES"]
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
         },
         "ports": {
           "inputs": [
-            {"name": "entity_states", "subject": "ENTITY_STATES.>", "type": "kv-watch", "bucket": "ENTITY_STATES"}
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES.>",
+              "type": "kv-watch",
+              "bucket": "ENTITY_STATES"
+            }
           ],
           "outputs": [
-            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
-            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
+            }
           ]
         }
       }
@@ -469,12 +564,38 @@
         "model": "default",
         "ports": {
           "inputs": [
-            {"name": "execution-trigger", "subject": "workflow.trigger.task-execution-loop", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive task execution triggers from task-dispatcher", "required": true},
-            {"name": "loop-completions", "subject": "agentic.loop_completed.v1", "type": "jetstream", "stream_name": "AGENT", "description": "Receive agentic loop completion events", "required": true}
+            {
+              "name": "execution-trigger",
+              "subject": "workflow.trigger.task-execution-loop",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Receive task execution triggers from task-dispatcher",
+              "required": true
+            },
+            {
+              "name": "loop-completions",
+              "subject": "agentic.loop_completed.v1",
+              "type": "jetstream",
+              "stream_name": "AGENT",
+              "description": "Receive agentic loop completion events",
+              "required": true
+            }
           ],
           "outputs": [
-            {"name": "entity-triples", "subject": "graph.mutation.triple.add", "type": "nats", "description": "Publish entity state triples", "required": false},
-            {"name": "agent-tasks", "subject": "agent.task.>", "type": "nats", "description": "Dispatch agent tasks", "required": false}
+            {
+              "name": "entity-triples",
+              "subject": "graph.mutation.triple.add",
+              "type": "nats",
+              "description": "Publish entity state triples",
+              "required": false
+            },
+            {
+              "name": "agent-tasks",
+              "subject": "agent.task.>",
+              "type": "nats",
+              "description": "Dispatch agent tasks",
+              "required": false
+            }
           ]
         }
       }
@@ -487,15 +608,30 @@
         "rules_dir": "configs/rules/semspec-task-execution",
         "entity": {
           "pattern": "local.semspec.workflow.task-execution.execution.*",
-          "watch_buckets": ["ENTITY_STATES"]
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
         },
         "ports": {
           "inputs": [
-            {"name": "entity_states", "subject": "ENTITY_STATES.>", "type": "kv-watch", "bucket": "ENTITY_STATES"}
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES.>",
+              "type": "kv-watch",
+              "bucket": "ENTITY_STATES"
+            }
           ],
           "outputs": [
-            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
-            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
+            }
           ]
         }
       }
@@ -508,15 +644,30 @@
         "rules_dir": "configs/rules/semspec-coordination",
         "entity": {
           "pattern": "local.semspec.workflow.coordination.execution.*",
-          "watch_buckets": ["ENTITY_STATES"]
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
         },
         "ports": {
           "inputs": [
-            {"name": "entity_states", "subject": "ENTITY_STATES.>", "type": "kv-watch", "bucket": "ENTITY_STATES"}
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES.>",
+              "type": "kv-watch",
+              "bucket": "ENTITY_STATES"
+            }
           ],
           "outputs": [
-            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
-            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
+            }
           ]
         }
       }
@@ -534,10 +685,22 @@
         "max_concurrent": 5,
         "ports": {
           "inputs": [
-            {"name": "orchestration-triggers", "subject": "scenario.orchestrate.*", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive scenario orchestration triggers", "required": true}
+            {
+              "name": "orchestration-triggers",
+              "subject": "scenario.orchestrate.*",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Receive scenario orchestration triggers",
+              "required": true
+            }
           ],
           "outputs": [
-            {"name": "scenario-execution-triggers", "subject": "workflow.trigger.scenario-execution-loop", "type": "nats", "description": "Trigger scenario-executor for each pending scenario"}
+            {
+              "name": "scenario-execution-triggers",
+              "subject": "workflow.trigger.scenario-execution-loop",
+              "type": "nats",
+              "description": "Trigger scenario-executor for each pending scenario"
+            }
           ]
         }
       }
@@ -552,12 +715,36 @@
         "sandbox_url": "${SANDBOX_URL:-}",
         "ports": {
           "inputs": [
-            {"name": "scenario-trigger", "subject": "workflow.trigger.scenario-execution-loop", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive scenario execution triggers from scenario-orchestrator", "required": true},
-            {"name": "loop-completions", "subject": "agentic.loop_completed.v1", "type": "jetstream", "stream_name": "AGENT", "description": "Receive agentic loop completion events", "required": true}
+            {
+              "name": "scenario-trigger",
+              "subject": "workflow.trigger.scenario-execution-loop",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Receive scenario execution triggers from scenario-orchestrator",
+              "required": true
+            },
+            {
+              "name": "loop-completions",
+              "subject": "agentic.loop_completed.v1",
+              "type": "jetstream",
+              "stream_name": "AGENT",
+              "description": "Receive agentic loop completion events",
+              "required": true
+            }
           ],
           "outputs": [
-            {"name": "entity-triples", "subject": "graph.mutation.triple.add", "type": "nats", "description": "Publish entity state triples"},
-            {"name": "agent-tasks", "subject": "agent.task.>", "type": "nats", "description": "Dispatch agent tasks for decomposition and node execution"}
+            {
+              "name": "entity-triples",
+              "subject": "graph.mutation.triple.add",
+              "type": "nats",
+              "description": "Publish entity state triples"
+            },
+            {
+              "name": "agent-tasks",
+              "subject": "agent.task.>",
+              "type": "nats",
+              "description": "Dispatch agent tasks for decomposition and node execution"
+            }
           ]
         }
       }
@@ -574,11 +761,29 @@
         "timeout_seconds": 120,
         "ports": {
           "inputs": [
-            {"name": "cascade-triggers", "subject": "workflow.trigger.change-proposal-cascade", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive cascade requests when a ChangeProposal is accepted", "required": true}
+            {
+              "name": "cascade-triggers",
+              "subject": "workflow.trigger.change-proposal-cascade",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Receive cascade requests when a ChangeProposal is accepted",
+              "required": true
+            }
           ],
           "outputs": [
-            {"name": "accepted-events", "subject": "workflow.events.change-proposal.accepted", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Publish accepted event with cascade summary"},
-            {"name": "cancellation-signals", "subject": "agent.signal.cancel.*", "type": "nats", "description": "Cancel running scenario loops affected by cascade"}
+            {
+              "name": "accepted-events",
+              "subject": "workflow.events.change-proposal.accepted",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Publish accepted event with cascade summary"
+            },
+            {
+              "name": "cancellation-signals",
+              "subject": "agent.signal.cancel.*",
+              "type": "nats",
+              "description": "Cancel running scenario loops affected by cascade"
+            }
           ]
         }
       }
@@ -591,15 +796,30 @@
         "rules_dir": "configs/rules/semspec-scenario-execution",
         "entity": {
           "pattern": "local.semspec.workflow.scenario-execution.execution.*",
-          "watch_buckets": ["ENTITY_STATES"]
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
         },
         "ports": {
           "inputs": [
-            {"name": "entity_states", "subject": "ENTITY_STATES.>", "type": "kv-watch", "bucket": "ENTITY_STATES"}
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES.>",
+              "type": "kv-watch",
+              "bucket": "ENTITY_STATES"
+            }
           ],
           "outputs": [
-            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
-            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
+            }
           ]
         }
       }
@@ -610,17 +830,21 @@
       "enabled": true,
       "config": {
         "ports": {
-          "inputs": [{
-            "name": "entities_in",
-            "subject": "graph.ingest.entity",
-            "type": "jetstream",
-            "stream_name": "GRAPH"
-          }],
-          "outputs": [{
-            "name": "rdf_out",
-            "subject": "graph.export.rdf",
-            "type": "nats"
-          }]
+          "inputs": [
+            {
+              "name": "entities_in",
+              "subject": "graph.ingest.entity",
+              "type": "jetstream",
+              "stream_name": "GRAPH"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "rdf_out",
+              "subject": "graph.export.rdf",
+              "type": "nats"
+            }
+          ]
         },
         "format": "turtle",
         "profile": "minimal",
@@ -633,17 +857,21 @@
       "enabled": true,
       "config": {
         "ports": {
-          "inputs": [{
-            "name": "entities_in",
-            "subject": "graph.ingest.entity",
-            "type": "jetstream",
-            "stream_name": "GRAPH"
-          }],
-          "outputs": [{
-            "name": "entity_states",
-            "subject": "ENTITY_STATES",
-            "type": "kv-write"
-          }]
+          "inputs": [
+            {
+              "name": "entities_in",
+              "subject": "graph.ingest.entity",
+              "type": "jetstream",
+              "stream_name": "GRAPH"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES",
+              "type": "kv-write"
+            }
+          ]
         },
         "enable_hierarchy": true
       }
@@ -654,16 +882,34 @@
       "enabled": true,
       "config": {
         "ports": {
-          "inputs": [{
-            "name": "entity_watch",
-            "subject": "ENTITY_STATES",
-            "type": "kv-watch"
-          }],
+          "inputs": [
+            {
+              "name": "entity_watch",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
           "outputs": [
-            {"name": "outgoing_index", "subject": "OUTGOING_INDEX", "type": "kv"},
-            {"name": "incoming_index", "subject": "INCOMING_INDEX", "type": "kv"},
-            {"name": "alias_index", "subject": "ALIAS_INDEX", "type": "kv"},
-            {"name": "predicate_index", "subject": "PREDICATE_INDEX", "type": "kv"}
+            {
+              "name": "outgoing_index",
+              "subject": "OUTGOING_INDEX",
+              "type": "kv"
+            },
+            {
+              "name": "incoming_index",
+              "subject": "INCOMING_INDEX",
+              "type": "kv"
+            },
+            {
+              "name": "alias_index",
+              "subject": "ALIAS_INDEX",
+              "type": "kv"
+            },
+            {
+              "name": "predicate_index",
+              "subject": "PREDICATE_INDEX",
+              "type": "kv"
+            }
           ]
         },
         "workers": 2,
@@ -676,11 +922,13 @@
       "enabled": true,
       "config": {
         "ports": {
-          "inputs": [{
-            "name": "query_requests",
-            "subject": "graph.query.>",
-            "type": "nats-request"
-          }],
+          "inputs": [
+            {
+              "name": "query_requests",
+              "subject": "graph.query.>",
+              "type": "nats-request"
+            }
+          ],
           "outputs": []
         },
         "request_timeout": "5s",
@@ -694,8 +942,20 @@
       "enabled": true,
       "config": {
         "ports": {
-          "inputs": [{"name": "http", "subject": ":8082", "type": "http"}],
-          "outputs": [{"name": "mutations", "subject": "graph.mutation.*", "type": "nats-request"}]
+          "inputs": [
+            {
+              "name": "http",
+              "subject": ":8082",
+              "type": "http"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mutations",
+              "subject": "graph.mutation.*",
+              "type": "nats-request"
+            }
+          ]
         },
         "graphql_path": "/graphql",
         "mcp_path": "/mcp",
@@ -711,7 +971,6 @@
         "stream_name": "AGENT",
         "consumer_name": "developer",
         "trigger_subject": "dev.task.development",
-        "state_bucket": "REACTIVE_STATE",
         "default_capability": "coding",
         "timeout": "180s",
         "max_tool_iterations": 20
@@ -725,7 +984,6 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "task-code-reviewer",
         "trigger_subject": "workflow.async.task-code-reviewer",
-        "state_bucket": "REACTIVE_STATE",
         "default_capability": "reviewing",
         "timeout": "5m"
       }

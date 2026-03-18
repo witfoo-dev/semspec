@@ -1,6 +1,7 @@
-// Package trajectoryapi provides HTTP endpoints for querying LLM call trajectories.
-// It aggregates data from LLM_CALLS and AGENT_LOOPS KV buckets to provide
-// unified trajectory views for debugging and observability.
+// Package trajectoryapi provides HTTP endpoints for querying agent loop trajectories.
+// It aggregates data from step entities in the knowledge graph (written by semstreams
+// alpha.53 on loop completion) and the AGENT_LOOPS KV bucket to provide unified
+// trajectory views for debugging and observability.
 package trajectoryapi
 
 import (
@@ -20,8 +21,8 @@ import (
 )
 
 // Component implements the trajectory-api component.
-// It provides HTTP endpoints for querying LLM call trajectories and tool call history.
-// NOTE: LLM calls are now stored in the knowledge graph, not KV.
+// It provides HTTP endpoints for querying agent loop trajectories.
+// Step data is sourced from the knowledge graph (semstreams alpha.53 step entities).
 type Component struct {
 	name       string
 	config     Config
@@ -29,12 +30,13 @@ type Component struct {
 	logger     *slog.Logger
 
 	// KV buckets
-	// NOTE: llmCallsBucket removed - LLM calls are now graph entities
-	toolCallsBucket jetstream.KeyValue
-	loopsBucket     jetstream.KeyValue
+	loopsBucket jetstream.KeyValue
 
-	// Graph querier for LLM call entities
-	llmCallQuerier *LLMCallQuerier
+	// NATS ObjectStore for step content (tool results, model responses)
+	contentStore jetstream.ObjectStore
+
+	// Graph querier for trajectory step entities
+	stepQuerier *StepQuerier
 
 	// Workflow manager for accessing plan data
 	workflowManager *workflow.Manager
@@ -63,14 +65,11 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	// Apply defaults
 	defaults := DefaultConfig()
-	if config.LLMCallsBucket == "" {
-		config.LLMCallsBucket = defaults.LLMCallsBucket
-	}
-	if config.ToolCallsBucket == "" {
-		config.ToolCallsBucket = defaults.ToolCallsBucket
-	}
 	if config.LoopsBucket == "" {
 		config.LoopsBucket = defaults.LoopsBucket
+	}
+	if config.ContentBucket == "" {
+		config.ContentBucket = defaults.ContentBucket
 	}
 	if config.GraphGatewayURL == "" {
 		config.GraphGatewayURL = defaults.GraphGatewayURL
@@ -93,9 +92,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 // Initialize prepares the component.
 func (c *Component) Initialize() error {
 	c.logger.Debug("Initialized trajectory-api",
-		"llm_calls_bucket", c.config.LLMCallsBucket,
-		"tool_calls_bucket", c.config.ToolCallsBucket,
-		"loops_bucket", c.config.LoopsBucket)
+		"loops_bucket", c.config.LoopsBucket,
+		"content_bucket", c.config.ContentBucket,
+		"graph_gateway_url", c.config.GraphGatewayURL)
 	return nil
 }
 
@@ -127,17 +126,7 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("get jetstream: %w", err)
 	}
 
-	// Get KV buckets - these may not exist yet, so we'll try lazily
-	// NOTE: LLM calls are now stored in the knowledge graph, not KV.
-	// The llmCallsBucket is no longer used.
-
-	toolCallsBucket, err := js.KeyValue(ctx, c.config.ToolCallsBucket)
-	if err != nil {
-		c.logger.Warn("Tool calls bucket not found, will retry on queries",
-			"bucket", c.config.ToolCallsBucket,
-			"error", err)
-	}
-
+	// Get AGENT_LOOPS KV bucket — may not exist yet, retry on queries.
 	loopsBucket, err := js.KeyValue(ctx, c.config.LoopsBucket)
 	if err != nil {
 		c.logger.Warn("Loops bucket not found, will retry on queries",
@@ -145,7 +134,18 @@ func (c *Component) Start(ctx context.Context) error {
 			"error", err)
 	}
 
-	// Initialize workflow manager for plan access
+	// Get AGENT_CONTENT ObjectStore — optional, used for detailed content fetches.
+	var contentStore jetstream.ObjectStore
+	if c.config.ContentBucket != "" {
+		contentStore, err = js.ObjectStore(ctx, c.config.ContentBucket)
+		if err != nil {
+			c.logger.Warn("Content object store not found, detailed content unavailable",
+				"bucket", c.config.ContentBucket,
+				"error", err)
+		}
+	}
+
+	// Initialize workflow manager for plan access.
 	repoRoot := c.config.RepoRoot
 	if repoRoot == "" {
 		repoRoot = os.Getenv("SEMSPEC_REPO_PATH")
@@ -160,37 +160,34 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 	workflowManager := workflow.NewManager(repoRoot)
 
-	// Initialize graph querier for LLM calls
-	var llmCallQuerier *LLMCallQuerier
+	// Initialize graph querier for step entity queries.
+	var stepQuerier *StepQuerier
 	if c.config.GraphGatewayURL != "" {
-		entityPrefix := c.config.EntityPrefix
-		if entityPrefix == "" {
-			entityPrefix = "local.semspec.llm.call.semspec"
-		}
-		llmCallQuerier = NewLLMCallQuerier(c.config.GraphGatewayURL, entityPrefix)
-		c.logger.Debug("Initialized LLM call graph querier", "url", c.config.GraphGatewayURL, "entity_prefix", entityPrefix)
+		stepQuerier = NewStepQuerier(c.config.GraphGatewayURL)
+		c.logger.Debug("Initialized step graph querier", "url", c.config.GraphGatewayURL)
 	}
 
-	// Create cancellation context
+	// Create cancellation context.
 	_, cancel := context.WithCancel(ctx)
 
-	// Update state atomically with lock for complex state
+	// Update state atomically with lock for complex state.
 	c.mu.Lock()
-	c.toolCallsBucket = toolCallsBucket
 	c.loopsBucket = loopsBucket
-	c.llmCallQuerier = llmCallQuerier
+	c.contentStore = contentStore
+	c.stepQuerier = stepQuerier
 	c.workflowManager = workflowManager
 	c.cancel = cancel
 	c.startTime = time.Now()
 	c.mu.Unlock()
 
-	// Transition to running
+	// Transition to running.
 	c.state.Store(stateRunning)
 
 	c.logger.Info("trajectory-api started",
-		"tool_calls_bucket", c.config.ToolCallsBucket,
 		"loops_bucket", c.config.LoopsBucket,
-		"note", "LLM calls are now stored in the knowledge graph")
+		"content_bucket", c.config.ContentBucket,
+		"org", c.config.Org,
+		"platform", c.config.Platform)
 
 	return nil
 }
@@ -233,7 +230,7 @@ func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
 		Name:        "trajectory-api",
 		Type:        "processor",
-		Description: "HTTP endpoints for querying LLM call trajectories and agent loop history",
+		Description: "HTTP endpoints for querying agent loop trajectories from graph step entities",
 		Version:     "0.1.0",
 	}
 }
@@ -285,45 +282,6 @@ func (c *Component) DataFlow() component.FlowMetrics {
 	return component.FlowMetrics{}
 }
 
-// NOTE: getLLMCallsBucket removed - LLM calls are now stored in the knowledge graph.
-// Use graph queries with llm.call.* predicates to access LLM call data.
-
-// getToolCallsBucket gets the tool calls bucket, attempting to reconnect if needed.
-func (c *Component) getToolCallsBucket(ctx context.Context) (jetstream.KeyValue, error) {
-	c.mu.RLock()
-	bucket := c.toolCallsBucket
-	c.mu.RUnlock()
-
-	if bucket != nil {
-		return bucket, nil
-	}
-
-	// Upgrade to write lock and check again (double-checked locking)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Check again after acquiring write lock
-	if c.toolCallsBucket != nil {
-		return c.toolCallsBucket, nil
-	}
-
-	// Try to get the bucket (it may have been created since startup)
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return nil, fmt.Errorf("get jetstream: %w", err)
-	}
-
-	bucket, err = js.KeyValue(ctx, c.config.ToolCallsBucket)
-	if err != nil {
-		return nil, fmt.Errorf("bucket not found: %w", err)
-	}
-
-	// Cache it
-	c.toolCallsBucket = bucket
-
-	return bucket, nil
-}
-
 // getLoopsBucket gets the loops bucket, attempting to reconnect if needed.
 func (c *Component) getLoopsBucket(ctx context.Context) (jetstream.KeyValue, error) {
 	c.mu.RLock()
@@ -334,16 +292,14 @@ func (c *Component) getLoopsBucket(ctx context.Context) (jetstream.KeyValue, err
 		return bucket, nil
 	}
 
-	// Upgrade to write lock and check again (double-checked locking)
+	// Upgrade to write lock and check again (double-checked locking).
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Check again after acquiring write lock
 	if c.loopsBucket != nil {
 		return c.loopsBucket, nil
 	}
 
-	// Try to get the bucket (it may have been created since startup)
 	js, err := c.natsClient.JetStream()
 	if err != nil {
 		return nil, fmt.Errorf("get jetstream: %w", err)
@@ -354,8 +310,54 @@ func (c *Component) getLoopsBucket(ctx context.Context) (jetstream.KeyValue, err
 		return nil, fmt.Errorf("bucket not found: %w", err)
 	}
 
-	// Cache it
 	c.loopsBucket = bucket
-
 	return bucket, nil
+}
+
+// getContentStore gets the ObjectStore for step content, attempting to reconnect if needed.
+func (c *Component) getContentStore(ctx context.Context) (jetstream.ObjectStore, error) {
+	c.mu.RLock()
+	store := c.contentStore
+	c.mu.RUnlock()
+
+	if store != nil {
+		return store, nil
+	}
+
+	if c.config.ContentBucket == "" {
+		return nil, fmt.Errorf("content bucket not configured")
+	}
+
+	// Upgrade to write lock and check again.
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.contentStore != nil {
+		return c.contentStore, nil
+	}
+
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return nil, fmt.Errorf("get jetstream: %w", err)
+	}
+
+	store, err = js.ObjectStore(ctx, c.config.ContentBucket)
+	if err != nil {
+		return nil, fmt.Errorf("content store not found: %w", err)
+	}
+
+	c.contentStore = store
+	return store, nil
+}
+
+// loopEntityID constructs the full graph entity ID for a loop given the short loop ID.
+// Returns an empty string if org or platform are not configured (graceful degradation).
+func (c *Component) loopEntityID(loopID string) string {
+	if c.config.Org == "" || c.config.Platform == "" {
+		// When org/platform are not configured, the caller receives an empty entity ID
+		// and will fall back to returning an empty step list gracefully.
+		return ""
+	}
+	return fmt.Sprintf("%s.%s.agent.agentic-loop.execution.%s",
+		c.config.Org, c.config.Platform, loopID)
 }

@@ -117,7 +117,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		config:        config,
 		natsClient:    deps.NATSClient,
 		logger:        logger,
-		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger), llm.WithCallStore(llm.GlobalCallStore())),
+		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger)),
 		questionStore: store,
 		contextHelper: ctxHelper,
 	}, nil

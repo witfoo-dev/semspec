@@ -6,8 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-
-	"github.com/c360studio/semspec/llm"
 )
 
 func TestExtractIDFromPath(t *testing.T) {
@@ -104,44 +102,43 @@ func TestBuildTrajectory(t *testing.T) {
 		EndedAt:   &endTime,
 	}
 
-	calls := []*llm.CallRecord{
+	steps := []*StepRecord{
 		{
-			RequestID:        "req-1",
-			TraceID:          "trace-456",
-			LoopID:           "loop-123",
-			Model:            "gpt-4",
-			Provider:         "openai",
-			Capability:       "planning",
-			PromptTokens:     100,
-			CompletionTokens: 50,
-			TotalTokens:      150,
-			DurationMs:       1000,
-			StartedAt:        now,
-			CompletedAt:      now.Add(time.Second),
-			FinishReason:     "stop",
-			Messages:         []llm.Message{{Role: "user", Content: "hello"}},
-			Response:         "Hello! How can I help you?",
+			EntityID:   "semspec.semspec-dev.agent.agentic-loop.step.loop-123-0",
+			Type:       "model_call",
+			Index:      0,
+			Timestamp:  now,
+			DurationMs: 1000,
+			Model:      "claude-sonnet",
+			Provider:   "anthropic",
+			Capability: "planning",
+			TokensIn:   100,
+			TokensOut:  50,
 		},
 		{
-			RequestID:        "req-2",
-			TraceID:          "trace-456",
-			LoopID:           "loop-123",
-			Model:            "gpt-4",
-			Provider:         "openai",
-			Capability:       "coding",
-			PromptTokens:     200,
-			CompletionTokens: 100,
-			TotalTokens:      300,
-			DurationMs:       2000,
-			StartedAt:        now.Add(2 * time.Second),
-			CompletedAt:      now.Add(4 * time.Second),
-			FinishReason:     "stop",
-			Messages:         []llm.Message{{Role: "user", Content: "write code"}},
-			Response:         "Here is the code...",
+			EntityID:   "semspec.semspec-dev.agent.agentic-loop.step.loop-123-1",
+			Type:       "tool_call",
+			Index:      1,
+			Timestamp:  now.Add(1500 * time.Millisecond),
+			DurationMs: 200,
+			ToolName:   "file_read",
+			Capability: "coding",
+		},
+		{
+			EntityID:   "semspec.semspec-dev.agent.agentic-loop.step.loop-123-2",
+			Type:       "model_call",
+			Index:      2,
+			Timestamp:  now.Add(2 * time.Second),
+			DurationMs: 2000,
+			Model:      "claude-sonnet",
+			Provider:   "anthropic",
+			Capability: "coding",
+			TokensIn:   200,
+			TokensOut:  100,
 		},
 	}
 
-	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, false)
+	trajectory := c.buildTrajectory(loopState, steps, false)
 
 	if trajectory.LoopID != "loop-123" {
 		t.Errorf("LoopID = %q, want %q", trajectory.LoopID, "loop-123")
@@ -153,23 +150,26 @@ func TestBuildTrajectory(t *testing.T) {
 		t.Errorf("Status = %q, want %q", trajectory.Status, "completed")
 	}
 	if trajectory.Steps != 3 {
-		t.Errorf("Steps = %d, want %d", trajectory.Steps, 3)
+		t.Errorf("Steps = %d, want 3", trajectory.Steps)
 	}
 	if trajectory.ModelCalls != 2 {
-		t.Errorf("ModelCalls = %d, want %d", trajectory.ModelCalls, 2)
+		t.Errorf("ModelCalls = %d, want 2", trajectory.ModelCalls)
+	}
+	if trajectory.ToolCalls != 1 {
+		t.Errorf("ToolCalls = %d, want 1", trajectory.ToolCalls)
 	}
 	if trajectory.TokensIn != 300 {
-		t.Errorf("TokensIn = %d, want %d", trajectory.TokensIn, 300)
+		t.Errorf("TokensIn = %d, want 300 (100+200)", trajectory.TokensIn)
 	}
 	if trajectory.TokensOut != 150 {
-		t.Errorf("TokensOut = %d, want %d", trajectory.TokensOut, 150)
+		t.Errorf("TokensOut = %d, want 150 (50+100)", trajectory.TokensOut)
 	}
-	// Duration should be calculated from loop state
+	// Duration is calculated from loop state start/end timestamps.
 	expectedDuration := endTime.Sub(now).Milliseconds()
 	if trajectory.DurationMs != expectedDuration {
 		t.Errorf("DurationMs = %d, want %d", trajectory.DurationMs, expectedDuration)
 	}
-	// Entries should not be included when includeEntries is false
+	// Entries should not be included when includeEntries is false.
 	if len(trajectory.Entries) != 0 {
 		t.Errorf("Entries count = %d, want 0 (includeEntries=false)", len(trajectory.Entries))
 	}
@@ -185,69 +185,73 @@ func TestBuildTrajectory_WithEntries(t *testing.T) {
 		Status:  "running",
 	}
 
-	calls := []*llm.CallRecord{
+	steps := []*StepRecord{
 		{
-			RequestID:        "req-1",
-			TraceID:          "trace-456",
-			LoopID:           "loop-123",
-			Model:            "claude-3",
-			Provider:         "anthropic",
-			Capability:       "planning",
-			PromptTokens:     100,
-			CompletionTokens: 50,
-			TotalTokens:      150,
-			DurationMs:       1000,
-			StartedAt:        now,
-			FinishReason:     "stop",
-			Retries:          1,
-			Messages:         []llm.Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "hi"}},
-			Response:         "This is a response",
+			EntityID:   "semspec.semspec-dev.agent.agentic-loop.step.loop-123-0",
+			Type:       "model_call",
+			Index:      0,
+			Timestamp:  now,
+			DurationMs: 1000,
+			Model:      "claude-sonnet",
+			Provider:   "anthropic",
+			Capability: "planning",
+			TokensIn:   100,
+			TokensOut:  50,
+			Retries:    1,
+		},
+		{
+			EntityID:   "semspec.semspec-dev.agent.agentic-loop.step.loop-123-1",
+			Type:       "tool_call",
+			Index:      1,
+			Timestamp:  now.Add(1500 * time.Millisecond),
+			DurationMs: 250,
+			ToolName:   "graph_query",
+			Capability: "planning",
 		},
 	}
 
-	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, true)
+	trajectory := c.buildTrajectory(loopState, steps, true)
 
-	if len(trajectory.Entries) != 1 {
-		t.Fatalf("Entries count = %d, want 1", len(trajectory.Entries))
+	if len(trajectory.Entries) != 2 {
+		t.Fatalf("Entries count = %d, want 2", len(trajectory.Entries))
 	}
 
-	entry := trajectory.Entries[0]
-	if entry.Type != "model_call" {
-		t.Errorf("Entry.Type = %q, want %q", entry.Type, "model_call")
+	entry0 := trajectory.Entries[0]
+	if entry0.Type != "model_call" {
+		t.Errorf("Entry[0].Type = %q, want %q", entry0.Type, "model_call")
 	}
-	if entry.Model != "claude-3" {
-		t.Errorf("Entry.Model = %q, want %q", entry.Model, "claude-3")
+	if entry0.Model != "claude-sonnet" {
+		t.Errorf("Entry[0].Model = %q, want %q", entry0.Model, "claude-sonnet")
 	}
-	if entry.Provider != "anthropic" {
-		t.Errorf("Entry.Provider = %q, want %q", entry.Provider, "anthropic")
+	if entry0.Provider != "anthropic" {
+		t.Errorf("Entry[0].Provider = %q, want %q", entry0.Provider, "anthropic")
 	}
-	if entry.Capability != "planning" {
-		t.Errorf("Entry.Capability = %q, want %q", entry.Capability, "planning")
+	if entry0.Capability != "planning" {
+		t.Errorf("Entry[0].Capability = %q, want %q", entry0.Capability, "planning")
 	}
-	if entry.TokensIn != 100 {
-		t.Errorf("Entry.TokensIn = %d, want %d", entry.TokensIn, 100)
+	if entry0.TokensIn != 100 {
+		t.Errorf("Entry[0].TokensIn = %d, want 100", entry0.TokensIn)
 	}
-	if entry.TokensOut != 50 {
-		t.Errorf("Entry.TokensOut = %d, want %d", entry.TokensOut, 50)
+	if entry0.TokensOut != 50 {
+		t.Errorf("Entry[0].TokensOut = %d, want 50", entry0.TokensOut)
 	}
-	if entry.DurationMs != 1000 {
-		t.Errorf("Entry.DurationMs = %d, want %d", entry.DurationMs, 1000)
+	if entry0.DurationMs != 1000 {
+		t.Errorf("Entry[0].DurationMs = %d, want 1000", entry0.DurationMs)
 	}
-	if entry.FinishReason != "stop" {
-		t.Errorf("Entry.FinishReason = %q, want %q", entry.FinishReason, "stop")
+	if entry0.Retries != 1 {
+		t.Errorf("Entry[0].Retries = %d, want 1", entry0.Retries)
 	}
-	if entry.Retries != 1 {
-		t.Errorf("Entry.Retries = %d, want %d", entry.Retries, 1)
+
+	entry1 := trajectory.Entries[1]
+	if entry1.Type != "tool_call" {
+		t.Errorf("Entry[1].Type = %q, want %q", entry1.Type, "tool_call")
 	}
-	if entry.MessagesCount != 2 {
-		t.Errorf("Entry.MessagesCount = %d, want %d", entry.MessagesCount, 2)
-	}
-	if entry.ResponsePreview != "This is a response" {
-		t.Errorf("Entry.ResponsePreview = %q, want %q", entry.ResponsePreview, "This is a response")
+	if entry1.ToolName != "graph_query" {
+		t.Errorf("Entry[1].ToolName = %q, want %q", entry1.ToolName, "graph_query")
 	}
 }
 
-func TestBuildTrajectory_EmptyCalls(t *testing.T) {
+func TestBuildTrajectory_EmptySteps(t *testing.T) {
 	c := &Component{}
 	now := time.Now()
 
@@ -259,77 +263,30 @@ func TestBuildTrajectory_EmptyCalls(t *testing.T) {
 		StartedAt: &now,
 	}
 
-	calls := []*llm.CallRecord{}
-
-	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, true)
+	trajectory := c.buildTrajectory(loopState, nil, true)
 
 	if trajectory.LoopID != "loop-123" {
 		t.Errorf("LoopID = %q, want %q", trajectory.LoopID, "loop-123")
 	}
 	if trajectory.ModelCalls != 0 {
-		t.Errorf("ModelCalls = %d, want %d", trajectory.ModelCalls, 0)
+		t.Errorf("ModelCalls = %d, want 0", trajectory.ModelCalls)
+	}
+	if trajectory.ToolCalls != 0 {
+		t.Errorf("ToolCalls = %d, want 0", trajectory.ToolCalls)
 	}
 	if trajectory.TokensIn != 0 {
-		t.Errorf("TokensIn = %d, want %d", trajectory.TokensIn, 0)
-	}
-	if trajectory.TokensOut != 0 {
-		t.Errorf("TokensOut = %d, want %d", trajectory.TokensOut, 0)
+		t.Errorf("TokensIn = %d, want 0", trajectory.TokensIn)
 	}
 	if len(trajectory.Entries) != 0 {
 		t.Errorf("Entries count = %d, want 0", len(trajectory.Entries))
 	}
 }
 
-func TestBuildTrajectory_ResponseTruncation(t *testing.T) {
+func TestBuildTrajectory_DurationFromSteps(t *testing.T) {
 	c := &Component{}
 	now := time.Now()
 
-	loopState := &LoopState{
-		ID:      "loop-123",
-		TraceID: "trace-456",
-		Status:  "completed",
-	}
-
-	// Create a response longer than 200 characters
-	longResponse := ""
-	for i := 0; i < 250; i++ {
-		longResponse += "x"
-	}
-
-	calls := []*llm.CallRecord{
-		{
-			RequestID: "req-1",
-			TraceID:   "trace-456",
-			LoopID:    "loop-123",
-			Model:     "gpt-4",
-			Provider:  "openai",
-			StartedAt: now,
-			Response:  longResponse,
-		},
-	}
-
-	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, true)
-
-	if len(trajectory.Entries) != 1 {
-		t.Fatalf("Entries count = %d, want 1", len(trajectory.Entries))
-	}
-
-	entry := trajectory.Entries[0]
-	// Should be truncated to 200 chars + "..."
-	expectedLen := 203
-	if len(entry.ResponsePreview) != expectedLen {
-		t.Errorf("ResponsePreview length = %d, want %d", len(entry.ResponsePreview), expectedLen)
-	}
-	if entry.ResponsePreview[200:] != "..." {
-		t.Errorf("ResponsePreview should end with '...', got %q", entry.ResponsePreview[200:])
-	}
-}
-
-func TestBuildTrajectory_DurationFromCalls(t *testing.T) {
-	c := &Component{}
-	now := time.Now()
-
-	// Loop state without endedAt - duration should be sum of call durations
+	// Loop state without endedAt — duration is sum of step durations.
 	loopState := &LoopState{
 		ID:        "loop-123",
 		TraceID:   "trace-456",
@@ -338,29 +295,17 @@ func TestBuildTrajectory_DurationFromCalls(t *testing.T) {
 		EndedAt:   nil,
 	}
 
-	calls := []*llm.CallRecord{
-		{
-			RequestID:  "req-1",
-			TraceID:    "trace-456",
-			LoopID:     "loop-123",
-			StartedAt:  now,
-			DurationMs: 500,
-		},
-		{
-			RequestID:  "req-2",
-			TraceID:    "trace-456",
-			LoopID:     "loop-123",
-			StartedAt:  now.Add(time.Second),
-			DurationMs: 700,
-		},
+	steps := []*StepRecord{
+		{Type: "model_call", Index: 0, Timestamp: now, DurationMs: 500, TokensIn: 10, TokensOut: 5},
+		{Type: "tool_call", Index: 1, Timestamp: now.Add(time.Second), DurationMs: 700},
 	}
 
-	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, false)
+	trajectory := c.buildTrajectory(loopState, steps, false)
 
-	// Without loop endedAt, duration is sum of call durations
+	// Without loop EndedAt, duration is sum of step durations.
 	expectedDuration := int64(1200)
 	if trajectory.DurationMs != expectedDuration {
-		t.Errorf("DurationMs = %d, want %d (sum of call durations)", trajectory.DurationMs, expectedDuration)
+		t.Errorf("DurationMs = %d, want %d (sum of step durations)", trajectory.DurationMs, expectedDuration)
 	}
 }
 
@@ -431,24 +376,23 @@ func TestTrajectoryResponseFormat(t *testing.T) {
 		EndedAt:   &endTime,
 	}
 
-	calls := []*llm.CallRecord{
+	steps := []*StepRecord{
 		{
-			RequestID:        "req-1",
-			Model:            "gpt-4",
-			Provider:         "openai",
-			Capability:       "planning",
-			PromptTokens:     50,
-			CompletionTokens: 25,
-			TotalTokens:      75,
-			DurationMs:       500,
-			StartedAt:        now,
-			CompletedAt:      now.Add(500 * time.Millisecond),
+			Type:       "model_call",
+			Index:      0,
+			Timestamp:  now,
+			DurationMs: 500,
+			Model:      "claude-sonnet",
+			Provider:   "anthropic",
+			Capability: "planning",
+			TokensIn:   50,
+			TokensOut:  25,
 		},
 	}
 
-	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, true)
+	trajectory := c.buildTrajectory(loopState, steps, true)
 
-	// Verify JSON marshaling works correctly
+	// Verify JSON marshaling works correctly.
 	data, err := json.Marshal(trajectory)
 	if err != nil {
 		t.Fatalf("Failed to marshal trajectory: %v", err)
@@ -485,49 +429,14 @@ func TestTrajectoryResponseFormat(t *testing.T) {
 	}
 }
 
-// TestTrajectoryEntryError verifies error field propagation in entries.
-func TestTrajectoryEntryError(t *testing.T) {
-	c := &Component{}
-	now := time.Now()
-
-	loopState := &LoopState{
-		ID:     "loop-error",
-		Status: "failed",
-	}
-
-	calls := []*llm.CallRecord{
-		{
-			RequestID:  "req-1",
-			Model:      "gpt-4",
-			Provider:   "openai",
-			StartedAt:  now,
-			DurationMs: 100,
-			Error:      "connection timeout",
-		},
-	}
-
-	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, true)
-
-	if len(trajectory.Entries) != 1 {
-		t.Fatalf("Entries count = %d, want 1", len(trajectory.Entries))
-	}
-
-	entry := trajectory.Entries[0]
-	if entry.Error != "connection timeout" {
-		t.Errorf("Entry.Error = %q, want %q", entry.Error, "connection timeout")
-	}
-}
-
-// TestRegisterHTTPHandlers verifies handler registration by checking the mux pattern.
+// TestRegisterHTTPHandlers verifies handler registration.
 func TestRegisterHTTPHandlers(t *testing.T) {
 	c := &Component{}
 	mux := http.NewServeMux()
 
-	// This should not panic
+	// This should not panic.
 	c.RegisterHTTPHandlers("/trajectory-api/", mux)
 
-	// Verify handlers are registered - we test this by checking handler paths
-	// that would return 400 Bad Request (missing ID) instead of 404 (no handler)
 	tests := []struct {
 		name         string
 		path         string
@@ -538,13 +447,13 @@ func TestRegisterHTTPHandlers(t *testing.T) {
 			name:         "loops handler registered - missing ID",
 			path:         "/trajectory-api/loops/",
 			method:       http.MethodGet,
-			expectedCode: http.StatusBadRequest, // Missing ID returns 400, not 404
+			expectedCode: http.StatusBadRequest,
 		},
 		{
 			name:         "traces handler registered - missing ID",
 			path:         "/trajectory-api/traces/",
 			method:       http.MethodGet,
-			expectedCode: http.StatusBadRequest, // Missing ID returns 400, not 404
+			expectedCode: http.StatusBadRequest,
 		},
 		{
 			name:         "loops handler wrong method",
@@ -583,7 +492,7 @@ func TestLoopStateJSONSerialization(t *testing.T) {
 		TraceID:   "trace-456",
 		Status:    "completed",
 		Role:      "planner",
-		Model:     "gpt-4",
+		Model:     "claude-sonnet",
 		Iteration: 5,
 		StartedAt: &now,
 		EndedAt:   &endTime,
@@ -624,18 +533,15 @@ func TestTrajectoryEntryJSONSerialization(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 
 	entry := TrajectoryEntry{
-		Type:            "model_call",
-		Timestamp:       now,
-		DurationMs:      1500,
-		Model:           "claude-3-opus",
-		Provider:        "anthropic",
-		Capability:      "coding",
-		TokensIn:        500,
-		TokensOut:       250,
-		FinishReason:    "stop",
-		Retries:         2,
-		MessagesCount:   3,
-		ResponsePreview: "Generated code...",
+		Type:       "model_call",
+		Timestamp:  now,
+		DurationMs: 1500,
+		Model:      "claude-sonnet",
+		Provider:   "anthropic",
+		Capability: "coding",
+		TokensIn:   500,
+		TokensOut:  250,
+		Retries:    2,
 	}
 
 	data, err := json.Marshal(entry)
@@ -669,17 +575,8 @@ func TestTrajectoryEntryJSONSerialization(t *testing.T) {
 	if unmarshaled.TokensOut != entry.TokensOut {
 		t.Errorf("TokensOut = %d, want %d", unmarshaled.TokensOut, entry.TokensOut)
 	}
-	if unmarshaled.FinishReason != entry.FinishReason {
-		t.Errorf("FinishReason = %q, want %q", unmarshaled.FinishReason, entry.FinishReason)
-	}
 	if unmarshaled.Retries != entry.Retries {
 		t.Errorf("Retries = %d, want %d", unmarshaled.Retries, entry.Retries)
-	}
-	if unmarshaled.MessagesCount != entry.MessagesCount {
-		t.Errorf("MessagesCount = %d, want %d", unmarshaled.MessagesCount, entry.MessagesCount)
-	}
-	if unmarshaled.ResponsePreview != entry.ResponsePreview {
-		t.Errorf("ResponsePreview = %q, want %q", unmarshaled.ResponsePreview, entry.ResponsePreview)
 	}
 }
 
@@ -709,12 +606,6 @@ func TestHandleGetWorkflowTrajectory(t *testing.T) {
 			name:         "valid request without manager returns 503",
 			method:       http.MethodGet,
 			url:          "/trajectory-api/workflows/test-plan",
-			expectedCode: http.StatusServiceUnavailable,
-		},
-		{
-			name:         "valid request with format param without manager",
-			method:       http.MethodGet,
-			url:          "/trajectory-api/workflows/test-plan?format=json",
 			expectedCode: http.StatusServiceUnavailable,
 		},
 	}
@@ -776,67 +667,67 @@ func TestBuildWorkflowTrajectory(t *testing.T) {
 	c := &Component{}
 	now := time.Now()
 
-	calls := []*llm.CallRecord{
+	steps := []*StepRecord{
 		// Planning phase
 		{
-			RequestID:        "req-1",
-			TraceID:          "trace-1",
-			Capability:       "planning",
-			PromptTokens:     15000,
-			CompletionTokens: 3000,
-			DurationMs:       10000,
-			StartedAt:        now,
-			ContextBudget:    128000,
-			ContextTruncated: false,
+			Type:       "model_call",
+			Index:      0,
+			Timestamp:  now,
+			DurationMs: 10000,
+			Capability: "planning",
+			TokensIn:   15000,
+			TokensOut:  3000,
 		},
 		// Review phase
 		{
-			RequestID:        "req-2",
-			TraceID:          "trace-1",
-			Capability:       "reviewing",
-			PromptTokens:     28000,
-			CompletionTokens: 5000,
-			DurationMs:       15000,
-			StartedAt:        now.Add(1 * time.Minute),
-			ContextBudget:    128000,
-			ContextTruncated: false,
+			Type:       "model_call",
+			Index:      1,
+			Timestamp:  now.Add(1 * time.Minute),
+			DurationMs: 15000,
+			Capability: "reviewing",
+			TokensIn:   28000,
+			TokensOut:  5000,
 		},
-		// Execution - coding with truncation
+		// Execution - coding
 		{
-			RequestID:        "req-3",
-			TraceID:          "trace-2",
-			Capability:       "coding",
-			PromptTokens:     64000,
-			CompletionTokens: 18000,
-			DurationMs:       20000,
-			StartedAt:        now.Add(2 * time.Minute),
-			ContextBudget:    64000,
-			ContextTruncated: true,
+			Type:       "model_call",
+			Index:      2,
+			Timestamp:  now.Add(2 * time.Minute),
+			DurationMs: 20000,
+			Capability: "coding",
+			TokensIn:   64000,
+			TokensOut:  18000,
+		},
+		// Tool call (not counted in model metrics)
+		{
+			Type:       "tool_call",
+			Index:      3,
+			Timestamp:  now.Add(3 * time.Minute),
+			DurationMs: 200,
+			ToolName:   "file_read",
 		},
 	}
 
 	slug := "test-workflow"
 	traceIDs := []string{"trace-1", "trace-2"}
 
-	wt := c.buildWorkflowTrajectory(slug, "approved", traceIDs, calls, &now, nil)
+	wt := c.buildWorkflowTrajectory(slug, "approved", traceIDs, steps, &now, nil)
 
 	if wt.Slug != slug {
 		t.Errorf("Slug = %q, want %q", wt.Slug, slug)
 	}
-
 	if wt.Status != "approved" {
 		t.Errorf("Status = %q, want %q", wt.Status, "approved")
 	}
-
 	if len(wt.TraceIDs) != 2 {
 		t.Errorf("TraceIDs count = %d, want 2", len(wt.TraceIDs))
 	}
 
-	// Check totals
 	if wt.Totals == nil {
 		t.Fatal("Totals is nil")
 	}
 
+	// Only model_call steps contribute to token counts (3 model calls, 1 tool call).
 	expectedTokensIn := 15000 + 28000 + 64000
 	if wt.Totals.TokensIn != expectedTokensIn {
 		t.Errorf("Totals.TokensIn = %d, want %d", wt.Totals.TokensIn, expectedTokensIn)
@@ -848,181 +739,26 @@ func TestBuildWorkflowTrajectory(t *testing.T) {
 	}
 
 	if wt.Totals.CallCount != 3 {
-		t.Errorf("Totals.CallCount = %d, want 3", wt.Totals.CallCount)
-	}
-
-	// Check truncation summary
-	if wt.TruncationSummary == nil {
-		t.Fatal("TruncationSummary is nil")
-	}
-
-	if wt.TruncationSummary.TruncatedCalls != 1 {
-		t.Errorf("TruncatedCalls = %d, want 1", wt.TruncationSummary.TruncatedCalls)
-	}
-
-	expectedRate := 33.33 // 1/3
-	if wt.TruncationSummary.TruncationRate < 33.0 || wt.TruncationSummary.TruncationRate > 34.0 {
-		t.Errorf("TruncationRate = %.2f, want ~%.2f", wt.TruncationSummary.TruncationRate, expectedRate)
+		t.Errorf("Totals.CallCount = %d, want 3 (model calls only)", wt.Totals.CallCount)
 	}
 }
 
-// TestGetByTraceID_AggregatesMultipleCalls verifies that getTrajectoryByTraceID
-// correctly aggregates multiple LLM calls with the same trace ID.
-func TestGetByTraceID_AggregatesMultipleCalls(t *testing.T) {
-	c := &Component{}
-	now := time.Now()
-
-	// Simulate multiple calls with the same trace ID (different loop IDs)
-	calls := []*llm.CallRecord{
-		{
-			RequestID:        "req-1",
-			TraceID:          "shared-trace-123",
-			LoopID:           "loop-a",
-			Model:            "gpt-4",
-			Provider:         "openai",
-			Capability:       "planning",
-			PromptTokens:     1000,
-			CompletionTokens: 200,
-			TotalTokens:      1200,
-			DurationMs:       500,
-			StartedAt:        now,
-		},
-		{
-			RequestID:        "req-2",
-			TraceID:          "shared-trace-123",
-			LoopID:           "loop-a",
-			Model:            "gpt-4",
-			Provider:         "openai",
-			Capability:       "planning",
-			PromptTokens:     800,
-			CompletionTokens: 150,
-			TotalTokens:      950,
-			DurationMs:       400,
-			StartedAt:        now.Add(1 * time.Second),
-		},
-		{
-			RequestID:        "req-3",
-			TraceID:          "shared-trace-123",
-			LoopID:           "loop-b", // Different loop, same trace
-			Model:            "gpt-4",
-			Provider:         "openai",
-			Capability:       "coding",
-			PromptTokens:     2000,
-			CompletionTokens: 500,
-			TotalTokens:      2500,
-			DurationMs:       1000,
-			StartedAt:        now.Add(2 * time.Second),
-		},
-	}
-
-	// Build trajectory (simulating what getTrajectoryByTraceID does internally)
-	loopState := &LoopState{
-		TraceID: "shared-trace-123",
-	}
-	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, false)
-
-	// Verify aggregation
-	if trajectory.TraceID != "shared-trace-123" {
-		t.Errorf("TraceID = %q, want %q", trajectory.TraceID, "shared-trace-123")
-	}
-
-	if trajectory.ModelCalls != 3 {
-		t.Errorf("ModelCalls = %d, want 3", trajectory.ModelCalls)
-	}
-
-	// Total tokens in: 1000 + 800 + 2000 = 3800
-	expectedTokensIn := 3800
-	if trajectory.TokensIn != expectedTokensIn {
-		t.Errorf("TokensIn = %d, want %d", trajectory.TokensIn, expectedTokensIn)
-	}
-
-	// Total tokens out: 200 + 150 + 500 = 850
-	expectedTokensOut := 850
-	if trajectory.TokensOut != expectedTokensOut {
-		t.Errorf("TokensOut = %d, want %d", trajectory.TokensOut, expectedTokensOut)
-	}
-
-	// Total duration: 500 + 400 + 1000 = 1900ms
-	expectedDurationMs := int64(1900)
-	if trajectory.DurationMs != expectedDurationMs {
-		t.Errorf("DurationMs = %d, want %d", trajectory.DurationMs, expectedDurationMs)
-	}
-}
-
-// TestGetWorkflowTrajectory_IncludesAllPhases verifies that buildWorkflowTrajectory
-// correctly includes all phases (planning, review, execution) when calls span multiple phases.
+// TestGetWorkflowTrajectory_IncludesAllPhases verifies phase mapping.
 func TestGetWorkflowTrajectory_IncludesAllPhases(t *testing.T) {
 	c := &Component{}
 	now := time.Now()
 
-	// Create calls covering all three phases
-	calls := []*llm.CallRecord{
-		// Planning phase - capability: "planning"
-		{
-			RequestID:        "req-plan-1",
-			TraceID:          "workflow-trace",
-			Capability:       "planning",
-			PromptTokens:     10000,
-			CompletionTokens: 2000,
-			DurationMs:       5000,
-			StartedAt:        now,
-			ContextBudget:    128000,
-		},
-		// Review phase - capability: "reviewing"
-		{
-			RequestID:        "req-review-1",
-			TraceID:          "workflow-trace",
-			Capability:       "reviewing",
-			PromptTokens:     15000,
-			CompletionTokens: 3000,
-			DurationMs:       7000,
-			StartedAt:        now.Add(1 * time.Minute),
-			ContextBudget:    128000,
-		},
-		{
-			RequestID:        "req-review-2",
-			TraceID:          "workflow-trace",
-			Capability:       "reviewing",
-			PromptTokens:     12000,
-			CompletionTokens: 2500,
-			DurationMs:       6000,
-			StartedAt:        now.Add(2 * time.Minute),
-			ContextBudget:    128000,
-		},
-		// Execution phase - capability: "coding"
-		{
-			RequestID:        "req-code-1",
-			TraceID:          "workflow-trace",
-			Capability:       "coding",
-			PromptTokens:     20000,
-			CompletionTokens: 5000,
-			DurationMs:       10000,
-			StartedAt:        now.Add(3 * time.Minute),
-			ContextBudget:    128000,
-		},
-		// Execution phase - capability: "writing"
-		{
-			RequestID:        "req-write-1",
-			TraceID:          "workflow-trace",
-			Capability:       "writing",
-			PromptTokens:     8000,
-			CompletionTokens: 1500,
-			DurationMs:       4000,
-			StartedAt:        now.Add(4 * time.Minute),
-			ContextBudget:    64000,
-		},
+	steps := []*StepRecord{
+		{Type: "model_call", Index: 0, Timestamp: now, Capability: "planning", TokensIn: 10000, TokensOut: 2000},
+		{Type: "model_call", Index: 1, Timestamp: now.Add(1 * time.Minute), Capability: "reviewing", TokensIn: 15000, TokensOut: 3000},
+		{Type: "model_call", Index: 2, Timestamp: now.Add(2 * time.Minute), Capability: "reviewing", TokensIn: 12000, TokensOut: 2500},
+		{Type: "model_call", Index: 3, Timestamp: now.Add(3 * time.Minute), Capability: "coding", TokensIn: 20000, TokensOut: 5000},
+		{Type: "model_call", Index: 4, Timestamp: now.Add(4 * time.Minute), Capability: "writing", TokensIn: 8000, TokensOut: 1500},
 	}
 
-	wt := c.buildWorkflowTrajectory(
-		"test-workflow",
-		"approved",
-		[]string{"workflow-trace"},
-		calls,
-		&now,
-		nil,
-	)
+	wt := c.buildWorkflowTrajectory("test-workflow", "approved", []string{"workflow-trace"}, steps, &now, nil)
 
-	// Verify all three phases are present
+	// Verify all three phases are present.
 	expectedPhases := []string{"planning", "review", "execution"}
 	for _, phase := range expectedPhases {
 		if wt.Phases[phase] == nil {
@@ -1030,7 +766,7 @@ func TestGetWorkflowTrajectory_IncludesAllPhases(t *testing.T) {
 		}
 	}
 
-	// Verify planning phase metrics
+	// Verify planning phase metrics.
 	planningPhase := wt.Phases["planning"]
 	if planningPhase == nil {
 		t.Fatal("Planning phase is nil")
@@ -1042,7 +778,7 @@ func TestGetWorkflowTrajectory_IncludesAllPhases(t *testing.T) {
 		t.Errorf("planning.TokensIn = %d, want 10000", planningPhase.TokensIn)
 	}
 
-	// Verify review phase metrics (2 calls)
+	// Verify review phase metrics (2 calls).
 	reviewPhase := wt.Phases["review"]
 	if reviewPhase == nil {
 		t.Fatal("Review phase is nil")
@@ -1050,11 +786,11 @@ func TestGetWorkflowTrajectory_IncludesAllPhases(t *testing.T) {
 	if reviewPhase.CallCount != 2 {
 		t.Errorf("review.CallCount = %d, want 2", reviewPhase.CallCount)
 	}
-	if reviewPhase.TokensIn != 27000 { // 15000 + 12000
+	if reviewPhase.TokensIn != 27000 {
 		t.Errorf("review.TokensIn = %d, want 27000", reviewPhase.TokensIn)
 	}
 
-	// Verify execution phase metrics (coding + writing = 2 calls)
+	// Verify execution phase metrics (coding + writing = 2 calls).
 	executionPhase := wt.Phases["execution"]
 	if executionPhase == nil {
 		t.Fatal("Execution phase is nil")
@@ -1062,11 +798,9 @@ func TestGetWorkflowTrajectory_IncludesAllPhases(t *testing.T) {
 	if executionPhase.CallCount != 2 {
 		t.Errorf("execution.CallCount = %d, want 2", executionPhase.CallCount)
 	}
-	if executionPhase.TokensIn != 28000 { // 20000 + 8000
+	if executionPhase.TokensIn != 28000 {
 		t.Errorf("execution.TokensIn = %d, want 28000", executionPhase.TokensIn)
 	}
-
-	// Verify execution phase has both capabilities
 	if executionPhase.Capabilities["coding"] == nil {
 		t.Error("execution.Capabilities[coding] is nil")
 	}
@@ -1074,97 +808,73 @@ func TestGetWorkflowTrajectory_IncludesAllPhases(t *testing.T) {
 		t.Error("execution.Capabilities[writing] is nil")
 	}
 
-	// Verify totals across all phases
-	if wt.Totals == nil {
-		t.Fatal("Totals is nil")
-	}
 	if wt.Totals.CallCount != 5 {
 		t.Errorf("Totals.CallCount = %d, want 5", wt.Totals.CallCount)
 	}
-
-	expectedTotalTokensIn := 10000 + 15000 + 12000 + 20000 + 8000 // 65000
-	if wt.Totals.TokensIn != expectedTotalTokensIn {
-		t.Errorf("Totals.TokensIn = %d, want %d", wt.Totals.TokensIn, expectedTotalTokensIn)
-	}
-
-	expectedTotalTokensOut := 2000 + 3000 + 2500 + 5000 + 1500 // 14000
-	if wt.Totals.TokensOut != expectedTotalTokensOut {
-		t.Errorf("Totals.TokensOut = %d, want %d", wt.Totals.TokensOut, expectedTotalTokensOut)
-	}
 }
 
-// TestBuildContextStats tests context utilization calculation.
+// TestBuildContextStats tests context utilization calculation from step records.
 func TestBuildContextStats(t *testing.T) {
 	c := &Component{}
 
-	calls := []*llm.CallRecord{
-		// Low utilization
-		{
-			RequestID:        "req-1",
-			TraceID:          "trace-1",
-			Capability:       "planning",
-			PromptTokens:     45000,
-			ContextBudget:    128000,
-			ContextTruncated: false,
-			StartedAt:        time.Now(),
-		},
-		// High utilization with truncation
-		{
-			RequestID:        "req-2",
-			TraceID:          "trace-1",
-			Capability:       "coding",
-			PromptTokens:     64000,
-			ContextBudget:    64000,
-			ContextTruncated: true,
-			StartedAt:        time.Now(),
-		},
-		// Medium utilization
-		{
-			RequestID:        "req-3",
-			TraceID:          "trace-1",
-			Capability:       "writing",
-			PromptTokens:     18000,
-			ContextBudget:    32000,
-			ContextTruncated: false,
-			StartedAt:        time.Now(),
-		},
+	steps := []*StepRecord{
+		{Type: "model_call", Capability: "planning", TokensIn: 45000, TokensOut: 5000},
+		{Type: "model_call", Capability: "coding", TokensIn: 64000, TokensOut: 8000},
+		{Type: "model_call", Capability: "writing", TokensIn: 18000, TokensOut: 2000},
+		// Tool calls should not be counted.
+		{Type: "tool_call", ToolName: "file_read"},
 	}
 
-	stats := c.buildContextStats(calls, false)
+	stats := c.buildContextStats(steps)
 
 	if stats.Summary == nil {
 		t.Fatal("Summary is nil")
 	}
-
+	// Only model_call steps count.
 	if stats.Summary.TotalCalls != 3 {
 		t.Errorf("TotalCalls = %d, want 3", stats.Summary.TotalCalls)
 	}
 
-	if stats.Summary.CallsWithBudget != 3 {
-		t.Errorf("CallsWithBudget = %d, want 3", stats.Summary.CallsWithBudget)
-	}
-
-	// 1 truncated out of 3 = 33.33%
-	expectedRate := 33.33
-	if stats.Summary.TruncationRate < 33.0 || stats.Summary.TruncationRate > 34.0 {
-		t.Errorf("TruncationRate = %.2f, want ~%.2f", stats.Summary.TruncationRate, expectedRate)
-	}
-
-	// Check capability breakdown
 	if stats.ByCapability == nil {
 		t.Fatal("ByCapability is nil")
 	}
-
 	if len(stats.ByCapability) != 3 {
 		t.Errorf("ByCapability count = %d, want 3", len(stats.ByCapability))
 	}
 
-	// Coding should have 100% truncation
-	codingStats, ok := stats.ByCapability["coding"]
+	planningStats, ok := stats.ByCapability["planning"]
 	if !ok {
-		t.Fatal("coding capability not found")
+		t.Fatal("planning capability not found")
 	}
-	if codingStats.TruncationRate != 100.0 {
-		t.Errorf("coding TruncationRate = %.2f, want 100.0", codingStats.TruncationRate)
+	if planningStats.CallCount != 1 {
+		t.Errorf("planning CallCount = %d, want 1", planningStats.CallCount)
+	}
+}
+
+// TestLoopEntityID verifies the entity ID construction.
+func TestLoopEntityID(t *testing.T) {
+	c := &Component{
+		config: Config{
+			Org:      "semspec",
+			Platform: "semspec-dev",
+		},
+	}
+
+	got := c.loopEntityID("abc123")
+	want := "semspec.semspec-dev.agent.agentic-loop.execution.abc123"
+	if got != want {
+		t.Errorf("loopEntityID() = %q, want %q", got, want)
+	}
+}
+
+// TestLoopEntityID_MissingOrg verifies graceful degradation when org/platform not set.
+func TestLoopEntityID_MissingOrg(t *testing.T) {
+	c := &Component{
+		config: Config{}, // no org or platform
+	}
+
+	got := c.loopEntityID("abc123")
+	if got != "" {
+		t.Errorf("loopEntityID() = %q, want empty when org/platform not configured", got)
 	}
 }

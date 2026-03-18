@@ -123,7 +123,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		assembler:     assembler,
 		llmClient: llm.NewClient(model.Global(),
 			llm.WithLogger(logger),
-			llm.WithCallStore(llm.GlobalCallStore()),
 		),
 	}, nil
 }
