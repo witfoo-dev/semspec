@@ -10,7 +10,7 @@ const (
 	DefaultHTTPURL    = "http://localhost:8180"
 	DefaultGraphURL   = "http://localhost:8182"
 	DefaultMetricsURL = "http://localhost:9190"
-	DefaultMockLLMURL = "http://localhost:11434"
+	DefaultMockLLMURL = "http://localhost:11535"
 	DefaultSandboxURL = "http://localhost:8190"
 )
 

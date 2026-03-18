@@ -11,10 +11,8 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/processor/context-builder/gatherers"
-	"github.com/c360studio/semspec/source"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
-	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
@@ -457,8 +455,9 @@ func (s *HelloWorldScenario) stageVerifyInitialized(ctx context.Context, result 
 	return nil
 }
 
-// stageIngestSOP writes an SOP document and publishes an ingestion request.
-// Uses YAML frontmatter so the source-ingester skips LLM analysis (fast + deterministic).
+// stageIngestSOP writes an SOP document to the workspace sources directory.
+// Source ingestion into the graph is handled by semsource in real deployments;
+// here we just verify the file is written correctly for the context-builder to find.
 func (s *HelloWorldScenario) stageIngestSOP(ctx context.Context, result *Result) error {
 	sopContent := `---
 category: sop
@@ -501,90 +500,55 @@ requirements:
 		return fmt.Errorf("write SOP file: %w", err)
 	}
 
-	req := source.IngestRequest{
-		Path:      "api-testing-sop.md",
-		ProjectID: "default",
-		AddedBy:   "e2e-test",
-	}
-	data, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("marshal ingest request: %w", err)
-	}
-
-	if err := s.nats.PublishToStream(ctx, config.SourceIngestSubject, data); err != nil {
-		return fmt.Errorf("publish ingest request: %w", err)
-	}
-
 	result.SetDetail("sop_file_written", true)
-	result.SetDetail("sop_ingest_published", true)
 	return nil
 }
 
-// stageVerifySOPIngested polls the message-logger for graph.ingest.entity entries
-// containing SOP-related content, confirming the source-ingester processed the document.
+// stageVerifySOPIngested confirms the SOP document was written to disk.
+// Graph ingestion is handled by semsource in real deployments; in e2e we
+// verify the file exists and has the expected frontmatter.
 func (s *HelloWorldScenario) stageVerifySOPIngested(ctx context.Context, result *Result) error {
-	ticker := time.NewTicker(kvPollInterval)
-	defer ticker.Stop()
+	sopPath := filepath.Join(s.config.WorkspacePath, "sources", "api-testing-sop.md")
 
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("SOP entity never appeared in graph: %w", ctx.Err())
-		case <-ticker.C:
-			entries, err := s.http.GetMessageLogEntries(ctx, 50, "graph.ingest.entity")
-			if err != nil {
-				continue
-			}
-			if len(entries) == 0 {
-				continue
-			}
-
-			sopEntities := 0
-			for _, entry := range entries {
-				raw := string(entry.RawData)
-				if strings.Contains(raw, sourceVocab.DocCategory) {
-					sopEntities++
-				}
-			}
-
-			if sopEntities > 0 {
-				result.SetDetail("sop_entities_found", sopEntities)
-				result.SetDetail("total_graph_entities", len(entries))
-				return nil
-			}
-		}
+	data, err := os.ReadFile(sopPath)
+	if err != nil {
+		return fmt.Errorf("SOP file not found at %s: %w", sopPath, err)
 	}
+
+	content := string(data)
+	if !strings.Contains(content, "category: sop") {
+		return fmt.Errorf("SOP file missing expected frontmatter (category: sop)")
+	}
+
+	result.SetDetail("sop_file_verified", true)
+	result.SetDetail("sop_file_size", len(data))
+	return nil
 }
 
-// stageVerifyStandardsPopulated reads standards.json and confirms SOP rules have been
-// extracted. This ensures the context-builder's loadStandardsPreamble() will find rules.
+// stageVerifyStandardsPopulated reads standards.json and confirms it exists with
+// valid structure. Rules may be empty — in production, semsource populates the
+// graph with SOP entities that the context-builder discovers at plan time.
+// The context-builder gracefully degrades when rules are empty.
 func (s *HelloWorldScenario) stageVerifyStandardsPopulated(ctx context.Context, result *Result) error {
 	standardsPath := filepath.Join(s.config.WorkspacePath, ".semspec", "standards.json")
 
-	ticker := time.NewTicker(kvPollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("standards.json never populated with rules: %w", ctx.Err())
-		case <-ticker.C:
-			data, err := os.ReadFile(standardsPath)
-			if err != nil {
-				continue
-			}
-
-			var standards workflow.Standards
-			if err := json.Unmarshal(data, &standards); err != nil {
-				continue
-			}
-
-			if len(standards.Rules) > 0 {
-				result.SetDetail("standards_rules_count", len(standards.Rules))
-				return nil
-			}
-		}
+	data, err := os.ReadFile(standardsPath)
+	if err != nil {
+		return fmt.Errorf("standards.json not found: %w", err)
 	}
+
+	var standards workflow.Standards
+	if err := json.Unmarshal(data, &standards); err != nil {
+		return fmt.Errorf("standards.json invalid JSON: %w", err)
+	}
+
+	if standards.Version == "" {
+		return fmt.Errorf("standards.json missing version field")
+	}
+
+	result.SetDetail("standards_rules_count", len(standards.Rules))
+	result.SetDetail("standards_version", standards.Version)
+	return nil
 }
 
 // stageVerifyGraphReady polls the graph gateway until it responds, confirming the

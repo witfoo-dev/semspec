@@ -31,7 +31,7 @@ tasks:
       - |
         echo "[CHECK] Verifying backend E2E ports are available..."
         STALE=false
-        for port in 4322 8322 8180 8182; do
+        for port in 4322 8322 8180 8182 11535; do
           if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
             STALE=true
             break
@@ -44,7 +44,7 @@ tasks:
           docker network ls -q --filter name=semspec-e2e | xargs -r docker network rm 2>/dev/null || true
           sleep 2
           # Verify ports are now free
-          for port in 4322 8322 8180 8182; do
+          for port in 4322 8322 8180 8182 11535; do
             if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
               echo "[ERROR] Port $port still in use after cleanup:"
               lsof -Pi :$port -sTCP:LISTEN
@@ -55,7 +55,7 @@ tasks:
           done
           echo "[OK] Stale containers cleaned, ports now available"
         else
-          echo "[OK] All backend E2E ports available (4322, 8322, 8180, 8182)"
+          echo "[OK] All backend E2E ports available (4322, 8322, 8180, 8182, 11535)"
         fi
 
   check-ports:ui:
@@ -303,8 +303,8 @@ tasks:
       - echo "[STATUS:MOCK] Semspec HTTP health (port 8180):"
       - curl -s http://localhost:8180/readyz || echo "  Semspec not available"
       - echo ""
-      - echo "[STATUS:MOCK] Mock LLM health (port 11434):"
-      - curl -s http://localhost:11434/health || echo "  Mock LLM not available"
+      - echo "[STATUS:MOCK] Mock LLM health (port 11535):"
+      - curl -s http://localhost:11535/health || echo "  Mock LLM not available"
 
   mock:run:
     desc: "Run scenario against running mock infrastructure - usage: task e2e:mock:run -- <scenario>"
@@ -315,7 +315,7 @@ tasks:
     cmds:
       - |
         echo "[MOCK:RUN] Running {{.SCENARIO}} against existing mock infrastructure..."
-        E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11434 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
+        E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11535 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
 
   debug:mock:
     desc: "Start mock infrastructure and tail logs - usage: task e2e:debug:mock -- <scenario>"
@@ -410,7 +410,7 @@ tasks:
         echo "[E2E:LLM] Running {{.SCENARIO}} with {{.PROVIDER}}..."
         MOCK_LLM_FLAG=""
         if [ "{{.PROVIDER}}" = "mock" ]; then
-          MOCK_LLM_FLAG="--mock-llm http://localhost:11434 --fast-timeouts"
+          MOCK_LLM_FLAG="--mock-llm http://localhost:11535 --fast-timeouts"
         fi
         E2E_PROVIDER_NAME={{.PROVIDER}} ./bin/e2e --json $MOCK_LLM_FLAG --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
       - defer: { task: cleanup-all-llm }
@@ -444,7 +444,7 @@ tasks:
         MOCK_SCENARIO={{.SCENARIO}} docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
       - |
         echo "[E2E:MOCK] Running {{.SCENARIO}} with mock LLM..."
-        E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11434 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
+        E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11535 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
       - defer: { task: cleanup-mock }
       - echo "[E2E:MOCK] Complete"
 
@@ -461,7 +461,7 @@ tasks:
         MOCK_SCENARIO={{.SCENARIO}} docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml -f docker/compose/e2e-mock-pressure.yml up -d --wait
       - |
         echo "[E2E:MOCK-PRESSURE] Running {{.SCENARIO}} with mock LLM (pressure config)..."
-        E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11434 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
+        E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11535 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
       - defer: { task: cleanup-mock-pressure }
       - echo "[E2E:MOCK-PRESSURE] Complete"
 
@@ -628,7 +628,7 @@ tasks:
         echo "║                                                            ║"
         echo "╠══════════════════════════════════════════════════════════════╣"
         echo "║  Port allocation (no conflicts between stacks):            ║"
-        echo "║    Backend E2E:  4322, 8322, 8180, 8182, 11434             ║"
+        echo "║    Backend E2E:  4322, 8322, 8180, 8182, 11535             ║"
         echo "║    UI E2E:       3000, 4223, 8223, 11534                   ║"
         echo "║    Production:   4222, 8222, 8080                          ║"
         echo "╚══════════════════════════════════════════════════════════════╝"

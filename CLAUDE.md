@@ -404,8 +404,12 @@ E2E tests verify the complete semspec workflow with real NATS infrastructure.
 **IMPORTANT**: Use the task commands - they handle infrastructure lifecycle automatically (clean, build, start, run, cleanup). Do NOT manually run `task e2e:up` before scenario tasks.
 
 ```bash
-# LLM scenarios (handles full lifecycle automatically)
-task e2e:llm -- hello-world           # Run hello-world with local LLM
+# Mock LLM scenarios (deterministic, offline)
+task e2e:mock -- hello-world          # Run hello-world with mock LLM
+task e2e:mock -- hello-world-plan-rejection  # Plan rejection scenario
+
+# Real LLM scenarios (handles full lifecycle automatically)
+task e2e:llm -- hello-world           # Run hello-world with local Ollama
 task e2e:llm -- hello-world claude    # Run with Claude provider
 task e2e:llm -- todo-app openrouter   # Run todo-app with OpenRouter
 
@@ -432,6 +436,57 @@ task e2e:status          # Check service health
 task e2e:logs            # Tail all logs
 task e2e:nuke            # Nuclear cleanup of all Docker resources
 ```
+
+### E2E Active Monitoring Protocol (MANDATORY)
+
+**E2E tests are long-running. You MUST monitor them actively — never block in foreground waiting for completion.**
+
+#### Launch Pattern
+1. Run `task e2e:mock -- <scenario>` (or `task e2e:llm -- <scenario> <provider>`) via `run_in_background: true`
+2. For debugging, use `task e2e:debug` to keep infra alive after tests finish
+
+#### Monitor Three Data Sources In Parallel While Tests Run
+Check every 20-30s. Do NOT wait for test completion before investigating.
+
+1. **Test output**: `TaskOutput` (non-blocking) to see which test is running, pass/fail, timing
+2. **Semspec logs** (filtered — debug is extremely noisy):
+   ```bash
+   docker compose -p semspec-e2e -f docker/compose/e2e.yml logs --since=30s semspec 2>&1 | \
+     grep -iE '(workflow|agentic|loop|model|error|fail|complet|tool|dispatch|plan|task|review)' | \
+     grep -v 'predicate index\|embedding\|heartbeat' | tail -30
+   ```
+3. **Message logger** — fetch when a workflow is running:
+   ```bash
+   curl -s http://localhost:8180/message-logger/entries?limit=10 | jq '.[].subject'
+   curl -s http://localhost:8180/message-logger/trace/{trace_id} | jq .
+   ```
+
+#### Dump Evidence to Files
+For post-mortem analysis, dump to `/tmp/` rather than depending on terminal output:
+```bash
+docker compose -p semspec-e2e -f docker/compose/e2e.yml logs semspec > /tmp/e2e-semspec.log 2>&1
+curl -s http://localhost:8180/message-logger/entries?limit=100 > /tmp/e2e-messages.json
+curl -s http://localhost:8180/message-logger/kv/WORKFLOWS > /tmp/e2e-workflows.json
+curl -s http://localhost:8180/message-logger/kv/AGENT_LOOPS > /tmp/e2e-loops.json
+```
+
+#### Rules
+- **Always use task commands** (`task e2e:mock`, `task e2e:llm`, etc.) — never raw docker compose
+- **Abort early** if logs show a workflow is stuck in a loop, hitting errors, or burning tokens on repeated retries
+- **Report findings with evidence** — quote specific log lines, message-logger data, model responses. Never guess at root cause when data is available.
+- **Workflow lifecycle trace**: trigger → planning → review → (task generation) → dispatch → execution → complete/failed. Cross-reference timestamps across all three data sources.
+
+### E2E Port Allocation
+
+Ports are offset to avoid conflicts with semdragon and native Ollama on the same machine.
+
+| Stack | NATS | NATS Monitor | HTTP | Graph | Mock LLM | Other |
+|-------|------|-------------|------|-------|----------|-------|
+| **Backend E2E** | 4322 | 8322 | 8180 | 8182 | 11535 | sandbox: 8190 |
+| **UI E2E** | 4223 | 8223 | — | — | 11534 | caddy: 3000 |
+| **Semdragon** | 4222 | 8222 | 8081 | — | 9090 | caddy: 80 |
+| **Ollama (native)** | — | — | — | — | 11434 | — |
+| **Production** | 4222 | 8222 | 8080 | — | — | — |
 
 ## Debugging Workflow
 
@@ -781,8 +836,12 @@ test/e2e/
 
 ## Infrastructure
 
-| Service | Port | Purpose |
-|---------|------|---------|
-| NATS JetStream | 4222 | Messaging |
-| NATS Monitoring | 8222 | HTTP monitoring |
-| Ollama (optional) | 11434 | LLM inference |
+| Service | Dev Port | E2E Port | Purpose |
+|---------|----------|----------|---------|
+| NATS JetStream | 4222 | 4322 | Messaging |
+| NATS Monitoring | 8222 | 8322 | HTTP monitoring |
+| Semspec HTTP | 8080 | 8180 | Gateway / API |
+| Graph API | 8082 | 8182 | Graph queries |
+| Sandbox | 8090 | 8190 | Code execution |
+| Mock LLM | — | 11535 | Deterministic test fixtures |
+| Ollama (native) | 11434 | — | LLM inference |

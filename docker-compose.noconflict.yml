@@ -1,0 +1,15 @@
+# Port override to run alongside semdragon without conflicts.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.noconflict.yml up -d
+#
+# Semdragon ports: NATS 4222/8222, caddy 80
+# Semspec ports:   NATS 4322/8322, gateway 8180
+
+services:
+  nats:
+    ports: !override
+      - "4322:4222"
+      - "8322:8222"
+
+  gateway:
+    ports: !override
+      - "8180:8080"

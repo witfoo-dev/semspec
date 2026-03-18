@@ -16,7 +16,7 @@ services:
     environment:
       - MOCK_SCENARIO=${MOCK_SCENARIO:-hello-world}
     ports:
-      - "11434:11434"
+      - "11535:11434"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:11434/health"]
       interval: 5s
