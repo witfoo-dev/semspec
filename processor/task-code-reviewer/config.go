@@ -20,9 +20,6 @@ type Config struct {
 	// TriggerSubject is the subject pattern for code review triggers.
 	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for code review triggers,category:basic,default:workflow.async.task-code-reviewer"`
 
-	// StateBucket is the KV bucket for workflow state.
-	StateBucket string `json:"state_bucket" schema:"type:string,description:KV bucket for workflow state,category:advanced,default:REACTIVE_STATE"`
-
 	// DefaultCapability is the LLM capability to use.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:LLM capability for code review,category:basic,default:coding"`
 
@@ -42,7 +39,6 @@ func DefaultConfig() Config {
 		StreamName:        "WORKFLOW",
 		ConsumerName:      "task-code-reviewer",
 		TriggerSubject:    "workflow.async.task-code-reviewer",
-		StateBucket:       "REACTIVE_STATE",
 		DefaultCapability: "coding",
 		Timeout:           "5m",
 		Ports: &component.PortConfig{

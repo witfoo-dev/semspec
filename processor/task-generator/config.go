@@ -31,9 +31,6 @@ type Config struct {
 	// ContextTimeout is the timeout for context building.
 	ContextTimeout string `json:"context_timeout" schema:"type:string,description:Timeout for context building,category:advanced,default:30s"`
 
-	// StateBucket is the KV bucket for workflow state (reactive engine state).
-	StateBucket string `json:"state_bucket" schema:"type:string,description:KV bucket for workflow state,category:basic,default:REACTIVE_STATE"`
-
 	// ReactiveMode controls whether task generation is skipped in favour of reactive execution.
 	// When true (default), the component transitions the plan directly from scenarios_generated
 	// to ready_for_execution without invoking the LLM or writing tasks.json. The scenario
@@ -54,7 +51,6 @@ func DefaultConfig() Config {
 		DefaultCapability:    "planning",
 		ContextSubjectPrefix: "context.build",
 		ContextTimeout:       "30s",
-		StateBucket:          "REACTIVE_STATE",
 		ReactiveMode:         true,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{

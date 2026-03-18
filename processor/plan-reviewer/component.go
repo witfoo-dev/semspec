@@ -54,9 +54,6 @@ type Component struct {
 	consumer jetstream.Consumer
 	stream   jetstream.Stream
 
-	// KV bucket for workflow state (reactive engine state)
-	stateBucket jetstream.KeyValue
-
 	// Lifecycle
 	running   bool
 	startTime time.Time
@@ -104,9 +101,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.ContextTimeout == "" {
 		config.ContextTimeout = defaults.ContextTimeout
-	}
-	if config.StateBucket == "" {
-		config.StateBucket = defaults.StateBucket
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
@@ -193,14 +187,6 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
 	}
 	c.stream = stream
-
-	// Get or create workflow state bucket
-	stateBucket, err := js.KeyValue(subCtx, c.config.StateBucket)
-	if err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("get state bucket %s: %w", c.config.StateBucket, err)
-	}
-	c.stateBucket = stateBucket
 
 	// Create or get consumer
 	consumerConfig := jetstream.ConsumerConfig{

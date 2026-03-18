@@ -125,7 +125,6 @@ func TestConfigValidate(t *testing.T) {
 				StreamName:     "",
 				ConsumerName:   "developer",
 				TriggerSubject: "dev.task.development",
-				StateBucket:    "REACTIVE_STATE",
 			},
 			wantErr: true,
 		},
@@ -135,7 +134,6 @@ func TestConfigValidate(t *testing.T) {
 				StreamName:     "AGENT",
 				ConsumerName:   "",
 				TriggerSubject: "dev.task.development",
-				StateBucket:    "REACTIVE_STATE",
 			},
 			wantErr: true,
 		},
@@ -145,17 +143,6 @@ func TestConfigValidate(t *testing.T) {
 				StreamName:     "AGENT",
 				ConsumerName:   "developer",
 				TriggerSubject: "",
-				StateBucket:    "REACTIVE_STATE",
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing state_bucket",
-			config: Config{
-				StreamName:     "AGENT",
-				ConsumerName:   "developer",
-				TriggerSubject: "dev.task.development",
-				StateBucket:    "",
 			},
 			wantErr: true,
 		},
@@ -182,9 +169,6 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if cfg.TriggerSubject != "dev.task.development" {
 		t.Errorf("TriggerSubject = %q, want %q", cfg.TriggerSubject, "dev.task.development")
-	}
-	if cfg.StateBucket != "REACTIVE_STATE" {
-		t.Errorf("StateBucket = %q, want %q", cfg.StateBucket, "REACTIVE_STATE")
 	}
 	if cfg.DefaultCapability != "coding" {
 		t.Errorf("DefaultCapability = %q, want %q", cfg.DefaultCapability, "coding")

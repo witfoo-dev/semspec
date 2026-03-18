@@ -22,9 +22,6 @@ type Config struct {
 	// TriggerSubject is the subject pattern for planner triggers.
 	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for planner triggers,category:basic,default:workflow.async.planner"`
 
-	// StateBucket is the KV bucket for workflow state (reactive engine state).
-	StateBucket string `json:"state_bucket" schema:"type:string,description:KV bucket for workflow state,category:basic,default:REACTIVE_STATE"`
-
 	// DefaultCapability is the model capability to use for planning.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for planning,category:basic,default:planning"`
 
@@ -44,7 +41,6 @@ func DefaultConfig() Config {
 		StreamName:           "WORKFLOW",
 		ConsumerName:         "planner",
 		TriggerSubject:       "workflow.async.planner",
-		StateBucket:          "REACTIVE_STATE",
 		DefaultCapability:    "planning",
 		ContextSubjectPrefix: "context.build",
 		ContextTimeout:       "30s",

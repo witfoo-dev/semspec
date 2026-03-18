@@ -22,9 +22,6 @@ type Config struct {
 	// TriggerSubject is the subject to subscribe to for developer requests.
 	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject to subscribe to,category:basic,default:dev.task.development"`
 
-	// StateBucket is the KV bucket for workflow state (reactive engine state).
-	StateBucket string `json:"state_bucket" schema:"type:string,description:KV bucket for workflow state,category:basic,default:REACTIVE_STATE"`
-
 	// DefaultCapability is the model capability for development tasks.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default LLM capability,category:basic,default:coding"`
 
@@ -45,7 +42,6 @@ func DefaultConfig() Config {
 		StreamName:        "AGENT",
 		ConsumerName:      "developer",
 		TriggerSubject:    "dev.task.development",
-		StateBucket:       "REACTIVE_STATE",
 		DefaultCapability: "coding",
 		Timeout:           "120s",
 		MaxToolIterations: 10,
@@ -96,9 +92,6 @@ func (c *Config) Validate() error {
 	}
 	if c.TriggerSubject == "" {
 		return fmt.Errorf("trigger_subject is required")
-	}
-	if c.StateBucket == "" {
-		return fmt.Errorf("state_bucket is required")
 	}
 	return nil
 }

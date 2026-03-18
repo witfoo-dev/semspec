@@ -37,9 +37,6 @@ type Component struct {
 	// JetStream consumer state.
 	consumer jetstream.Consumer
 
-	// KV bucket for workflow state
-	stateBucket jetstream.KeyValue
-
 	// Lifecycle.
 	running   bool
 	startTime time.Time
@@ -72,9 +69,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.TriggerSubject == "" {
 		config.TriggerSubject = defaults.TriggerSubject
-	}
-	if config.StateBucket == "" {
-		config.StateBucket = defaults.StateBucket
 	}
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
@@ -152,14 +146,6 @@ func (c *Component) Start(ctx context.Context) error {
 		c.rollbackStart(cancel)
 		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
 	}
-
-	// Get workflow state bucket.
-	stateBucket, err := js.KeyValue(subCtx, c.config.StateBucket)
-	if err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("get state bucket %s: %w", c.config.StateBucket, err)
-	}
-	c.stateBucket = stateBucket
 
 	consumerConfig := jetstream.ConsumerConfig{
 		Durable:       c.config.ConsumerName,

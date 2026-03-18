@@ -399,35 +399,6 @@
         "enable_playground": true
       }
     },
-    "workflow-processor": {
-      "name": "workflow-processor",
-      "type": "processor",
-      "enabled": false,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "definitions_bucket": "WORKFLOW_DEFINITIONS",
-        "executions_bucket": "WORKFLOW_EXECUTIONS",
-        "default_timeout": "30m",
-        "default_max_iterations": 10,
-        "request_timeout": "5m",
-        "workflow_files": [
-          "configs/workflows/*.json"
-        ]
-      }
-    },
-    "reactive-workflow": {
-      "name": "reactive-workflow",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "state_bucket": "REACTIVE_STATE",
-        "callback_stream_name": "WORKFLOW",
-        "event_stream_name": "WORKFLOW",
-        "default_timeout": "30m",
-        "default_max_iterations": 10,
-        "enable_metrics": true
-      }
-    },
     "planner": {
       "name": "planner",
       "type": "processor",
@@ -607,31 +578,16 @@
         "default_timeout": "120s"
       }
     },
-    "developer": {
-      "name": "developer",
+    "execution-orchestrator": {
+      "name": "execution-orchestrator",
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "AGENT",
-        "consumer_name": "developer",
-        "trigger_subject": "dev.task.development",
-        "state_bucket": "REACTIVE_STATE",
-        "default_capability": "coding",
-        "timeout": "120s"
-      }
-    },
-    "task-code-reviewer": {
-      "name": "task-code-reviewer",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "task-code-reviewer",
-        "trigger_subject": "workflow.async.task-code-reviewer",
-        "state_bucket": "REACTIVE_STATE",
-        "default_capability": "reviewing",
-        "timeout": "5m",
-        "repo_path": "/workspace"
+        "max_iterations": 3,
+        "timeout_seconds": 300,
+        "model": "mock-coder",
+        "sandbox_url": "http://sandbox:8090",
+        "benching_threshold": 3
       }
     }
   },

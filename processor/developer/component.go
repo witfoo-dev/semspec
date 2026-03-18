@@ -49,9 +49,6 @@ type Component struct {
 	js       jetstream.JetStream
 	consumer jetstream.Consumer
 
-	// KV bucket for workflow state (reactive engine state).
-	stateBucket jetstream.KeyValue
-
 	// Lifecycle.
 	running   bool
 	startTime time.Time
@@ -85,9 +82,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.TriggerSubject == "" {
 		config.TriggerSubject = defaults.TriggerSubject
-	}
-	if config.StateBucket == "" {
-		config.StateBucket = defaults.StateBucket
 	}
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
@@ -168,14 +162,6 @@ func (c *Component) Start(ctx context.Context) error {
 		c.rollbackStart(cancel)
 		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
 	}
-
-	// Get or create workflow state bucket
-	stateBucket, err := js.KeyValue(subCtx, c.config.StateBucket)
-	if err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("get state bucket %s: %w", c.config.StateBucket, err)
-	}
-	c.stateBucket = stateBucket
 
 	triggerSubject := c.config.TriggerSubject
 	if c.config.Ports != nil && len(c.config.Ports.Inputs) > 0 {
