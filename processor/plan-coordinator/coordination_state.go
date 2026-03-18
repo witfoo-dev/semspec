@@ -25,6 +25,10 @@ type coordinationExecution struct {
 	// local.semspec.workflow.plan.execution.<slug>
 	EntityID string
 
+	// CurrentPhase tracks the current pipeline phase in memory.
+	// Used as a guard against duplicate/stale events from generators.
+	CurrentPhase string
+
 	// Slug is the plan slug.
 	Slug string
 

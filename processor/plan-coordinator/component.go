@@ -575,7 +575,9 @@ func (c *Component) synthesizeAndCompleteLocked(ctx context.Context, exec *coord
 	if exec.terminated {
 		return
 	}
-	exec.terminated = true
+	// NOTE: Do NOT set terminated=true here — synthesis is a mid-pipeline
+	// transition, not a terminal state. Only markErrorLocked and the
+	// terminal cases in handleReviewerCompleteLocked set terminated.
 
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseSynthesizing); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseSynthesizing, "error", err)
@@ -760,9 +762,7 @@ func (c *Component) dispatchRequirementGeneratorLocked(ctx context.Context, exec
 		return
 	}
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseGeneratingRequirements); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseGeneratingRequirements, "error", err)
-	}
+	c.advancePhase(ctx, exec, phaseGeneratingRequirements)
 
 	req := &payloads.RequirementGeneratorRequest{
 		ExecutionID: exec.EntityID,
@@ -787,9 +787,7 @@ func (c *Component) dispatchScenarioGeneratorLocked(ctx context.Context, exec *c
 		return
 	}
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseGeneratingScenarios); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseGeneratingScenarios, "error", err)
-	}
+	c.advancePhase(ctx, exec, phaseGeneratingScenarios)
 
 	// Load requirements from disk to fan out one scenario-generator per requirement.
 	repoPath := os.Getenv("SEMSPEC_REPO_PATH")
@@ -841,9 +839,7 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *coordinati
 
 	taskID := fmt.Sprintf("%s%s%s", roleReviewer, taskIDSep, exec.EntityID)
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
-	}
+	c.advancePhase(ctx, exec, phaseReviewing)
 
 	req := &payloads.PlanReviewRequest{
 		ExecutionID:  exec.EntityID,
@@ -921,8 +917,20 @@ func (c *Component) handleGeneratorEvent(ctx context.Context, msg *nats.Msg) {
 
 	switch msg.Subject {
 	case subjectReqsGenerated:
+		// Guard: only accept if we're actually in the generating_requirements phase.
+		if exec.CurrentPhase != phaseGeneratingRequirements {
+			c.logger.Debug("Ignoring stale requirements event",
+				"current_phase", exec.CurrentPhase, "slug", exec.Slug)
+			return
+		}
 		c.handleReqsGeneratedLocked(ctx, exec, envelope.Payload)
 	case subjectScenariosGenerated:
+		// Guard: only accept if we're actually in the generating_scenarios phase.
+		if exec.CurrentPhase != phaseGeneratingScenarios {
+			c.logger.Debug("Ignoring stale/duplicate scenarios event",
+				"current_phase", exec.CurrentPhase, "slug", exec.Slug)
+			return
+		}
 		c.handleScenariosGeneratedLocked(ctx, exec, envelope.Payload)
 	default:
 		c.logger.Debug("Unknown generator event subject", "subject", msg.Subject)
@@ -943,9 +951,7 @@ func (c *Component) handleReqsGeneratedLocked(ctx context.Context, exec *coordin
 		"requirement_count", event.RequirementCount,
 	)
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseRequirementsGenerated); err != nil {
-		c.logger.Error("Failed to write phase triple", "error", err)
-	}
+	c.advancePhase(ctx, exec, phaseRequirementsGenerated)
 
 	// Advance to scenario generation.
 	c.dispatchScenarioGeneratorLocked(ctx, exec)
@@ -965,9 +971,7 @@ func (c *Component) handleScenariosGeneratedLocked(ctx context.Context, exec *co
 		"scenario_count", event.ScenarioCount,
 	)
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseScenariosGenerated); err != nil {
-		c.logger.Error("Failed to write phase triple", "error", err)
-	}
+	c.advancePhase(ctx, exec, phaseScenariosGenerated)
 
 	// Advance to review.
 	c.dispatchReviewerLocked(ctx, exec)
@@ -1076,11 +1080,12 @@ func (c *Component) parseReviewerVerdict(result string) (verdict, summary string
 		Summary string `json:"summary"`
 	}
 	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
-		c.logger.Warn("Failed to parse reviewer result, defaulting to approved", "error", err)
-		return "approved", ""
+		c.logger.Error("Failed to parse reviewer result, escalating", "error", err)
+		return "escalated", fmt.Sprintf("reviewer result parse failed: %v", err)
 	}
 	if parsed.Verdict == "" {
-		return "approved", parsed.Summary
+		c.logger.Warn("Reviewer returned empty verdict, escalating")
+		return "escalated", "reviewer returned empty verdict"
 	}
 	return parsed.Verdict, parsed.Summary
 }
@@ -1512,6 +1517,15 @@ func (r *CoordinatorResult) UnmarshalJSON(data []byte) error {
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
+
+// advancePhase writes a phase triple and updates the in-memory CurrentPhase tracker.
+// Caller must hold exec.mu if exec is shared.
+func (c *Component) advancePhase(ctx context.Context, exec *coordinationExecution, phase string) {
+	exec.CurrentPhase = phase
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phase); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phase, "error", err)
+	}
+}
 
 func (c *Component) updateLastActivity() {
 	c.lastActivityMu.Lock()

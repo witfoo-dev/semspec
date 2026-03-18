@@ -37,10 +37,10 @@ func NewCoordinationEntity(exec *coordinationExecution) *CoordinationEntity {
 }
 
 // EntityID returns the 6-part canonical graph entity ID.
-// Format: local.semspec.workflow.coordination.execution.<slug>
-// This must match the format used in handleTrigger.
+// Format: local.semspec.workflow.plan.execution.<slug>
+// This must match the format used in handleTrigger and the rule entity patterns.
 func (e *CoordinationEntity) EntityID() string {
-	return fmt.Sprintf("local.semspec.workflow.coordination.execution.%s", e.Slug)
+	return fmt.Sprintf("local.semspec.workflow.plan.execution.%s", e.Slug)
 }
 
 // WithPhase sets the current lifecycle phase and returns the entity for chaining.
