@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "workflow-api.v1.json",
+  "$id": "plan-api.v1.json",
   "type": "object",
-  "title": "workflow-api Configuration",
+  "title": "plan-api Configuration",
   "description": "HTTP API for development plan lifecycle management - create, approve, and execute plans",
   "properties": {
     "event_stream_name": {
@@ -26,7 +26,7 @@
   },
   "required": [],
   "x-component-metadata": {
-    "name": "workflow-api",
+    "name": "plan-api",
     "type": "processor",
     "domain": "semspec",
     "version": "1.0.0"

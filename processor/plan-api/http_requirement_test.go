@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"bytes"
@@ -21,42 +21,42 @@ func TestExtractSlugRequirementAndAction(t *testing.T) {
 	}{
 		{
 			name:              "get requirement",
-			path:              "/workflow-api/plans/my-feature/requirements/requirement.my-feature.1",
+			path:              "/plan-api/plans/my-feature/requirements/requirement.my-feature.1",
 			wantSlug:          "my-feature",
 			wantRequirementID: "requirement.my-feature.1",
 			wantAction:        "",
 		},
 		{
 			name:              "deprecate requirement",
-			path:              "/workflow-api/plans/my-feature/requirements/requirement.my-feature.1/deprecate",
+			path:              "/plan-api/plans/my-feature/requirements/requirement.my-feature.1/deprecate",
 			wantSlug:          "my-feature",
 			wantRequirementID: "requirement.my-feature.1",
 			wantAction:        "deprecate",
 		},
 		{
 			name:              "with trailing slash",
-			path:              "/workflow-api/plans/test-slug/requirements/requirement.test-slug.2/",
+			path:              "/plan-api/plans/test-slug/requirements/requirement.test-slug.2/",
 			wantSlug:          "test-slug",
 			wantRequirementID: "requirement.test-slug.2",
 			wantAction:        "",
 		},
 		{
 			name:              "invalid - missing requirements segment",
-			path:              "/workflow-api/plans/test-slug/something/requirement.test.1",
+			path:              "/plan-api/plans/test-slug/something/requirement.test.1",
 			wantSlug:          "",
 			wantRequirementID: "",
 			wantAction:        "",
 		},
 		{
 			name:              "invalid - insufficient parts",
-			path:              "/workflow-api/plans/test-slug/requirements",
+			path:              "/plan-api/plans/test-slug/requirements",
 			wantSlug:          "",
 			wantRequirementID: "",
 			wantAction:        "",
 		},
 		{
 			name:              "no plans segment",
-			path:              "/workflow-api/other/my-feature/requirements/r.1",
+			path:              "/plan-api/other/my-feature/requirements/r.1",
 			wantSlug:          "",
 			wantRequirementID: "",
 			wantAction:        "",
@@ -104,7 +104,7 @@ func TestHandleListRequirements(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug+"/requirements", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/requirements", nil)
 	w := httptest.NewRecorder()
 
 	c.handleListRequirements(w, req, slug)
@@ -137,7 +137,7 @@ func TestHandleListRequirements_Empty(t *testing.T) {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug+"/requirements", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/requirements", nil)
 	w := httptest.NewRecorder()
 
 	c.handleListRequirements(w, req, slug)
@@ -175,7 +175,7 @@ func TestHandleCreateRequirement(t *testing.T) {
 		Description: "The system must allow users to authenticate",
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/requirements", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -216,7 +216,7 @@ func TestHandleCreateRequirement_MissingTitle(t *testing.T) {
 
 	body, _ := json.Marshal(CreateRequirementHTTPRequest{Description: "No title here"})
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/requirements", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -249,7 +249,7 @@ func TestHandleGetRequirement(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug+"/requirements/"+reqID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/requirements/"+reqID, nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetRequirement(w, req, slug, reqID)
@@ -282,7 +282,7 @@ func TestHandleGetRequirement_NotFound(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug+"/requirements/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/requirements/nonexistent", nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetRequirement(w, req, slug, "nonexistent")
@@ -317,7 +317,7 @@ func TestHandleUpdateRequirement(t *testing.T) {
 	newTitle := "New title"
 	body, _ := json.Marshal(UpdateRequirementHTTPRequest{Title: &newTitle})
 
-	req := httptest.NewRequest(http.MethodPatch, "/workflow-api/plans/"+slug+"/requirements/"+reqID, bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/requirements/"+reqID, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -359,7 +359,7 @@ func TestHandleDeleteRequirement(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodDelete, "/workflow-api/plans/"+slug+"/requirements/"+reqID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/requirements/"+reqID, nil)
 	w := httptest.NewRecorder()
 
 	c.handleDeleteRequirement(w, req, slug, reqID)
@@ -400,7 +400,7 @@ func TestHandleDeprecateRequirement(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/requirements/"+reqID+"/deprecate", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements/"+reqID+"/deprecate", nil)
 	w := httptest.NewRecorder()
 
 	c.handleDeprecateRequirement(w, req, slug, reqID)
@@ -488,7 +488,7 @@ func TestHandleCreateRequirement_DependsOn(t *testing.T) {
 			c := setupTestComponent(t)
 
 			body, _ := json.Marshal(tt.reqBody)
-			req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/requirements", bytes.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
@@ -541,7 +541,7 @@ func TestHandleCreateRequirement_CycleViaUpdate(t *testing.T) {
 
 	// Create requirement A (no deps).
 	bodyA, _ := json.Marshal(CreateRequirementHTTPRequest{Title: "Requirement A"})
-	reqA := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/requirements", bytes.NewReader(bodyA))
+	reqA := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements", bytes.NewReader(bodyA))
 	reqA.Header.Set("Content-Type", "application/json")
 	wA := httptest.NewRecorder()
 	c.handleCreateRequirement(wA, reqA, slug)
@@ -559,7 +559,7 @@ func TestHandleCreateRequirement_CycleViaUpdate(t *testing.T) {
 		Title:     "Requirement B",
 		DependsOn: []string{idA},
 	})
-	reqB := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/requirements", bytes.NewReader(bodyB))
+	reqB := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements", bytes.NewReader(bodyB))
 	reqB.Header.Set("Content-Type", "application/json")
 	wB := httptest.NewRecorder()
 	c.handleCreateRequirement(wB, reqB, slug)
@@ -574,7 +574,7 @@ func TestHandleCreateRequirement_CycleViaUpdate(t *testing.T) {
 
 	// Attempt to update A to depend on B — creates cycle A → B → A.
 	bodyUpdate, _ := json.Marshal(UpdateRequirementHTTPRequest{DependsOn: []string{idB}})
-	reqUpdate := httptest.NewRequest(http.MethodPatch, "/workflow-api/plans/"+slug+"/requirements/"+idA, bytes.NewReader(bodyUpdate))
+	reqUpdate := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/requirements/"+idA, bytes.NewReader(bodyUpdate))
 	reqUpdate.Header.Set("Content-Type", "application/json")
 	wUpdate := httptest.NewRecorder()
 	c.handleUpdateRequirement(wUpdate, reqUpdate, slug, idA)
@@ -653,7 +653,7 @@ func TestHandleUpdateRequirement_DependsOn(t *testing.T) {
 			c := setupTestComponent(t)
 
 			body, _ := json.Marshal(tt.updateBody)
-			req := httptest.NewRequest(http.MethodPatch, "/workflow-api/plans/"+slug+"/requirements/"+tt.targetID, bytes.NewReader(body))
+			req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/requirements/"+tt.targetID, bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
@@ -723,7 +723,7 @@ func TestHandleUpdateRequirement_ClearDependsOn(t *testing.T) {
 
 	// Send {"depends_on": []} as raw JSON — bypasses Go's omitempty marshalling.
 	rawBody := []byte(`{"depends_on": []}`)
-	req := httptest.NewRequest(http.MethodPatch, "/workflow-api/plans/"+slug+"/requirements/requirement.clear-dep-plan.2", bytes.NewReader(rawBody))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/requirements/requirement.clear-dep-plan.2", bytes.NewReader(rawBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -771,7 +771,7 @@ func TestHandleCreateRequirement_IndependentRequirementsHaveNoDeps(t *testing.T)
 
 	for i, title := range []string{"First requirement", "Second requirement"} {
 		body, _ := json.Marshal(CreateRequirementHTTPRequest{Title: title})
-		req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/requirements", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
@@ -827,7 +827,7 @@ func TestHandleDeprecateRequirement_AlreadyDeprecated(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/requirements/"+reqID+"/deprecate", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements/"+reqID+"/deprecate", nil)
 	w := httptest.NewRecorder()
 
 	c.handleDeprecateRequirement(w, req, slug, reqID)

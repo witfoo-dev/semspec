@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// RegisterHTTPHandlers registers HTTP handlers for the workflow-api component.
+// RegisterHTTPHandlers registers HTTP handlers for the plan-api component.
 // The prefix may or may not include trailing slash.
 // This includes both workflow endpoints and Q&A endpoints.
 func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
@@ -32,7 +32,7 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	mux.HandleFunc(prefix+"plans/", c.handlePlansWithSlug)
 
 	// Q&A endpoints (delegated to question handler)
-	// These are registered at /workflow-api/questions/* instead of /questions/*
+	// These are registered at /plan-api/questions/* instead of /questions/*
 	// to keep them scoped under this component's prefix
 	c.mu.RLock()
 	questionHandler := c.questionHandler
@@ -133,7 +133,7 @@ func (c *Component) handleGetPlanReviews(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Extract slug from path: /workflow-api/plans/{slug}/reviews
+	// Extract slug from path: /plan-api/plans/{slug}/reviews
 	slug, endpoint := extractSlugAndEndpoint(r.URL.Path)
 	if slug == "" {
 		http.Error(w, "Plan slug required", http.StatusBadRequest)
@@ -301,7 +301,7 @@ func (c *Component) findReviewResult(exec *WorkflowExecution) *StepResult {
 	return nil
 }
 
-// extractSlugAndEndpoint extracts slug and endpoint from path like /workflow-api/plans/{slug}/reviews
+// extractSlugAndEndpoint extracts slug and endpoint from path like /plan-api/plans/{slug}/reviews
 func extractSlugAndEndpoint(path string) (slug, endpoint string) {
 	// Find /plans/ in the path
 	idx := strings.Index(path, "/plans/")
@@ -327,9 +327,9 @@ func extractSlugAndEndpoint(path string) (slug, endpoint string) {
 }
 
 // extractSlugTaskAndAction extracts slug, taskID, and action from paths like:
-// /workflow-api/plans/{slug}/tasks/{taskId}
-// /workflow-api/plans/{slug}/tasks/{taskId}/approve
-// /workflow-api/plans/{slug}/tasks/{taskId}/reject
+// /plan-api/plans/{slug}/tasks/{taskId}
+// /plan-api/plans/{slug}/tasks/{taskId}/approve
+// /plan-api/plans/{slug}/tasks/{taskId}/reject
 func extractSlugTaskAndAction(path string) (slug, taskID, action string) {
 	// Find /plans/ in the path
 	idx := strings.Index(path, "/plans/")
@@ -439,7 +439,7 @@ type UpdatePlanHTTPRequest struct {
 	Context *string `json:"context,omitempty"`
 }
 
-// handlePlans handles POST /workflow-api/plans (create plan).
+// handlePlans handles POST /plan-api/plans (create plan).
 func (c *Component) handlePlans(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
@@ -451,7 +451,7 @@ func (c *Component) handlePlans(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handlePlansWithSlug handles /workflow-api/plans/{slug}/*
+// handlePlansWithSlug handles /plan-api/plans/{slug}/*
 func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) {
 	slug, endpoint := extractSlugAndEndpoint(r.URL.Path)
 	if slug == "" {
@@ -638,7 +638,7 @@ func (c *Component) handleTaskCollectionEndpoint(w http.ResponseWriter, r *http.
 	return true
 }
 
-// handleCreatePlan handles POST /workflow-api/plans.
+// handleCreatePlan handles POST /plan-api/plans.
 // Creates a new plan and triggers the planner agent loop.
 func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 	// Limit request body size to prevent DoS
@@ -746,7 +746,7 @@ func (c *Component) triggerPlanCoordinator(ctx context.Context, plan *workflow.P
 		TraceID:     traceID,
 	}
 
-	baseMsg := message.NewBaseMessage(req.Schema(), req, "workflow-api")
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.logger.Error("Failed to marshal plan-coordinator trigger", "error", err)
@@ -766,7 +766,7 @@ func (c *Component) triggerPlanCoordinator(ctx context.Context, plan *workflow.P
 	return requestID, nil
 }
 
-// handleListPlans handles GET /workflow-api/plans.
+// handleListPlans handles GET /plan-api/plans.
 func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
 	manager := c.getManager(w)
 	if manager == nil {
@@ -795,7 +795,7 @@ func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleGetPlan handles GET /workflow-api/plans/{slug}.
+// handleGetPlan handles GET /plan-api/plans/{slug}.
 func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug string) {
 	manager := c.getManager(w)
 	if manager == nil {
@@ -824,7 +824,7 @@ func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug s
 	}
 }
 
-// handlePromotePlan handles POST /workflow-api/plans/{slug}/promote.
+// handlePromotePlan handles POST /plan-api/plans/{slug}/promote.
 // Approves the plan directly (manual approval via REST API).
 // If the plan is already approved, it returns immediately.
 func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, slug string) {
@@ -874,7 +874,7 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 	}
 }
 
-// handlePlanTasks handles GET /workflow-api/plans/{slug}/tasks and POST /workflow-api/plans/{slug}/tasks.
+// handlePlanTasks handles GET /plan-api/plans/{slug}/tasks and POST /plan-api/plans/{slug}/tasks.
 func (c *Component) handlePlanTasks(w http.ResponseWriter, r *http.Request, slug string) {
 	switch r.Method {
 	case http.MethodGet:
@@ -886,7 +886,7 @@ func (c *Component) handlePlanTasks(w http.ResponseWriter, r *http.Request, slug
 	}
 }
 
-// handleListTasks handles GET /workflow-api/plans/{slug}/tasks.
+// handleListTasks handles GET /plan-api/plans/{slug}/tasks.
 func (c *Component) handleListTasks(w http.ResponseWriter, r *http.Request, slug string) {
 	manager := c.getManager(w)
 	if manager == nil {
@@ -910,7 +910,7 @@ func (c *Component) handleListTasks(w http.ResponseWriter, r *http.Request, slug
 	}
 }
 
-// handleGenerateTasks handles POST /workflow-api/plans/{slug}/tasks/generate.
+// handleGenerateTasks handles POST /plan-api/plans/{slug}/tasks/generate.
 func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, slug string) {
 	manager := c.getManager(w)
 	if manager == nil {
@@ -987,7 +987,7 @@ func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, 
 	baseMsg := message.NewBaseMessage(
 		workflow.WorkflowTriggerType,
 		triggerPayload,
-		"workflow-api",
+		"plan-api",
 	)
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
@@ -1021,7 +1021,7 @@ func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
-// handleExecutePlan handles POST /workflow-api/plans/{slug}/execute.
+// handleExecutePlan handles POST /plan-api/plans/{slug}/execute.
 func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, slug string) {
 	manager := c.getManager(w)
 	if manager == nil {
@@ -1071,7 +1071,7 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 	baseMsg := message.NewBaseMessage(
 		payloads.TaskDispatchRequestType,
 		triggerPayload,
-		"workflow-api",
+		"plan-api",
 	)
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
@@ -1104,7 +1104,7 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 	}
 }
 
-// handleApproveTasksPlan handles POST /workflow-api/plans/{slug}/tasks/approve.
+// handleApproveTasksPlan handles POST /plan-api/plans/{slug}/tasks/approve.
 // Approves the generated tasks for execution.
 func (c *Component) handleApproveTasksPlan(w http.ResponseWriter, r *http.Request, slug string) {
 	manager := c.getManager(w)

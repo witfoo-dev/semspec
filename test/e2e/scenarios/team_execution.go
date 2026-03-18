@@ -398,7 +398,7 @@ func (s *TeamExecutionScenario) stageCreateScenarios(ctx context.Context, result
 	return nil
 }
 
-// stageExecutePlan calls POST /workflow-api/plans/{slug}/execute to trigger
+// stageExecutePlan calls POST /plan-api/plans/{slug}/execute to trigger
 // the reactive execution pipeline.
 func (s *TeamExecutionScenario) stageExecutePlan(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")

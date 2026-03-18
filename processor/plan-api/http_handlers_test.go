@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"bytes"
@@ -30,7 +30,7 @@ func TestHandleGetPlan(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug, nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug, nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetPlan(w, req, slug)
@@ -61,7 +61,7 @@ func TestHandleGetPlan_NotFound(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/nonexistent-plan", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/nonexistent-plan", nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetPlan(w, req, "nonexistent-plan")
@@ -85,7 +85,7 @@ func TestHandleListPlans(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans", nil)
 	w := httptest.NewRecorder()
 
 	c.handleListPlans(w, req)
@@ -110,7 +110,7 @@ func TestHandleListPlans_Empty(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans", nil)
 	w := httptest.NewRecorder()
 
 	c.handleListPlans(w, req)
@@ -137,7 +137,7 @@ func TestHandleUpdatePlan_NotFound(t *testing.T) {
 
 	newTitle := "Updated Title"
 	body, _ := json.Marshal(UpdatePlanHTTPRequest{Title: &newTitle})
-	req := httptest.NewRequest(http.MethodPatch, "/workflow-api/plans/no-such-plan", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/no-such-plan", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -162,7 +162,7 @@ func TestHandlePromotePlan(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/promote", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
 	w := httptest.NewRecorder()
 
 	c.handlePromotePlan(w, req, slug)
@@ -190,7 +190,7 @@ func TestHandlePromotePlan_NotFound(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/no-such-plan/promote", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/no-such-plan/promote", nil)
 	w := httptest.NewRecorder()
 
 	c.handlePromotePlan(w, req, "no-such-plan")
@@ -217,7 +217,7 @@ func TestHandlePromotePlan_AlreadyApproved(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/promote", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
 	w := httptest.NewRecorder()
 
 	c.handlePromotePlan(w, req, slug)
@@ -258,7 +258,7 @@ func TestHandleListTasks_WithTasks(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug+"/tasks", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/tasks", nil)
 	w := httptest.NewRecorder()
 
 	c.handleListTasks(w, req, slug)
@@ -290,7 +290,7 @@ func TestHandleListTasks_NoTasks(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug+"/tasks", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/tasks", nil)
 	w := httptest.NewRecorder()
 
 	c.handleListTasks(w, req, slug)
@@ -336,7 +336,7 @@ func TestHandleApproveTasksPlan(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/tasks/approve", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/tasks/approve", nil)
 	w := httptest.NewRecorder()
 
 	c.handleApproveTasksPlan(w, req, slug)
@@ -367,7 +367,7 @@ func TestHandleApproveTasksPlan_PlanNotApproved(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/tasks/approve", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/tasks/approve", nil)
 	w := httptest.NewRecorder()
 
 	c.handleApproveTasksPlan(w, req, slug)
@@ -383,7 +383,7 @@ func TestHandleApproveTasksPlan_NotFound(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/no-such-plan/tasks/approve", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/no-such-plan/tasks/approve", nil)
 	w := httptest.NewRecorder()
 
 	c.handleApproveTasksPlan(w, req, "no-such-plan")
@@ -410,7 +410,7 @@ func TestHandleApproveTasksPlan_NoTasks(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/tasks/approve", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/tasks/approve", nil)
 	w := httptest.NewRecorder()
 
 	c.handleApproveTasksPlan(w, req, slug)
@@ -448,7 +448,7 @@ func TestHandleGetChangeProposal(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetChangeProposal(w, req, slug, proposalID)
@@ -483,7 +483,7 @@ func TestHandleGetChangeProposal_NotFound(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug+"/change-proposals/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/change-proposals/nonexistent", nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetChangeProposal(w, req, slug, "nonexistent")
@@ -525,7 +525,7 @@ func TestHandleUpdateChangeProposal(t *testing.T) {
 		Rationale: &newRationale,
 	})
 
-	req := httptest.NewRequest(http.MethodPatch, "/workflow-api/plans/"+slug+"/change-proposals/"+proposalID, bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -575,7 +575,7 @@ func TestHandleUpdateChangeProposal_InvalidStatus(t *testing.T) {
 	newTitle := "Try to change accepted"
 	body, _ := json.Marshal(UpdateChangeProposalHTTPRequest{Title: &newTitle})
 
-	req := httptest.NewRequest(http.MethodPatch, "/workflow-api/plans/"+slug+"/change-proposals/"+proposalID, bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -602,7 +602,7 @@ func TestHandleUpdateChangeProposal_NotFound(t *testing.T) {
 	newTitle := "Nope"
 	body, _ := json.Marshal(UpdateChangeProposalHTTPRequest{Title: &newTitle})
 
-	req := httptest.NewRequest(http.MethodPatch, "/workflow-api/plans/"+slug+"/change-proposals/nonexistent", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/change-proposals/nonexistent", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -637,7 +637,7 @@ func TestHandleDeleteChangeProposal_Success(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodDelete, "/workflow-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
 	w := httptest.NewRecorder()
 
 	c.handleDeleteChangeProposal(w, req, slug, proposalID)
@@ -676,7 +676,7 @@ func TestHandleCreateChangeProposal_InvalidRequirementID(t *testing.T) {
 		AffectedReqIDs: []string{"requirement.cp-bad-req-id.999"},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/change-proposals", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -722,7 +722,7 @@ func TestHandleGetScenario(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug+"/scenarios/"+scenarioID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/scenarios/"+scenarioID, nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetScenario(w, req, slug, scenarioID)
@@ -754,7 +754,7 @@ func TestHandleGetScenario_NotFound(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug+"/scenarios/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/scenarios/nonexistent", nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetScenario(w, req, slug, "nonexistent")

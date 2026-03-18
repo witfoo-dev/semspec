@@ -1038,7 +1038,7 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 }
 
 // publishPlanApprovedEvent sends a typed PlanApprovedEvent to the WORKFLOW stream
-// so workflow-api can update the plan file on disk.
+// so plan-api can update the plan file on disk.
 func (c *Component) publishPlanApprovedEvent(ctx context.Context, exec *coordinationExecution, verdict, summary string) {
 	event := &workflow.PlanApprovedEvent{
 		Slug:    exec.Slug,

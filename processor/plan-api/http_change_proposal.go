@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"encoding/json"
@@ -46,9 +46,9 @@ type RejectChangeProposalHTTPRequest struct {
 }
 
 // extractSlugChangeProposalAndAction extracts slug, proposalID, and action from paths like:
-// /workflow-api/plans/{slug}/change-proposals/{proposalId}
-// /workflow-api/plans/{slug}/change-proposals/{proposalId}/accept
-// /workflow-api/plans/{slug}/change-proposals/{proposalId}/reject
+// /plan-api/plans/{slug}/change-proposals/{proposalId}
+// /plan-api/plans/{slug}/change-proposals/{proposalId}/accept
+// /plan-api/plans/{slug}/change-proposals/{proposalId}/reject
 func extractSlugChangeProposalAndAction(path string) (slug, proposalID, action string) {
 	idx := strings.Index(path, "/plans/")
 	if idx == -1 {
@@ -497,7 +497,7 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 			ProposalID: proposalID,
 			Slug:       slug,
 		}
-		baseMsg := message.NewBaseMessage(cascadeReq.Schema(), cascadeReq, "workflow-api")
+		baseMsg := message.NewBaseMessage(cascadeReq.Schema(), cascadeReq, "plan-api")
 		cascadeData, err := json.Marshal(baseMsg)
 		if err != nil {
 			c.logger.Error("Failed to marshal cascade request", "proposal_id", proposalID, "error", err)

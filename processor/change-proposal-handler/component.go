@@ -4,7 +4,7 @@
 // that manages the proposal lifecycle.
 //
 // Flow:
-//  1. workflow-api accepts a ChangeProposal and publishes a ChangeProposalCascadeRequest.
+//  1. plan-api accepts a ChangeProposal and publishes a ChangeProposalCascadeRequest.
 //  2. This component consumes the request from JetStream.
 //  3. It loads the proposal, runs cascade.ChangeProposal, and publishes
 //     a change_proposal.accepted event to JetStream.

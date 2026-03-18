@@ -38,7 +38,7 @@ type llmCompleter interface {
 }
 
 // RequirementsGeneratedType is the message type for requirements-generated events.
-// This matches the type consumed by workflow-api's dispatchCascadeEvent handler.
+// This matches the type consumed by plan-api's dispatchCascadeEvent handler.
 var RequirementsGeneratedType = message.Type{
 	Domain:   "workflow",
 	Category: "requirements-generated",
@@ -47,7 +47,7 @@ var RequirementsGeneratedType = message.Type{
 
 // requirementsGeneratedPayload wraps workflow.RequirementsGeneratedEvent to satisfy
 // the message.Payload interface required by message.NewBaseMessage.
-// The JSON layout is identical to RequirementsGeneratedEvent so workflow-api's
+// The JSON layout is identical to RequirementsGeneratedEvent so plan-api's
 // ParseReactivePayload[workflow.RequirementsGeneratedEvent] can deserialise it.
 type requirementsGeneratedPayload struct {
 	Slug             string `json:"slug"`
@@ -587,7 +587,7 @@ func (c *Component) saveAndPublish(ctx context.Context, trigger *payloads.Requir
 			"slug", trigger.Slug, "error", err)
 	}
 
-	// Publish RequirementsGeneratedEvent so workflow-api can dispatch scenario generation.
+	// Publish RequirementsGeneratedEvent so plan-api can dispatch scenario generation.
 	// Use requirementsGeneratedPayload (implements message.Payload) with the same JSON
 	// layout as workflow.RequirementsGeneratedEvent so ParseReactivePayload deserialises it correctly.
 	event := &requirementsGeneratedPayload{

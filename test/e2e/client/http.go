@@ -510,7 +510,7 @@ type SynthesisResult struct {
 // GetPlanReviews retrieves review synthesis results for a plan slug.
 // Returns the result, HTTP status code, and any error.
 func (c *HTTPClient) GetPlanReviews(ctx context.Context, slug string) (*SynthesisResult, int, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/reviews", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/reviews", c.baseURL, slug)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -750,7 +750,7 @@ type Question struct {
 	Sources       string            `json:"sources,omitempty"`
 }
 
-// ListQuestionsResponse represents the response from GET /workflow-api/questions.
+// ListQuestionsResponse represents the response from GET /plan-api/questions.
 type ListQuestionsResponse struct {
 	Questions []*Question `json:"questions"`
 	Total     int         `json:"total"`
@@ -762,7 +762,7 @@ type ListQuestionsResponse struct {
 // limit: max results (default: 50, max: 1000)
 func (c *HTTPClient) ListQuestions(ctx context.Context, status, topic string, limit int) (*ListQuestionsResponse, error) {
 	// Note: trailing slash is required to avoid 301 redirect from Go's ServeMux
-	url := fmt.Sprintf("%s/workflow-api/questions/?", c.baseURL)
+	url := fmt.Sprintf("%s/plan-api/questions/?", c.baseURL)
 
 	params := make([]string, 0)
 	if status != "" {
@@ -812,7 +812,7 @@ func (c *HTTPClient) ListQuestions(ctx context.Context, status, topic string, li
 
 // GetQuestion retrieves a single question by ID.
 func (c *HTTPClient) GetQuestion(ctx context.Context, id string) (*Question, error) {
-	url := fmt.Sprintf("%s/workflow-api/questions/%s", c.baseURL, id)
+	url := fmt.Sprintf("%s/plan-api/questions/%s", c.baseURL, id)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -853,7 +853,7 @@ type AnswerQuestionRequest struct {
 // AnswerQuestion submits an answer to a question.
 // Returns the updated question.
 func (c *HTTPClient) AnswerQuestion(ctx context.Context, id, answer, confidence, sources string) (*Question, error) {
-	url := fmt.Sprintf("%s/workflow-api/questions/%s/answer", c.baseURL, id)
+	url := fmt.Sprintf("%s/plan-api/questions/%s/answer", c.baseURL, id)
 
 	reqBody := AnswerQuestionRequest{
 		Answer:     answer,
@@ -898,7 +898,7 @@ func (c *HTTPClient) AnswerQuestion(ctx context.Context, id, answer, confidence,
 // AnswerQuestionWithAction submits an answer with an optional machine-executable action.
 // Returns the updated question.
 func (c *HTTPClient) AnswerQuestionWithAction(ctx context.Context, id string, req AnswerQuestionRequest) (*Question, error) {
-	url := fmt.Sprintf("%s/workflow-api/questions/%s/answer", c.baseURL, id)
+	url := fmt.Sprintf("%s/plan-api/questions/%s/answer", c.baseURL, id)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -946,7 +946,7 @@ type QuestionEvent struct {
 // The channel is closed when the context is cancelled or an error occurs.
 // status: optional filter for question status (pending, answered, timeout, all)
 func (c *HTTPClient) StreamQuestions(ctx context.Context, status string) (<-chan QuestionEvent, error) {
-	url := fmt.Sprintf("%s/workflow-api/questions/stream", c.baseURL)
+	url := fmt.Sprintf("%s/plan-api/questions/stream", c.baseURL)
 	if status != "" {
 		url += "?status=" + status
 	}
@@ -1166,8 +1166,8 @@ type CreatePlanResponse struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// CreatePlan creates a new plan via the workflow-api.
-// POST /workflow-api/plans {"description": "..."}
+// CreatePlan creates a new plan via the plan-api.
+// POST /plan-api/plans {"description": "..."}
 func (c *HTTPClient) CreatePlan(ctx context.Context, description string) (*CreatePlanResponse, error) {
 	reqBody := CreatePlanRequest{Description: description}
 	data, err := json.Marshal(reqBody)
@@ -1175,7 +1175,7 @@ func (c *HTTPClient) CreatePlan(ctx context.Context, description string) (*Creat
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/workflow-api/plans", bytes.NewReader(data))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/plan-api/plans", bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -1204,10 +1204,10 @@ func (c *HTTPClient) CreatePlan(ctx context.Context, description string) (*Creat
 	return &planResp, nil
 }
 
-// GetPlans retrieves all plans via the workflow-api.
-// GET /workflow-api/plans
+// GetPlans retrieves all plans via the plan-api.
+// GET /plan-api/plans
 func (c *HTTPClient) GetPlans(ctx context.Context) ([]*Plan, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/workflow-api/plans", nil)
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/plan-api/plans", nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -1236,9 +1236,9 @@ func (c *HTTPClient) GetPlans(ctx context.Context) ([]*Plan, error) {
 }
 
 // GetPlan retrieves a single plan by slug.
-// GET /workflow-api/plans/{slug}
+// GET /plan-api/plans/{slug}
 func (c *HTTPClient) GetPlan(ctx context.Context, slug string) (*Plan, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s", c.baseURL, slug)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -1269,7 +1269,7 @@ func (c *HTTPClient) GetPlan(ctx context.Context, slug string) (*Plan, error) {
 }
 
 // PromotePlanResponse is the response from promoting a plan.
-// This matches the PromoteResponse struct in workflow-api/http.go.
+// This matches the PromoteResponse struct in plan-api/http.go.
 // The response embeds PlanWithStatus (which embeds workflow.Plan) and review findings.
 type PromotePlanResponse struct {
 	// Plan fields come from the embedded PlanWithStatus → workflow.Plan
@@ -1304,11 +1304,11 @@ func (r *PromotePlanResponse) NeedsChanges() bool {
 	return r.ReviewVerdict == "needs_changes"
 }
 
-// PromotePlan promotes (approves) a plan via the workflow-api.
-// POST /workflow-api/plans/{slug}/promote
+// PromotePlan promotes (approves) a plan via the plan-api.
+// POST /plan-api/plans/{slug}/promote
 // Returns the response for both 200 (approved) and 422 (needs_changes) — both are valid.
 func (c *HTTPClient) PromotePlan(ctx context.Context, slug string) (*PromotePlanResponse, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/promote", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/promote", c.baseURL, slug)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
 	if err != nil {
@@ -1347,10 +1347,10 @@ type ExecutePlanResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// ExecutePlan executes a plan via the workflow-api.
-// POST /workflow-api/plans/{slug}/execute
+// ExecutePlan executes a plan via the plan-api.
+// POST /plan-api/plans/{slug}/execute
 func (c *HTTPClient) ExecutePlan(ctx context.Context, slug string) (*ExecutePlanResponse, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/execute", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/execute", c.baseURL, slug)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
 	if err != nil {
@@ -1380,10 +1380,10 @@ func (c *HTTPClient) ExecutePlan(ctx context.Context, slug string) (*ExecutePlan
 	return &execResp, nil
 }
 
-// GetPlanTasks retrieves tasks for a plan via the workflow-api.
-// GET /workflow-api/plans/{slug}/tasks
+// GetPlanTasks retrieves tasks for a plan via the plan-api.
+// GET /plan-api/plans/{slug}/tasks
 func (c *HTTPClient) GetPlanTasks(ctx context.Context, slug string) ([]*Task, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/tasks", c.baseURL, slug)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -1422,10 +1422,10 @@ type GenerateTasksResponse struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// GenerateTasks triggers task generation for a plan via the workflow-api.
-// POST /workflow-api/plans/{slug}/tasks/generate
+// GenerateTasks triggers task generation for a plan via the plan-api.
+// POST /plan-api/plans/{slug}/tasks/generate
 func (c *HTTPClient) GenerateTasks(ctx context.Context, slug string) (*GenerateTasksResponse, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/generate", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/tasks/generate", c.baseURL, slug)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
 	if err != nil {
@@ -1456,9 +1456,9 @@ func (c *HTTPClient) GenerateTasks(ctx context.Context, slug string) (*GenerateT
 }
 
 // GetTasks retrieves all tasks for a plan.
-// GET /workflow-api/plans/{slug}/tasks
+// GET /plan-api/plans/{slug}/tasks
 func (c *HTTPClient) GetTasks(ctx context.Context, slug string) ([]*Task, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/tasks", c.baseURL, slug)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -1494,9 +1494,9 @@ type ApproveTaskRequest struct {
 }
 
 // ApproveTask approves a single task.
-// POST /workflow-api/plans/{slug}/tasks/{taskID}/approve
+// POST /plan-api/plans/{slug}/tasks/{taskID}/approve
 func (c *HTTPClient) ApproveTask(ctx context.Context, slug, taskID, approvedBy string) (*Task, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/%s/approve", c.baseURL, slug, taskID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/tasks/%s/approve", c.baseURL, slug, taskID)
 
 	reqBody := ApproveTaskRequest{ApprovedBy: approvedBy}
 	data, err := json.Marshal(reqBody)
@@ -1539,10 +1539,10 @@ type ApproveTasksResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
-// ApproveTasksPlan approves the generated tasks for a plan via the workflow-api.
-// POST /workflow-api/plans/{slug}/tasks/approve
+// ApproveTasksPlan approves the generated tasks for a plan via the plan-api.
+// POST /plan-api/plans/{slug}/tasks/approve
 func (c *HTTPClient) ApproveTasksPlan(ctx context.Context, slug string) (*ApproveTasksResponse, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/approve", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/tasks/approve", c.baseURL, slug)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
 	if err != nil {
@@ -1579,9 +1579,9 @@ type RejectTaskRequest struct {
 }
 
 // RejectTask rejects a single task with a reason.
-// POST /workflow-api/plans/{slug}/tasks/{taskId}/reject
+// POST /plan-api/plans/{slug}/tasks/{taskId}/reject
 func (c *HTTPClient) RejectTask(ctx context.Context, slug, taskID, reason, rejectedBy string) (*Task, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/%s/reject", c.baseURL, slug, taskID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/tasks/%s/reject", c.baseURL, slug, taskID)
 
 	reqBody := RejectTaskRequest{Reason: reason, RejectedBy: rejectedBy}
 	data, err := json.Marshal(reqBody)
@@ -1627,9 +1627,9 @@ type UpdateTaskRequest struct {
 }
 
 // UpdateTask updates a task's fields.
-// PATCH /workflow-api/plans/{slug}/tasks/{taskId}
+// PATCH /plan-api/plans/{slug}/tasks/{taskId}
 func (c *HTTPClient) UpdateTask(ctx context.Context, slug, taskID string, req *UpdateTaskRequest) (*Task, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/%s", c.baseURL, slug, taskID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/tasks/%s", c.baseURL, slug, taskID)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -1666,9 +1666,9 @@ func (c *HTTPClient) UpdateTask(ctx context.Context, slug, taskID string, req *U
 }
 
 // DeleteTask deletes a task.
-// DELETE /workflow-api/plans/{slug}/tasks/{taskId}
+// DELETE /plan-api/plans/{slug}/tasks/{taskId}
 func (c *HTTPClient) DeleteTask(ctx context.Context, slug, taskID string) error {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/%s", c.baseURL, slug, taskID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/tasks/%s", c.baseURL, slug, taskID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
 	if err != nil {
@@ -2326,9 +2326,9 @@ type CreateRequirementRequest struct {
 }
 
 // CreateRequirement creates a new requirement for a plan.
-// POST /workflow-api/plans/{slug}/requirements
+// POST /plan-api/plans/{slug}/requirements
 func (c *HTTPClient) CreateRequirement(ctx context.Context, slug string, req *CreateRequirementRequest) (*Requirement, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/requirements", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/requirements", c.baseURL, slug)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -2365,9 +2365,9 @@ func (c *HTTPClient) CreateRequirement(ctx context.Context, slug string, req *Cr
 }
 
 // GetRequirement retrieves a single requirement by ID.
-// GET /workflow-api/plans/{slug}/requirements/{requirementID}
+// GET /plan-api/plans/{slug}/requirements/{requirementID}
 func (c *HTTPClient) GetRequirement(ctx context.Context, slug, requirementID string) (*Requirement, int, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/requirements/%s", c.baseURL, slug, requirementID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/requirements/%s", c.baseURL, slug, requirementID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -2398,9 +2398,9 @@ func (c *HTTPClient) GetRequirement(ctx context.Context, slug, requirementID str
 }
 
 // ListRequirements lists all requirements for a plan.
-// GET /workflow-api/plans/{slug}/requirements
+// GET /plan-api/plans/{slug}/requirements
 func (c *HTTPClient) ListRequirements(ctx context.Context, slug string) ([]*Requirement, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/requirements", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/requirements", c.baseURL, slug)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -2437,9 +2437,9 @@ type UpdateRequirementRequest struct {
 }
 
 // UpdateRequirement updates a requirement's fields.
-// PATCH /workflow-api/plans/{slug}/requirements/{requirementID}
+// PATCH /plan-api/plans/{slug}/requirements/{requirementID}
 func (c *HTTPClient) UpdateRequirement(ctx context.Context, slug, requirementID string, req *UpdateRequirementRequest) (*Requirement, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/requirements/%s", c.baseURL, slug, requirementID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/requirements/%s", c.baseURL, slug, requirementID)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -2476,10 +2476,10 @@ func (c *HTTPClient) UpdateRequirement(ctx context.Context, slug, requirementID 
 }
 
 // DeleteRequirement deletes a requirement.
-// DELETE /workflow-api/plans/{slug}/requirements/{requirementID}
+// DELETE /plan-api/plans/{slug}/requirements/{requirementID}
 // Returns the HTTP status code.
 func (c *HTTPClient) DeleteRequirement(ctx context.Context, slug, requirementID string) (int, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/requirements/%s", c.baseURL, slug, requirementID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/requirements/%s", c.baseURL, slug, requirementID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
 	if err != nil {
@@ -2501,9 +2501,9 @@ func (c *HTTPClient) DeleteRequirement(ctx context.Context, slug, requirementID 
 }
 
 // DeprecateRequirement deprecates a requirement.
-// POST /workflow-api/plans/{slug}/requirements/{requirementID}/deprecate
+// POST /plan-api/plans/{slug}/requirements/{requirementID}/deprecate
 func (c *HTTPClient) DeprecateRequirement(ctx context.Context, slug, requirementID string) (*Requirement, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/requirements/%s/deprecate", c.baseURL, slug, requirementID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/requirements/%s/deprecate", c.baseURL, slug, requirementID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
 	if err != nil {
@@ -2558,9 +2558,9 @@ type CreateScenarioRequest struct {
 }
 
 // CreateScenario creates a new scenario for a plan.
-// POST /workflow-api/plans/{slug}/scenarios
+// POST /plan-api/plans/{slug}/scenarios
 func (c *HTTPClient) CreateScenario(ctx context.Context, slug string, req *CreateScenarioRequest) (*ScenarioRecord, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/scenarios", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/scenarios", c.baseURL, slug)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -2597,9 +2597,9 @@ func (c *HTTPClient) CreateScenario(ctx context.Context, slug string, req *Creat
 }
 
 // GetScenario retrieves a single scenario by ID.
-// GET /workflow-api/plans/{slug}/scenarios/{scenarioID}
+// GET /plan-api/plans/{slug}/scenarios/{scenarioID}
 func (c *HTTPClient) GetScenario(ctx context.Context, slug, scenarioID string) (*ScenarioRecord, int, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/scenarios/%s", c.baseURL, slug, scenarioID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/scenarios/%s", c.baseURL, slug, scenarioID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -2630,10 +2630,10 @@ func (c *HTTPClient) GetScenario(ctx context.Context, slug, scenarioID string) (
 }
 
 // ListScenarios lists all scenarios for a plan.
-// GET /workflow-api/plans/{slug}/scenarios
+// GET /plan-api/plans/{slug}/scenarios
 // Optionally filter by ?requirement_id= query param.
 func (c *HTTPClient) ListScenarios(ctx context.Context, slug string, requirementID string) ([]*ScenarioRecord, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/scenarios", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/scenarios", c.baseURL, slug)
 	if requirementID != "" {
 		url += "?requirement_id=" + requirementID
 	}
@@ -2675,9 +2675,9 @@ type UpdateScenarioRequest struct {
 }
 
 // UpdateScenario updates a scenario's fields.
-// PATCH /workflow-api/plans/{slug}/scenarios/{scenarioID}
+// PATCH /plan-api/plans/{slug}/scenarios/{scenarioID}
 func (c *HTTPClient) UpdateScenario(ctx context.Context, slug, scenarioID string, req *UpdateScenarioRequest) (*ScenarioRecord, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/scenarios/%s", c.baseURL, slug, scenarioID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/scenarios/%s", c.baseURL, slug, scenarioID)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -2714,10 +2714,10 @@ func (c *HTTPClient) UpdateScenario(ctx context.Context, slug, scenarioID string
 }
 
 // DeleteScenario deletes a scenario.
-// DELETE /workflow-api/plans/{slug}/scenarios/{scenarioID}
+// DELETE /plan-api/plans/{slug}/scenarios/{scenarioID}
 // Returns the HTTP status code.
 func (c *HTTPClient) DeleteScenario(ctx context.Context, slug, scenarioID string) (int, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/scenarios/%s", c.baseURL, slug, scenarioID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/scenarios/%s", c.baseURL, slug, scenarioID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
 	if err != nil {
@@ -2769,10 +2769,10 @@ type GeneratePhasesResponse struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// GeneratePhases triggers phase generation for a plan via the workflow-api.
-// POST /workflow-api/plans/{slug}/phases/generate
+// GeneratePhases triggers phase generation for a plan via the plan-api.
+// POST /plan-api/plans/{slug}/phases/generate
 func (c *HTTPClient) GeneratePhases(ctx context.Context, slug string) (*GeneratePhasesResponse, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/generate", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/phases/generate", c.baseURL, slug)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
 	if err != nil {
@@ -2803,9 +2803,9 @@ func (c *HTTPClient) GeneratePhases(ctx context.Context, slug string) (*Generate
 }
 
 // GetPhases retrieves all phases for a plan.
-// GET /workflow-api/plans/{slug}/phases
+// GET /plan-api/plans/{slug}/phases
 func (c *HTTPClient) GetPhases(ctx context.Context, slug string) ([]*Phase, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/phases", c.baseURL, slug)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -2841,9 +2841,9 @@ type ApproveAllPhasesResponse struct {
 }
 
 // ApproveAllPhases approves all phases for a plan.
-// POST /workflow-api/plans/{slug}/phases/approve
+// POST /plan-api/plans/{slug}/phases/approve
 func (c *HTTPClient) ApproveAllPhases(ctx context.Context, slug, approvedBy string) ([]*Phase, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/approve", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/phases/approve", c.baseURL, slug)
 
 	reqBody := struct {
 		ApprovedBy string `json:"approved_by"`
@@ -2908,9 +2908,9 @@ type ReorderPhasesRequest struct {
 }
 
 // CreatePhase creates a new phase for a plan.
-// POST /workflow-api/plans/{slug}/phases
+// POST /plan-api/plans/{slug}/phases
 func (c *HTTPClient) CreatePhase(ctx context.Context, slug string, req *CreatePhaseRequest) (*Phase, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/phases", c.baseURL, slug)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -2947,9 +2947,9 @@ func (c *HTTPClient) CreatePhase(ctx context.Context, slug string, req *CreatePh
 }
 
 // GetPhase retrieves a single phase by ID.
-// GET /workflow-api/plans/{slug}/phases/{phaseID}
+// GET /plan-api/plans/{slug}/phases/{phaseID}
 func (c *HTTPClient) GetPhase(ctx context.Context, slug, phaseID string) (*Phase, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/%s", c.baseURL, slug, phaseID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/phases/%s", c.baseURL, slug, phaseID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -2980,9 +2980,9 @@ func (c *HTTPClient) GetPhase(ctx context.Context, slug, phaseID string) (*Phase
 }
 
 // UpdatePhase updates a phase's fields.
-// PATCH /workflow-api/plans/{slug}/phases/{phaseID}
+// PATCH /plan-api/plans/{slug}/phases/{phaseID}
 func (c *HTTPClient) UpdatePhase(ctx context.Context, slug, phaseID string, req *UpdatePhaseRequest) (*Phase, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/%s", c.baseURL, slug, phaseID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/phases/%s", c.baseURL, slug, phaseID)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -3019,9 +3019,9 @@ func (c *HTTPClient) UpdatePhase(ctx context.Context, slug, phaseID string, req 
 }
 
 // DeletePhase deletes a phase.
-// DELETE /workflow-api/plans/{slug}/phases/{phaseID}
+// DELETE /plan-api/plans/{slug}/phases/{phaseID}
 func (c *HTTPClient) DeletePhase(ctx context.Context, slug, phaseID string) error {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/%s", c.baseURL, slug, phaseID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/phases/%s", c.baseURL, slug, phaseID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
 	if err != nil {
@@ -3043,9 +3043,9 @@ func (c *HTTPClient) DeletePhase(ctx context.Context, slug, phaseID string) erro
 }
 
 // ApprovePhase approves a single phase.
-// POST /workflow-api/plans/{slug}/phases/{phaseID}/approve
+// POST /plan-api/plans/{slug}/phases/{phaseID}/approve
 func (c *HTTPClient) ApprovePhase(ctx context.Context, slug, phaseID, approvedBy string) (*Phase, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/%s/approve", c.baseURL, slug, phaseID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/phases/%s/approve", c.baseURL, slug, phaseID)
 
 	reqBody := struct {
 		ApprovedBy string `json:"approved_by"`
@@ -3085,9 +3085,9 @@ func (c *HTTPClient) ApprovePhase(ctx context.Context, slug, phaseID, approvedBy
 }
 
 // RejectPhase rejects a single phase with a reason.
-// POST /workflow-api/plans/{slug}/phases/{phaseID}/reject
+// POST /plan-api/plans/{slug}/phases/{phaseID}/reject
 func (c *HTTPClient) RejectPhase(ctx context.Context, slug, phaseID, reason string) (*Phase, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/%s/reject", c.baseURL, slug, phaseID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/phases/%s/reject", c.baseURL, slug, phaseID)
 
 	reqBody := struct {
 		Reason string `json:"reason"`
@@ -3127,9 +3127,9 @@ func (c *HTTPClient) RejectPhase(ctx context.Context, slug, phaseID, reason stri
 }
 
 // ReorderPhases reorders phases for a plan.
-// PUT /workflow-api/plans/{slug}/phases/reorder
+// PUT /plan-api/plans/{slug}/phases/reorder
 func (c *HTTPClient) ReorderPhases(ctx context.Context, slug string, phaseIDs []string) ([]*Phase, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/reorder", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/phases/reorder", c.baseURL, slug)
 
 	reqBody := ReorderPhasesRequest{PhaseIDs: phaseIDs}
 	data, err := json.Marshal(reqBody)
@@ -3167,9 +3167,9 @@ func (c *HTTPClient) ReorderPhases(ctx context.Context, slug string, phaseIDs []
 }
 
 // GetPhaseTasks retrieves tasks for a specific phase.
-// GET /workflow-api/plans/{slug}/phases/{phaseID}/tasks
+// GET /plan-api/plans/{slug}/phases/{phaseID}/tasks
 func (c *HTTPClient) GetPhaseTasks(ctx context.Context, slug, phaseID string) ([]*Task, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/%s/tasks", c.baseURL, slug, phaseID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/phases/%s/tasks", c.baseURL, slug, phaseID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -3213,9 +3213,9 @@ type CreateTaskRequest struct {
 }
 
 // CreateTask creates a new task for a plan.
-// POST /workflow-api/plans/{slug}/tasks
+// POST /plan-api/plans/{slug}/tasks
 func (c *HTTPClient) CreateTask(ctx context.Context, slug string, req *CreateTaskRequest) (*Task, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/tasks", c.baseURL, slug)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -3252,9 +3252,9 @@ func (c *HTTPClient) CreateTask(ctx context.Context, slug string, req *CreateTas
 }
 
 // GetTask retrieves a single task by ID.
-// GET /workflow-api/plans/{slug}/tasks/{taskID}
+// GET /plan-api/plans/{slug}/tasks/{taskID}
 func (c *HTTPClient) GetTask(ctx context.Context, slug, taskID string) (*Task, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/%s", c.baseURL, slug, taskID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/tasks/%s", c.baseURL, slug, taskID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -3332,9 +3332,9 @@ type UpdateChangeProposalRequest struct {
 }
 
 // CreateChangeProposal creates a new change proposal for a plan.
-// POST /workflow-api/plans/{slug}/change-proposals
+// POST /plan-api/plans/{slug}/change-proposals
 func (c *HTTPClient) CreateChangeProposal(ctx context.Context, slug string, req *CreateChangeProposalRequest) (*ChangeProposal, int, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/change-proposals", c.baseURL, slug)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -3371,9 +3371,9 @@ func (c *HTTPClient) CreateChangeProposal(ctx context.Context, slug string, req 
 }
 
 // GetChangeProposal retrieves a single change proposal by ID.
-// GET /workflow-api/plans/{slug}/change-proposals/{proposalID}
+// GET /plan-api/plans/{slug}/change-proposals/{proposalID}
 func (c *HTTPClient) GetChangeProposal(ctx context.Context, slug, proposalID string) (*ChangeProposal, int, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals/%s", c.baseURL, slug, proposalID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/change-proposals/%s", c.baseURL, slug, proposalID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -3404,10 +3404,10 @@ func (c *HTTPClient) GetChangeProposal(ctx context.Context, slug, proposalID str
 }
 
 // ListChangeProposals lists all change proposals for a plan.
-// GET /workflow-api/plans/{slug}/change-proposals
+// GET /plan-api/plans/{slug}/change-proposals
 // Optional status filter: "proposed", "under_review", "accepted", "rejected", "archived"
 func (c *HTTPClient) ListChangeProposals(ctx context.Context, slug, statusFilter string) ([]*ChangeProposal, error) {
-	rawURL := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals", c.baseURL, slug)
+	rawURL := fmt.Sprintf("%s/plan-api/plans/%s/change-proposals", c.baseURL, slug)
 	if statusFilter != "" {
 		rawURL += "?status=" + statusFilter
 	}
@@ -3441,9 +3441,9 @@ func (c *HTTPClient) ListChangeProposals(ctx context.Context, slug, statusFilter
 }
 
 // UpdateChangeProposal updates a change proposal's fields.
-// PATCH /workflow-api/plans/{slug}/change-proposals/{proposalID}
+// PATCH /plan-api/plans/{slug}/change-proposals/{proposalID}
 func (c *HTTPClient) UpdateChangeProposal(ctx context.Context, slug, proposalID string, req *UpdateChangeProposalRequest) (*ChangeProposal, int, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals/%s", c.baseURL, slug, proposalID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/change-proposals/%s", c.baseURL, slug, proposalID)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -3480,10 +3480,10 @@ func (c *HTTPClient) UpdateChangeProposal(ctx context.Context, slug, proposalID 
 }
 
 // DeleteChangeProposal deletes a change proposal (only allowed when status is "proposed").
-// DELETE /workflow-api/plans/{slug}/change-proposals/{proposalID}
+// DELETE /plan-api/plans/{slug}/change-proposals/{proposalID}
 // Returns the HTTP status code.
 func (c *HTTPClient) DeleteChangeProposal(ctx context.Context, slug, proposalID string) (int, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals/%s", c.baseURL, slug, proposalID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/change-proposals/%s", c.baseURL, slug, proposalID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
 	if err != nil {
@@ -3505,9 +3505,9 @@ func (c *HTTPClient) DeleteChangeProposal(ctx context.Context, slug, proposalID 
 }
 
 // SubmitChangeProposal transitions a proposal from "proposed" to "under_review".
-// POST /workflow-api/plans/{slug}/change-proposals/{proposalID}/submit
+// POST /plan-api/plans/{slug}/change-proposals/{proposalID}/submit
 func (c *HTTPClient) SubmitChangeProposal(ctx context.Context, slug, proposalID string) (*ChangeProposal, int, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals/%s/submit", c.baseURL, slug, proposalID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/change-proposals/%s/submit", c.baseURL, slug, proposalID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, http.NoBody)
 	if err != nil {
@@ -3539,9 +3539,9 @@ func (c *HTTPClient) SubmitChangeProposal(ctx context.Context, slug, proposalID 
 
 // AcceptChangeProposal transitions a proposal from "under_review" to "accepted"
 // and triggers the cascade that marks affected tasks dirty.
-// POST /workflow-api/plans/{slug}/change-proposals/{proposalID}/accept
+// POST /plan-api/plans/{slug}/change-proposals/{proposalID}/accept
 func (c *HTTPClient) AcceptChangeProposal(ctx context.Context, slug, proposalID, reviewedBy string) (*AcceptChangeProposalResponse, int, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals/%s/accept", c.baseURL, slug, proposalID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/change-proposals/%s/accept", c.baseURL, slug, proposalID)
 
 	type acceptBody struct {
 		ReviewedBy string `json:"reviewed_by,omitempty"`
@@ -3583,9 +3583,9 @@ func (c *HTTPClient) AcceptChangeProposal(ctx context.Context, slug, proposalID,
 }
 
 // RejectChangeProposal transitions a proposal from "under_review" to "rejected".
-// POST /workflow-api/plans/{slug}/change-proposals/{proposalID}/reject
+// POST /plan-api/plans/{slug}/change-proposals/{proposalID}/reject
 func (c *HTTPClient) RejectChangeProposal(ctx context.Context, slug, proposalID, reviewedBy, reason string) (*ChangeProposal, int, error) {
-	url := fmt.Sprintf("%s/workflow-api/plans/%s/change-proposals/%s/reject", c.baseURL, slug, proposalID)
+	url := fmt.Sprintf("%s/plan-api/plans/%s/change-proposals/%s/reject", c.baseURL, slug, proposalID)
 
 	type rejectBody struct {
 		ReviewedBy string `json:"reviewed_by,omitempty"`
@@ -3634,7 +3634,7 @@ func (c *HTTPClient) UpdatePlan(ctx context.Context, slug string, updates map[st
 		return nil, fmt.Errorf("marshal updates: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/workflow-api/plans/%s", c.baseURL, slug)
+	url := fmt.Sprintf("%s/plan-api/plans/%s", c.baseURL, slug)
 	httpReq, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)

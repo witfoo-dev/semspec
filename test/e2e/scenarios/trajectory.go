@@ -132,10 +132,10 @@ func (s *TrajectoryScenario) stageTriggerLLMCall(ctx context.Context, result *Re
 
 	result.SetDetail("trigger_response", resp)
 
-	// The workflow-api returns trace_id directly in the response.
+	// The plan-api returns trace_id directly in the response.
 	traceID := resp.TraceID
 	if traceID == "" {
-		return fmt.Errorf("workflow-api did not return a trace_id in the plan creation response")
+		return fmt.Errorf("plan-api did not return a trace_id in the plan creation response")
 	}
 
 	result.SetDetail("trace_id", traceID)

@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"encoding/json"
@@ -29,7 +29,7 @@ type UpdateScenarioHTTPRequest struct {
 }
 
 // extractSlugScenarioAndAction extracts slug, scenarioID, and action from paths like:
-// /workflow-api/plans/{slug}/scenarios/{scenarioId}
+// /plan-api/plans/{slug}/scenarios/{scenarioId}
 func extractSlugScenarioAndAction(path string) (slug, scenarioID, action string) {
 	idx := strings.Index(path, "/plans/")
 	if idx == -1 {

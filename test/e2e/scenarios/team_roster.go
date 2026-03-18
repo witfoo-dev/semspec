@@ -36,7 +36,7 @@ type kvEntityState struct {
 //  1. Team entities are seeded in the ENTITY_STATES KV bucket.
 //  2. Each team entity has at least one member agent linked via team.member.agent_id.
 //  3. Each agent with an agent.team.id predicate references a team entity that exists.
-//  4. The workflow-api plan lifecycle is operational (shared smoke test).
+//  4. The plan-api plan lifecycle is operational (shared smoke test).
 //
 // Full team selection and red-team routing are tested via unit tests in the
 // processor/execution-orchestrator package. This E2E scenario validates that
@@ -279,7 +279,7 @@ func (s *TeamRosterScenario) stageVerifyAgentTeamLinkage(ctx context.Context, re
 	return nil
 }
 
-// stageVerifyPlanAPI creates a plan via HTTP to confirm the workflow-api is
+// stageVerifyPlanAPI creates a plan via HTTP to confirm the plan-api is
 // operational. Unlike the agent-roster equivalent, this stage does NOT poll
 // the local filesystem — plan file access now goes through the sandbox.
 func (s *TeamRosterScenario) stageVerifyPlanLifecycle(ctx context.Context, result *Result) error {

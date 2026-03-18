@@ -419,7 +419,7 @@ func (s *PlanWorkflowScenario) stageVerifyReactiveState(ctx context.Context, res
 	return nil
 }
 
-// stageVerifyReviewsEndpoint tests the GET /workflow-api/plans/{slug}/reviews endpoint.
+// stageVerifyReviewsEndpoint tests the GET /plan-api/plans/{slug}/reviews endpoint.
 func (s *PlanWorkflowScenario) stageVerifyReviewsEndpoint(ctx context.Context, result *Result) error {
 	// Use the slug from earlier plan stage
 	slug := "authentication-options"

@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"bytes"
@@ -21,42 +21,42 @@ func TestExtractSlugChangeProposalAndAction(t *testing.T) {
 	}{
 		{
 			name:           "get proposal",
-			path:           "/workflow-api/plans/my-feature/change-proposals/change-proposal.my-feature.1",
+			path:           "/plan-api/plans/my-feature/change-proposals/change-proposal.my-feature.1",
 			wantSlug:       "my-feature",
 			wantProposalID: "change-proposal.my-feature.1",
 			wantAction:     "",
 		},
 		{
 			name:           "accept proposal",
-			path:           "/workflow-api/plans/my-feature/change-proposals/change-proposal.my-feature.1/accept",
+			path:           "/plan-api/plans/my-feature/change-proposals/change-proposal.my-feature.1/accept",
 			wantSlug:       "my-feature",
 			wantProposalID: "change-proposal.my-feature.1",
 			wantAction:     "accept",
 		},
 		{
 			name:           "reject proposal",
-			path:           "/workflow-api/plans/my-feature/change-proposals/change-proposal.my-feature.1/reject",
+			path:           "/plan-api/plans/my-feature/change-proposals/change-proposal.my-feature.1/reject",
 			wantSlug:       "my-feature",
 			wantProposalID: "change-proposal.my-feature.1",
 			wantAction:     "reject",
 		},
 		{
 			name:           "submit proposal",
-			path:           "/workflow-api/plans/my-feature/change-proposals/change-proposal.my-feature.1/submit",
+			path:           "/plan-api/plans/my-feature/change-proposals/change-proposal.my-feature.1/submit",
 			wantSlug:       "my-feature",
 			wantProposalID: "change-proposal.my-feature.1",
 			wantAction:     "submit",
 		},
 		{
 			name:           "invalid - missing segment",
-			path:           "/workflow-api/plans/test-slug/other/change-proposal.test.1",
+			path:           "/plan-api/plans/test-slug/other/change-proposal.test.1",
 			wantSlug:       "",
 			wantProposalID: "",
 			wantAction:     "",
 		},
 		{
 			name:           "invalid - insufficient parts",
-			path:           "/workflow-api/plans/test-slug/change-proposals",
+			path:           "/plan-api/plans/test-slug/change-proposals",
 			wantSlug:       "",
 			wantProposalID: "",
 			wantAction:     "",
@@ -108,7 +108,7 @@ func TestHandleListChangeProposals(t *testing.T) {
 	c := setupTestComponent(t)
 
 	t.Run("list all", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug+"/change-proposals", nil)
+		req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/change-proposals", nil)
 		w := httptest.NewRecorder()
 
 		c.handleListChangeProposals(w, req, slug)
@@ -128,7 +128,7 @@ func TestHandleListChangeProposals(t *testing.T) {
 
 	t.Run("filter by status", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet,
-			"/workflow-api/plans/"+slug+"/change-proposals?status=proposed", nil)
+			"/plan-api/plans/"+slug+"/change-proposals?status=proposed", nil)
 		w := httptest.NewRecorder()
 
 		c.handleListChangeProposals(w, req, slug)
@@ -178,7 +178,7 @@ func TestHandleCreateChangeProposal(t *testing.T) {
 		AffectedReqIDs: []string{"requirement.cp-create-plan.1"},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/change-proposals", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -223,7 +223,7 @@ func TestHandleCreateChangeProposal_MissingTitle(t *testing.T) {
 
 	body, _ := json.Marshal(CreateChangeProposalHTTPRequest{Rationale: "no title"})
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/change-proposals", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -259,7 +259,7 @@ func TestHandleAcceptChangeProposal(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/change-proposals/"+proposalID+"/accept", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/accept", nil)
 	w := httptest.NewRecorder()
 
 	c.handleAcceptChangeProposal(w, req, slug, proposalID)
@@ -306,7 +306,7 @@ func TestHandleRejectChangeProposal(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/change-proposals/"+proposalID+"/reject", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/reject", nil)
 	w := httptest.NewRecorder()
 
 	c.handleRejectChangeProposal(w, req, slug, proposalID)
@@ -356,7 +356,7 @@ func TestHandleAcceptChangeProposal_InvalidTransition(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/change-proposals/"+proposalID+"/accept", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/accept", nil)
 	w := httptest.NewRecorder()
 
 	c.handleAcceptChangeProposal(w, req, slug, proposalID)
@@ -391,7 +391,7 @@ func TestHandleSubmitChangeProposal(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/change-proposals/"+proposalID+"/submit", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/submit", nil)
 	w := httptest.NewRecorder()
 
 	c.handleSubmitChangeProposal(w, req, slug, proposalID)
@@ -435,7 +435,7 @@ func TestHandleDeleteChangeProposal_NotProposed(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodDelete, "/workflow-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
 	w := httptest.NewRecorder()
 
 	c.handleDeleteChangeProposal(w, req, slug, proposalID)

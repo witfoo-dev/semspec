@@ -27,7 +27,7 @@ import (
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
-	workflowapi "github.com/c360studio/semspec/processor/workflow-api"
+	planapi "github.com/c360studio/semspec/processor/plan-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 
 	"github.com/c360studio/semstreams/component"
@@ -77,8 +77,8 @@ var componentRegistry = map[string]struct {
 		Description: "HTTP endpoints for querying LLM call trajectories and agent loop history",
 		Domain:      "semspec",
 	},
-	"workflow-api": {
-		ConfigType:  reflect.TypeOf(workflowapi.Config{}),
+	"plan-api": {
+		ConfigType:  reflect.TypeOf(planapi.Config{}),
 		Description: "HTTP API for development plan lifecycle management - create, approve, and execute plans",
 		Domain:      "semspec",
 	},

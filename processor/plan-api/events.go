@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"context"
@@ -29,7 +29,7 @@ func (c *Component) handleWorkflowEvents(ctx context.Context, js jetstream.JetSt
 	// Create a durable consumer for workflow events.
 	// Uses wildcard to capture all per-event-type subjects under workflow.events.>
 	consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
-		Name:          "workflow-api-events",
+		Name:          "plan-api-events",
 		FilterSubject: "workflow.events.>",
 		AckPolicy:     jetstream.AckExplicitPolicy,
 		DeliverPolicy: jetstream.DeliverNewPolicy,
@@ -298,7 +298,7 @@ func (c *Component) handleUserSignals(ctx context.Context, js jetstream.JetStrea
 	}
 
 	consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
-		Name:          "workflow-api-user-signals",
+		Name:          "plan-api-user-signals",
 		FilterSubject: "user.signal.>",
 		AckPolicy:     jetstream.AckExplicitPolicy,
 		DeliverPolicy: jetstream.DeliverNewPolicy,

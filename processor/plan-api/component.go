@@ -1,6 +1,6 @@
 // Package workflowapi provides HTTP endpoints for workflow-related data.
 // It exposes review synthesis results and other workflow data to the UI.
-package workflowapi
+package planapi
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// Component implements the workflow-api component.
+// Component implements the plan-api component.
 // It provides HTTP endpoints for querying workflow data and questions.
 type Component struct {
 	name       string
@@ -49,7 +49,7 @@ const (
 	stateStopping = 3
 )
 
-// NewComponent creates a new workflow-api component.
+// NewComponent creates a new plan-api component.
 func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (component.Discoverable, error) {
 	var config Config
 	if err := json.Unmarshal(rawConfig, &config); err != nil {
@@ -83,7 +83,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 
 	return &Component{
-		name:            "workflow-api",
+		name:            "plan-api",
 		config:          config,
 		natsClient:      deps.NATSClient,
 		logger:          logger,
@@ -94,7 +94,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 // Initialize prepares the component.
 func (c *Component) Initialize() error {
-	c.logger.Debug("Initialized workflow-api",
+	c.logger.Debug("Initialized plan-api",
 		"exec_bucket", c.config.ExecutionBucketName)
 	return nil
 }
@@ -162,7 +162,7 @@ func (c *Component) Start(ctx context.Context) error {
 	// Transition to running
 	c.state.Store(stateRunning)
 
-	c.logger.Info("workflow-api started",
+	c.logger.Info("plan-api started",
 		"exec_bucket", c.config.ExecutionBucketName)
 
 	return nil
@@ -196,7 +196,7 @@ func (c *Component) Stop(_ time.Duration) error {
 	// Transition to stopped
 	c.state.Store(stateStopped)
 
-	c.logger.Info("workflow-api stopped")
+	c.logger.Info("plan-api stopped")
 
 	return nil
 }
@@ -204,7 +204,7 @@ func (c *Component) Stop(_ time.Duration) error {
 // Meta returns component metadata.
 func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
-		Name:        "workflow-api",
+		Name:        "plan-api",
 		Type:        "processor",
 		Description: "HTTP endpoints for workflow data including review synthesis results",
 		Version:     "0.1.0",

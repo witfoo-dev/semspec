@@ -13,7 +13,7 @@ import (
 // AgentRosterScenario tests that the persistent agent roster is operational
 // in the running semspec instance. It verifies:
 //  1. Error categories are loaded (seeded as graph entities on startup).
-//  2. The workflow-api exposes plan lifecycle endpoints that the
+//  2. The plan-api exposes plan lifecycle endpoints that the
 //     execution-orchestrator's agent selection depends on.
 //  3. Agent entity creation works via the ENTITY_STATES KV bucket.
 //
@@ -152,7 +152,7 @@ func (s *AgentRosterScenario) stageVerifyErrorCategoriesSeeded(ctx context.Conte
 	return nil
 }
 
-// stageVerifyPlanLifecycle creates and approves a plan to verify the workflow-api
+// stageVerifyPlanLifecycle creates and approves a plan to verify the plan-api
 // is operational. The execution-orchestrator's agent selection hooks into the
 // task dispatch path, which depends on these APIs working correctly.
 func (s *AgentRosterScenario) stageVerifyPlanLifecycle(ctx context.Context, result *Result) error {

@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"bytes"
@@ -22,28 +22,28 @@ func TestExtractSlugScenarioAndAction(t *testing.T) {
 	}{
 		{
 			name:           "get scenario",
-			path:           "/workflow-api/plans/my-feature/scenarios/scenario.my-feature.1",
+			path:           "/plan-api/plans/my-feature/scenarios/scenario.my-feature.1",
 			wantSlug:       "my-feature",
 			wantScenarioID: "scenario.my-feature.1",
 			wantAction:     "",
 		},
 		{
 			name:           "with trailing slash",
-			path:           "/workflow-api/plans/test-slug/scenarios/scenario.test-slug.2/",
+			path:           "/plan-api/plans/test-slug/scenarios/scenario.test-slug.2/",
 			wantSlug:       "test-slug",
 			wantScenarioID: "scenario.test-slug.2",
 			wantAction:     "",
 		},
 		{
 			name:           "invalid - missing scenarios segment",
-			path:           "/workflow-api/plans/test-slug/something/scenario.test.1",
+			path:           "/plan-api/plans/test-slug/something/scenario.test.1",
 			wantSlug:       "",
 			wantScenarioID: "",
 			wantAction:     "",
 		},
 		{
 			name:           "invalid - insufficient parts",
-			path:           "/workflow-api/plans/test-slug/scenarios",
+			path:           "/plan-api/plans/test-slug/scenarios",
 			wantSlug:       "",
 			wantScenarioID: "",
 			wantAction:     "",
@@ -108,7 +108,7 @@ func TestHandleListScenarios(t *testing.T) {
 	c := setupTestComponent(t)
 
 	t.Run("list all", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug+"/scenarios", nil)
+		req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/scenarios", nil)
 		w := httptest.NewRecorder()
 
 		c.handleListScenarios(w, req, slug)
@@ -128,7 +128,7 @@ func TestHandleListScenarios(t *testing.T) {
 
 	t.Run("filter by requirement_id", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet,
-			"/workflow-api/plans/"+slug+"/scenarios?requirement_id=requirement.scenario-list-plan.1", nil)
+			"/plan-api/plans/"+slug+"/scenarios?requirement_id=requirement.scenario-list-plan.1", nil)
 		w := httptest.NewRecorder()
 
 		c.handleListScenarios(w, req, slug)
@@ -171,7 +171,7 @@ func TestHandleCreateScenario(t *testing.T) {
 		Then:          []string{"they are authenticated", "they are redirected to dashboard"},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/scenarios", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/scenarios", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -236,7 +236,7 @@ func TestHandleCreateScenario_ValidationErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			bodyBytes, _ := json.Marshal(tt.body)
-			req := httptest.NewRequest(http.MethodPost, "/workflow-api/plans/"+slug+"/scenarios", bytes.NewReader(bodyBytes))
+			req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/scenarios", bytes.NewReader(bodyBytes))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
@@ -284,7 +284,7 @@ func TestHandleUpdateScenario(t *testing.T) {
 	newGiven := "updated given"
 	body, _ := json.Marshal(UpdateScenarioHTTPRequest{Given: &newGiven})
 
-	req := httptest.NewRequest(http.MethodPatch, "/workflow-api/plans/"+slug+"/scenarios/"+scenarioID, bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/scenarios/"+scenarioID, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -340,7 +340,7 @@ func TestHandleDeleteScenario(t *testing.T) {
 
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodDelete, "/workflow-api/plans/"+slug+"/scenarios/"+scenarioID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/scenarios/"+scenarioID, nil)
 	w := httptest.NewRecorder()
 
 	c.handleDeleteScenario(w, req, slug, scenarioID)

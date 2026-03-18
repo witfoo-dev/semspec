@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"encoding/json"
@@ -86,9 +86,9 @@ func computePhaseStats(phases []workflow.Phase) *PhaseStats {
 }
 
 // extractSlugPhaseAndAction extracts slug, phaseID, and action from paths like:
-// /workflow-api/plans/{slug}/phases/{phaseId}
-// /workflow-api/plans/{slug}/phases/{phaseId}/approve
-// /workflow-api/plans/{slug}/phases/{phaseId}/reject
+// /plan-api/plans/{slug}/phases/{phaseId}
+// /plan-api/plans/{slug}/phases/{phaseId}/approve
+// /plan-api/plans/{slug}/phases/{phaseId}/reject
 func extractSlugPhaseAndAction(path string) (slug, phaseID, action string) {
 	idx := strings.Index(path, "/plans/")
 	if idx == -1 {
@@ -574,7 +574,7 @@ func (c *Component) handleGeneratePhases(w http.ResponseWriter, r *http.Request,
 	baseMsg := message.NewBaseMessage(
 		workflow.WorkflowTriggerType,
 		triggerPayload,
-		"workflow-api",
+		"plan-api",
 	)
 	data, err := json.Marshal(baseMsg)
 	if err != nil {

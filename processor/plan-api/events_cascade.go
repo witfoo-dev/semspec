@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"context"
@@ -22,7 +22,7 @@ func (c *Component) triggerRequirementGeneration(ctx context.Context, plan *work
 		TraceID:     latestTraceID(plan),
 	}
 
-	baseMsg := message.NewBaseMessage(req.Schema(), req, "workflow-api")
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.logger.Error("Failed to marshal requirement generator request",
@@ -86,7 +86,7 @@ func (c *Component) triggerScenarioGeneration(ctx context.Context, slug, require
 		TraceID:       traceID,
 	}
 
-	baseMsg := message.NewBaseMessage(req.Schema(), req, "workflow-api")
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.logger.Error("Failed to marshal scenario generator request",

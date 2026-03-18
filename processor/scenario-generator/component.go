@@ -819,7 +819,7 @@ func (p *scenariosGeneratedPayload) UnmarshalJSON(data []byte) error {
 }
 
 // publishScenariosGeneratedEvent publishes a ScenariosGeneratedEvent to the
-// WORKFLOW JetStream stream so that workflow-api can react and transition the
+// WORKFLOW JetStream stream so that plan-api can react and transition the
 // plan to ready_for_execution.
 func (c *Component) publishScenariosGeneratedEvent(ctx context.Context, slug string, scenarioCount int, traceID string) error {
 	payload := &scenariosGeneratedPayload{

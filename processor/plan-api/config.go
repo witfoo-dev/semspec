@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 // workflowAPISchema defines the configuration schema.
 var workflowAPISchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 
-// Config holds configuration for the workflow-api component.
+// Config holds configuration for the plan-api component.
 type Config struct {
 	// ExecutionBucketName is the KV bucket name for workflow executions.
 	ExecutionBucketName string `json:"execution_bucket_name" schema:"type:string,description:KV bucket for workflow executions,category:basic,default:WORKFLOW_EXECUTIONS"`

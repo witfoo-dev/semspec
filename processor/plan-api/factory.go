@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"fmt"
@@ -11,13 +11,13 @@ type RegistryInterface interface {
 	RegisterWithConfig(component.RegistrationConfig) error
 }
 
-// Register registers the workflow-api component with the given registry.
+// Register registers the plan-api component with the given registry.
 func Register(registry RegistryInterface) error {
 	if registry == nil {
 		return fmt.Errorf("registry cannot be nil")
 	}
 	return registry.RegisterWithConfig(component.RegistrationConfig{
-		Name:        "workflow-api",
+		Name:        "plan-api",
 		Factory:     NewComponent,
 		Schema:      workflowAPISchema,
 		Type:        "processor",

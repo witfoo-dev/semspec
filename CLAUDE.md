@@ -156,7 +156,7 @@ semspec/
 │   ├── scenario-orchestrator/ # Reactive execution entry point (ADR-025)
 │   ├── question-answerer/    # LLM question answering
 │   ├── question-timeout/     # SLA monitoring and escalation
-│   ├── workflow-api/         # Workflow + Requirement/Scenario/ChangeProposal HTTP API
+│   ├── plan-api/         # Workflow + Requirement/Scenario/ChangeProposal HTTP API
 │   ├── trajectory-api/       # Trajectory/LLM call queries
 │   └── ast/                  # AST parsing library
 ├── workflow/

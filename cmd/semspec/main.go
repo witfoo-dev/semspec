@@ -47,7 +47,7 @@ import (
 	taskgenerator "github.com/c360studio/semspec/processor/task-generator"
 	taskreviewer "github.com/c360studio/semspec/processor/task-reviewer"
 	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
-	workflowapi "github.com/c360studio/semspec/processor/workflow-api"
+	planapi "github.com/c360studio/semspec/processor/plan-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 	"github.com/c360studio/semspec/tools/spawn"
 	"github.com/c360studio/semspec/workflow"
@@ -244,7 +244,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return taskdispatcher.Register(componentRegistry) },
 		func() error { return planner.Register(componentRegistry) },
 		func() error { return contextbuilder.Register(componentRegistry) },
-		func() error { return workflowapi.Register(componentRegistry) },
+		func() error { return planapi.Register(componentRegistry) },
 		func() error { return trajectoryapi.Register(componentRegistry) },
 		func() error { return plancoordinator.Register(componentRegistry) },
 		func() error { return planreviewer.Register(componentRegistry) },

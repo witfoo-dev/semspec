@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"context"
@@ -358,7 +358,7 @@ func (c *Component) publishGraphEntity(ctx context.Context, payload message.Payl
 		return nil
 	}
 
-	baseMsg := message.NewBaseMessage(payload.Schema(), payload, "workflow-api")
+	baseMsg := message.NewBaseMessage(payload.Schema(), payload, "plan-api")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		return fmt.Errorf("marshal graph entity: %w", err)

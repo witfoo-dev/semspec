@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"encoding/json"
@@ -27,8 +27,8 @@ type UpdateRequirementHTTPRequest struct {
 }
 
 // extractSlugRequirementAndAction extracts slug, requirementID, and action from paths like:
-// /workflow-api/plans/{slug}/requirements/{reqId}
-// /workflow-api/plans/{slug}/requirements/{reqId}/deprecate
+// /plan-api/plans/{slug}/requirements/{reqId}
+// /plan-api/plans/{slug}/requirements/{reqId}/deprecate
 func extractSlugRequirementAndAction(path string) (slug, requirementID, action string) {
 	idx := strings.Index(path, "/plans/")
 	if idx == -1 {

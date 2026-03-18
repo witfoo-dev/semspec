@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"reflect"
@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	service.RegisterOpenAPISpec("workflow-api", workflowAPIOpenAPISpec())
+	service.RegisterOpenAPISpec("plan-api", workflowAPIOpenAPISpec())
 }
 
 // OpenAPISpec implements the OpenAPIProvider interface.
@@ -19,7 +19,7 @@ func (c *Component) OpenAPISpec() *service.OpenAPISpec {
 	return workflowAPIOpenAPISpec()
 }
 
-// workflowAPIOpenAPISpec returns the OpenAPI specification for workflow-api endpoints.
+// workflowAPIOpenAPISpec returns the OpenAPI specification for plan-api endpoints.
 func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 	slugParam := service.ParameterSpec{
 		Name:        "slug",
@@ -43,7 +43,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 			{Name: "Phases", Description: "Phase management - logical groupings of tasks within a plan with dependencies and approval gates"},
 		},
 		Paths: map[string]service.PathSpec{
-			"/workflow-api/plans": {
+			"/plan-api/plans": {
 				GET: &service.OperationSpec{
 					Summary:     "List plans",
 					Description: "Returns all development plans with their current workflow stage and active agent loops",
@@ -81,7 +81,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}": {
+			"/plan-api/plans/{slug}": {
 				GET: &service.OperationSpec{
 					Summary:     "Get plan",
 					Description: "Returns a single plan with its current workflow stage and active agent loops",
@@ -127,7 +127,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/promote": {
+			"/plan-api/plans/{slug}/promote": {
 				POST: &service.OperationSpec{
 					Summary:     "Promote plan",
 					Description: "Approves a plan draft, marking it ready for task generation and execution",
@@ -143,7 +143,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/tasks": {
+			"/plan-api/plans/{slug}/tasks": {
 				GET: &service.OperationSpec{
 					Summary:     "List plan tasks",
 					Description: "Returns all tasks associated with the given plan",
@@ -179,7 +179,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/tasks/approve": {
+			"/plan-api/plans/{slug}/tasks/approve": {
 				POST: &service.OperationSpec{
 					Summary:     "Approve all tasks",
 					Description: "Bulk-approves all pending tasks for a plan",
@@ -196,7 +196,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/tasks/{taskId}": {
+			"/plan-api/plans/{slug}/tasks/{taskId}": {
 				GET: &service.OperationSpec{
 					Summary:     "Get task",
 					Description: "Returns a single task by ID",
@@ -242,7 +242,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/tasks/{taskId}/approve": {
+			"/plan-api/plans/{slug}/tasks/{taskId}/approve": {
 				POST: &service.OperationSpec{
 					Summary:     "Approve task",
 					Description: "Approves a single task for execution",
@@ -263,7 +263,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/tasks/{taskId}/reject": {
+			"/plan-api/plans/{slug}/tasks/{taskId}/reject": {
 				POST: &service.OperationSpec{
 					Summary:     "Reject task",
 					Description: "Rejects a task with a reason",
@@ -285,7 +285,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/tasks/generate": {
+			"/plan-api/plans/{slug}/tasks/generate": {
 				POST: &service.OperationSpec{
 					Summary:     "Generate tasks",
 					Description: "Triggers the task generator agent to produce executable tasks from an approved plan's Goal, Context, and Scope",
@@ -302,7 +302,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/execute": {
+			"/plan-api/plans/{slug}/execute": {
 				POST: &service.OperationSpec{
 					Summary:     "Execute plan",
 					Description: "Triggers the batch task dispatcher to execute all tasks for an approved plan",
@@ -319,7 +319,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/reviews": {
+			"/plan-api/plans/{slug}/reviews": {
 				GET: &service.OperationSpec{
 					Summary:     "Get plan reviews",
 					Description: "Returns the aggregated review synthesis result for a plan, combining findings from all reviewers",
@@ -336,7 +336,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 				},
 			},
 			// Phase endpoints
-			"/workflow-api/plans/{slug}/phases": {
+			"/plan-api/plans/{slug}/phases": {
 				GET: &service.OperationSpec{
 					Summary:     "List phases",
 					Description: "Returns all phases for a plan, ordered by sequence",
@@ -373,7 +373,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/phases/generate": {
+			"/plan-api/plans/{slug}/phases/generate": {
 				POST: &service.OperationSpec{
 					Summary:     "Generate phases",
 					Description: "Triggers the LLM to generate phases from an approved plan's Goal, Context, and Scope",
@@ -390,7 +390,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/phases/approve": {
+			"/plan-api/plans/{slug}/phases/approve": {
 				POST: &service.OperationSpec{
 					Summary:     "Approve all phases",
 					Description: "Bulk-approves all pending phases for a plan",
@@ -407,7 +407,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/phases/reorder": {
+			"/plan-api/plans/{slug}/phases/reorder": {
 				PUT: &service.OperationSpec{
 					Summary:     "Reorder phases",
 					Description: "Reorders phases within the plan by specifying new sequence order",
@@ -430,7 +430,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/phases/{phaseId}": {
+			"/plan-api/plans/{slug}/phases/{phaseId}": {
 				GET: &service.OperationSpec{
 					Summary:     "Get phase",
 					Description: "Returns a single phase by ID",
@@ -485,7 +485,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/phases/{phaseId}/approve": {
+			"/plan-api/plans/{slug}/phases/{phaseId}/approve": {
 				POST: &service.OperationSpec{
 					Summary:     "Approve phase",
 					Description: "Approves a single phase for execution",
@@ -509,7 +509,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/phases/{phaseId}/reject": {
+			"/plan-api/plans/{slug}/phases/{phaseId}/reject": {
 				POST: &service.OperationSpec{
 					Summary:     "Reject phase",
 					Description: "Rejects a phase with a reason",
@@ -534,7 +534,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/workflow-api/plans/{slug}/phases/{phaseId}/tasks": {
+			"/plan-api/plans/{slug}/phases/{phaseId}/tasks": {
 				GET: &service.OperationSpec{
 					Summary:     "List phase tasks",
 					Description: "Returns all tasks belonging to a specific phase",

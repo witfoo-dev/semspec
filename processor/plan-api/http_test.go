@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"bytes"
@@ -23,19 +23,19 @@ func TestExtractSlugAndEndpoint(t *testing.T) {
 	}{
 		{
 			name:         "standard path",
-			path:         "/workflow-api/plans/authentication-options/reviews",
+			path:         "/plan-api/plans/authentication-options/reviews",
 			wantSlug:     "authentication-options",
 			wantEndpoint: "reviews",
 		},
 		{
 			name:         "with trailing slash",
-			path:         "/workflow-api/plans/my-feature/reviews/",
+			path:         "/plan-api/plans/my-feature/reviews/",
 			wantSlug:     "my-feature",
 			wantEndpoint: "reviews",
 		},
 		{
 			name:         "no endpoint",
-			path:         "/workflow-api/plans/test-slug",
+			path:         "/plan-api/plans/test-slug",
 			wantSlug:     "test-slug",
 			wantEndpoint: "",
 		},
@@ -47,13 +47,13 @@ func TestExtractSlugAndEndpoint(t *testing.T) {
 		},
 		{
 			name:         "no plans segment",
-			path:         "/workflow-api/something/else",
+			path:         "/plan-api/something/else",
 			wantSlug:     "",
 			wantEndpoint: "",
 		},
 		{
 			name:         "slug with dashes",
-			path:         "/workflow-api/plans/add-user-auth-flow/reviews",
+			path:         "/plan-api/plans/add-user-auth-flow/reviews",
 			wantSlug:     "add-user-auth-flow",
 			wantEndpoint: "reviews",
 		},
@@ -230,42 +230,42 @@ func TestExtractSlugTaskAndAction(t *testing.T) {
 	}{
 		{
 			name:       "get task",
-			path:       "/workflow-api/plans/my-feature/tasks/task.my-feature.1",
+			path:       "/plan-api/plans/my-feature/tasks/task.my-feature.1",
 			wantSlug:   "my-feature",
 			wantTaskID: "task.my-feature.1",
 			wantAction: "",
 		},
 		{
 			name:       "approve task",
-			path:       "/workflow-api/plans/my-feature/tasks/task.my-feature.1/approve",
+			path:       "/plan-api/plans/my-feature/tasks/task.my-feature.1/approve",
 			wantSlug:   "my-feature",
 			wantTaskID: "task.my-feature.1",
 			wantAction: "approve",
 		},
 		{
 			name:       "reject task",
-			path:       "/workflow-api/plans/my-feature/tasks/task.my-feature.1/reject",
+			path:       "/plan-api/plans/my-feature/tasks/task.my-feature.1/reject",
 			wantSlug:   "my-feature",
 			wantTaskID: "task.my-feature.1",
 			wantAction: "reject",
 		},
 		{
 			name:       "with trailing slash",
-			path:       "/workflow-api/plans/test-slug/tasks/task.test-slug.2/approve/",
+			path:       "/plan-api/plans/test-slug/tasks/task.test-slug.2/approve/",
 			wantSlug:   "test-slug",
 			wantTaskID: "task.test-slug.2",
 			wantAction: "approve",
 		},
 		{
 			name:       "invalid - missing tasks segment",
-			path:       "/workflow-api/plans/test-slug/something/task.test.1",
+			path:       "/plan-api/plans/test-slug/something/task.test.1",
 			wantSlug:   "",
 			wantTaskID: "",
 			wantAction: "",
 		},
 		{
 			name:       "invalid - insufficient parts",
-			path:       "/workflow-api/plans/test-slug/tasks",
+			path:       "/plan-api/plans/test-slug/tasks",
 			wantSlug:   "",
 			wantTaskID: "",
 			wantAction: "",
@@ -388,7 +388,7 @@ func TestHandleGetTask(t *testing.T) {
 			slug := tt.setupFunc(t)
 			c := setupTestComponent(t)
 
-			req := httptest.NewRequest(http.MethodGet, "/workflow-api/plans/"+slug+"/tasks/"+tt.taskID, nil)
+			req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/tasks/"+tt.taskID, nil)
 			w := httptest.NewRecorder()
 
 			c.handleGetTask(w, req, slug, tt.taskID)
@@ -516,7 +516,7 @@ func TestHandleApproveTask(t *testing.T) {
 
 			req := httptest.NewRequest(
 				http.MethodPost,
-				"/workflow-api/plans/"+slug+"/tasks/"+tt.taskID+"/approve",
+				"/plan-api/plans/"+slug+"/tasks/"+tt.taskID+"/approve",
 				bytes.NewBufferString(tt.requestBody),
 			)
 			req.Header.Set("Content-Type", "application/json")
@@ -684,7 +684,7 @@ func TestHandleRejectTask(t *testing.T) {
 
 			req := httptest.NewRequest(
 				http.MethodPost,
-				"/workflow-api/plans/"+slug+"/tasks/"+tt.taskID+"/reject",
+				"/plan-api/plans/"+slug+"/tasks/"+tt.taskID+"/reject",
 				bytes.NewBufferString(tt.requestBody),
 			)
 			req.Header.Set("Content-Type", "application/json")
@@ -850,7 +850,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 			req := httptest.NewRequest(
 				http.MethodPost,
-				"/workflow-api/plans/"+slug+"/tasks",
+				"/plan-api/plans/"+slug+"/tasks",
 				bytes.NewBufferString(tt.requestBody),
 			)
 			req.Header.Set("Content-Type", "application/json")
@@ -1014,7 +1014,7 @@ func TestHandleUpdateTask(t *testing.T) {
 
 			req := httptest.NewRequest(
 				http.MethodPatch,
-				"/workflow-api/plans/"+slug+"/tasks/"+taskID,
+				"/plan-api/plans/"+slug+"/tasks/"+taskID,
 				bytes.NewBufferString(tt.requestBody),
 			)
 			req.Header.Set("Content-Type", "application/json")
@@ -1148,7 +1148,7 @@ func TestHandleDeleteTask(t *testing.T) {
 
 			req := httptest.NewRequest(
 				http.MethodDelete,
-				"/workflow-api/plans/"+slug+"/tasks/"+taskID,
+				"/plan-api/plans/"+slug+"/tasks/"+taskID,
 				nil,
 			)
 			w := httptest.NewRecorder()
@@ -1332,7 +1332,7 @@ func TestHandleUpdatePlan(t *testing.T) {
 
 			req := httptest.NewRequest(
 				http.MethodPatch,
-				"/workflow-api/plans/"+slug,
+				"/plan-api/plans/"+slug,
 				bytes.NewBufferString(tt.requestBody),
 			)
 			req.Header.Set("Content-Type", "application/json")
@@ -1505,7 +1505,7 @@ func TestHandleDeletePlan(t *testing.T) {
 			slug := tt.setupFunc(t)
 			c := setupTestComponent(t)
 
-			url := "/workflow-api/plans/" + slug
+			url := "/plan-api/plans/" + slug
 			if tt.archiveParam != "" {
 				url += "?archive=" + tt.archiveParam
 			}

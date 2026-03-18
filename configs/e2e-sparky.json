@@ -417,8 +417,8 @@
         "platform": "semspec-e2e-sparky"
       }
     },
-    "workflow-api": {
-      "name": "workflow-api",
+    "plan-api": {
+      "name": "plan-api",
       "type": "processor",
       "enabled": true,
       "config": {

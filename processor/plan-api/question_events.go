@@ -1,4 +1,4 @@
-package workflowapi
+package planapi
 
 import (
 	"context"
