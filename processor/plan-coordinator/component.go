@@ -719,7 +719,9 @@ func (c *Component) dispatchPlannersLocked(ctx context.Context, exec *coordinati
 			ProjectID:    exec.ProjectID,
 			TraceID:      exec.TraceID,
 			LoopID:       exec.LoopID,
-			Prompt:       c.buildPlannerPrompt(exec, focus),
+			Prompt:           c.buildPlannerPrompt(exec, focus),
+			Revision:         exec.Iteration > 0,
+			PreviousFindings: exec.ReviewFeedback,
 		}
 
 		// Publish typed request to planner's async subject.
@@ -979,34 +981,54 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 
 	switch verdict {
 	case "approved":
-		// Write approved phase — rules handle status=completed.
-		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseApproved); err != nil {
-			c.logger.Error("Failed to write phase triple", "error", err)
+		if c.config.AutoApprove {
+			// Auto-approve: go directly to approved phase.
+			c.advancePhase(ctx, exec, phaseApproved)
+			c.publishPlanApprovedEvent(ctx, exec, verdict, summary)
+			exec.terminated = true
+			c.coordinationsCompleted.Add(1)
+			c.cleanupExecutionLocked(exec)
+		} else {
+			// Human gate: pause at awaiting_human. A human must call
+			// POST /plans/{slug}/approve to advance to phaseApproved.
+			c.advancePhase(ctx, exec, phaseAwaitingHuman)
+			c.logger.Info("Plan awaiting human approval",
+				"slug", exec.Slug, "iteration", exec.Iteration)
+			// NOTE: execution stays active — cleanup happens when human
+			// approves (via an external event or future HTTP handler).
 		}
-
-		// Publish typed PlanApprovedEvent for workflow-api to update plan file.
-		c.publishPlanApprovedEvent(ctx, exec, verdict, summary)
-
-		exec.terminated = true
-		c.coordinationsCompleted.Add(1)
-		c.cleanupExecutionLocked(exec)
 
 	case "needs_changes":
-		// Write revision_needed — rules check iteration budget and either
-		// reset to planning or escalate.
-		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseRevisionNeeded); err != nil {
-			c.logger.Error("Failed to write phase triple", "error", err)
+		exec.Iteration++
+		exec.ReviewFeedback = summary
+		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Iteration, exec.Iteration)
+
+		if exec.Iteration >= c.config.MaxReviewIterations {
+			c.logger.Warn("Review budget exhausted, escalating",
+				"slug", exec.Slug,
+				"iteration", exec.Iteration,
+				"max", c.config.MaxReviewIterations,
+			)
+			c.advancePhase(ctx, exec, phaseEscalated)
+			exec.terminated = true
+			c.coordinationsFailed.Add(1)
+			c.cleanupExecutionLocked(exec)
+			return
 		}
-		// TODO: Implement retry loop — increment iteration, re-dispatch planner
-		// with reviewer feedback. For now, escalate.
-		c.logger.Warn("Revision requested but retry loop not yet implemented, escalating",
-			"slug", exec.Slug)
-		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseEscalated); err != nil {
-			c.logger.Error("Failed to write phase triple", "error", err)
-		}
-		exec.terminated = true
-		c.coordinationsFailed.Add(1)
-		c.cleanupExecutionLocked(exec)
+
+		c.logger.Info("Reviewer requested changes, retrying planner",
+			"slug", exec.Slug,
+			"iteration", exec.Iteration,
+			"max", c.config.MaxReviewIterations,
+			"feedback_length", len(summary),
+		)
+
+		// Re-dispatch the planner with reviewer feedback. The full pipeline
+		// (plan → requirements → scenarios → review) runs again.
+		c.advancePhase(ctx, exec, phasePlanning)
+		exec.CompletedResults = make(map[string]*workflow.PlannerResult)
+		exec.PlannerTaskIDs = nil
+		c.dispatchPlannersLocked(ctx, exec)
 
 	default:
 		c.logger.Warn("Unknown reviewer verdict, treating as error",

@@ -29,6 +29,16 @@ type coordinationExecution struct {
 	// Used as a guard against duplicate/stale events from generators.
 	CurrentPhase string
 
+	// Iteration tracks the current review cycle (0-based). Incremented
+	// each time the reviewer returns needs_changes and the planner is
+	// re-dispatched with feedback.
+	Iteration int
+
+	// ReviewFeedback holds the reviewer's summary from the most recent
+	// needs_changes verdict. Passed to the planner as PreviousFindings
+	// on retry.
+	ReviewFeedback string
+
 	// Slug is the plan slug.
 	Slug string
 

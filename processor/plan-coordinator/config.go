@@ -21,6 +21,15 @@ type Config struct {
 	// full focus → plan → synthesize pipeline).
 	TimeoutSeconds int `json:"timeout_seconds" schema:"type:int,description:Timeout per coordination in seconds,category:advanced,default:1800"`
 
+	// MaxReviewIterations is the maximum number of revision cycles before escalating.
+	// Each cycle: planner generates → reviewer evaluates → needs_changes → retry.
+	MaxReviewIterations int `json:"max_review_iterations" schema:"type:int,description:Max review revision cycles before escalation,category:basic,default:3,min:1,max:10"`
+
+	// AutoApprove skips the human approval gate after reviewer approves.
+	// When false, the pipeline pauses at phaseAwaitingHuman until a human
+	// explicitly approves via the HTTP API.
+	AutoApprove bool `json:"auto_approve" schema:"type:bool,description:Skip human approval gate,category:basic,default:true"`
+
 	// Model is the model endpoint name passed through to dispatched planner agents.
 	Model string `json:"model" schema:"type:string,description:Model endpoint name for planner agent tasks,category:basic,default:default"`
 
@@ -127,6 +136,9 @@ func (c Config) withDefaults() Config {
 	d := DefaultConfig()
 	if c.MaxConcurrentPlanners <= 0 {
 		c.MaxConcurrentPlanners = d.MaxConcurrentPlanners
+	}
+	if c.MaxReviewIterations <= 0 {
+		c.MaxReviewIterations = 3
 	}
 	if c.TimeoutSeconds <= 0 {
 		c.TimeoutSeconds = d.TimeoutSeconds
