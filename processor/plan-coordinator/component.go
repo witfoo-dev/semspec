@@ -33,6 +33,7 @@ import (
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
+	"github.com/c360studio/semspec/processor/context-builder/gatherers"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
@@ -383,6 +384,16 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 		c.logger.Error("Slug contains reserved separator", "slug", trigger.Slug, "separator", taskIDSep)
 		c.errors.Add(1)
 		return
+	}
+
+	// Gate on semsource readiness if configured — ensures planners have
+	// full codebase context from source graph before generating.
+	if reg := gatherers.GlobalRegistry(); reg != nil {
+		c.logger.Info("Waiting for semsource readiness", "slug", trigger.Slug)
+		if err := reg.WaitForSemsource(ctx, 120*time.Second); err != nil {
+			c.logger.Warn("Semsource not ready, proceeding with local graph only",
+				"error", err, "slug", trigger.Slug)
+		}
 	}
 
 	entityID := fmt.Sprintf("local.semspec.workflow.plan.execution.%s", trigger.Slug)

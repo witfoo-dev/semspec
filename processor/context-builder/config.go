@@ -60,11 +60,6 @@ type Config struct {
 	// AnswerersConfigPath is the path to the answerers.yaml configuration file.
 	AnswerersConfigPath string `json:"answerers_config_path" schema:"type:string,description:Path to answerers.yaml for question routing,category:advanced,default:configs/answerers.yaml"`
 
-	// SemsourceURL is the base URL for a semsource instance providing source graph data.
-	// When set, the context-builder uses federated graph queries (local + semsource).
-	// When empty, operates in local-only mode.
-	SemsourceURL string `json:"semsource_url,omitempty" schema:"type:string,description:SemSource base URL for federated graph queries,category:basic"`
-
 	// GraphReadinessBudget is the maximum time to wait for the graph pipeline to become
 	// ready on the first context build request. Uses time.ParseDuration format (e.g. "15s").
 	// The probe exercises the full NATS request-reply path (not just HTTP).

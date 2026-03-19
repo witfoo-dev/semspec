@@ -41,14 +41,8 @@ type Builder struct {
 // NewBuilder creates a new context builder.
 func NewBuilder(config Config, modelRegistry *model.Registry, logger *slog.Logger) *Builder {
 	var g *strategies.Gatherers
-	if config.SemsourceURL != "" {
+	if reg := gatherers.GlobalRegistry(); reg != nil && reg.SemsourceConfigured() {
 		// Federated mode: query local graph + semsource instances.
-		reg := gatherers.NewGraphRegistry(gatherers.GraphRegistryConfig{
-			LocalURL:     config.GraphGatewayURL,
-			SemsourceURL: config.SemsourceURL,
-			Logger:       logger,
-		})
-		reg.Start(context.Background())
 		g = strategies.NewFederatedGatherers(reg, config.RepoPath, config.SOPEntityPrefix, logger)
 	} else {
 		// Local-only mode.

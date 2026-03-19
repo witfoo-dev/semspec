@@ -202,6 +202,11 @@ func (r *GraphRegistry) WaitForSemsource(ctx context.Context, budget time.Durati
 	}
 }
 
+// SemsourceConfigured returns true if a semsource URL is configured.
+func (r *GraphRegistry) SemsourceConfigured() bool {
+	return r.semsourceURL != ""
+}
+
 // QueryTimeout returns the configured per-source query timeout.
 func (r *GraphRegistry) QueryTimeout() time.Duration {
 	return r.queryTimeout

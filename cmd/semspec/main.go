@@ -27,6 +27,7 @@ import (
 
 	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/processor/context-builder/gatherers"
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	changeproposalhandler "github.com/c360studio/semspec/processor/change-proposal-handler"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
@@ -384,9 +385,37 @@ func loadConfigWithEnvSubstitution(configPath string) (*config.Config, error) {
 		slog.Warn("Failed to load model_registry from config, using defaults", "error", err)
 	}
 
+	// Initialize global graph registry for federated graph queries.
+	// Components use gatherers.GlobalRegistry() to access it.
+	initGraphRegistry()
+
 	// Load using semstreams loader (preserves defaults, validation, env overrides)
 	loader := config.NewLoader()
 	return loader.LoadFromBytes([]byte(expanded))
+}
+
+// initGraphRegistry initializes the global graph source registry from environment.
+// SEMSOURCE_URL enables federated graph queries; empty means local-only.
+func initGraphRegistry() {
+	semsourceURL := os.Getenv("SEMSOURCE_URL")
+	graphGatewayURL := os.Getenv("GRAPH_GATEWAY_URL")
+	if graphGatewayURL == "" {
+		graphGatewayURL = "http://localhost:8082"
+	}
+
+	reg := gatherers.NewGraphRegistry(gatherers.GraphRegistryConfig{
+		LocalURL:     graphGatewayURL,
+		SemsourceURL: semsourceURL,
+	})
+	gatherers.SetGlobalRegistry(reg)
+
+	if semsourceURL != "" {
+		slog.Info("Graph registry initialized with semsource",
+			"local", graphGatewayURL, "semsource", semsourceURL)
+		reg.Start(context.Background())
+	} else {
+		slog.Info("Graph registry initialized (local-only)", "local", graphGatewayURL)
+	}
 }
 
 // initModelRegistryFromConfig loads model_registry section from config JSON and

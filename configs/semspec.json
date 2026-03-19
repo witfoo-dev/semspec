@@ -371,7 +371,6 @@
         "output_subject_prefix": "context.built",
         "default_token_budget": 32000,
         "graph_gateway_url": "http://localhost:8082",
-        "semsource_url": "${SEMSOURCE_URL:-}",
         "default_capability": "reviewing",
         "sop_entity_prefix": "c360.semspec.source.doc",
         "response_bucket_name": "CONTEXT_RESPONSES",
