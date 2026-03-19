@@ -75,7 +75,7 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{
 		{
 			Name:        "workflow_query_graph",
-			Description: "Query the semantic knowledge graph using GraphQL. Results are capped at 100KB — use specific predicates and limits for best results. The graph contains indexed code entities (functions, types, interfaces), their relationships (calls, implements, imports), and workflow entities (plans, specs).",
+			Description: "Query the semantic knowledge graph using GraphQL. Broad queries (>50 results) return auto-summarized community summaries + entity IDs — drill into specific entities by ID if needed. The graph contains indexed code entities (functions, types, interfaces), their relationships (calls, implements, imports), and workflow entities (plans, specs).",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
