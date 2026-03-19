@@ -80,7 +80,8 @@ func TestIntegration_StartStop(t *testing.T) {
 // TestIntegration_TriggerCreatesExecution verifies the end-to-end trigger path:
 // publishing a valid TriggerPayload to the execution trigger subject causes the
 // component to register an active execution, publish entity triples to
-// graph.mutation.triple.add, and dispatch a developer task to dev.task.development.
+// graph.mutation.triple.add, and dispatch a tester task to agent.task.testing
+// (TDD red phase: write failing tests first).
 func TestIntegration_TriggerCreatesExecution(t *testing.T) {
 	tc := natsclient.NewTestClient(t,
 		natsclient.WithStreams(
@@ -109,18 +110,19 @@ func TestIntegration_TriggerCreatesExecution(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
 
-	// Subscribe to dev.task.development before publishing so no messages are missed.
-	devTasks := make(chan []byte, 10)
+	// Subscribe to agent.task.testing before publishing so no messages are missed.
+	// The TDD pipeline starts with the tester (red phase), not the developer.
+	testerTasks := make(chan []byte, 10)
 	nativeConn := tc.GetNativeConnection()
-	devSub, err := nativeConn.Subscribe("dev.task.development", func(msg *nats.Msg) {
+	testerSub, err := nativeConn.Subscribe("agent.task.testing", func(msg *nats.Msg) {
 		data := make([]byte, len(msg.Data))
 		copy(data, msg.Data)
-		devTasks <- data
+		testerTasks <- data
 	})
 	if err != nil {
-		t.Fatalf("Subscribe(dev.task.development) error = %v", err)
+		t.Fatalf("Subscribe(agent.task.testing) error = %v", err)
 	}
-	t.Cleanup(func() { _ = devSub.Unsubscribe() })
+	t.Cleanup(func() { _ = testerSub.Unsubscribe() })
 
 	// Subscribe to graph.mutation.triple.add for entity triple publishing.
 	triples := make(chan []byte, 20)
@@ -144,10 +146,11 @@ func TestIntegration_TriggerCreatesExecution(t *testing.T) {
 	}
 	publishExecTrigger(t, tc, ctx, trigger)
 
-	// Verify: a developer task message appears on dev.task.development.
-	devMsgs := collectMessagesFrom(ctx, t, devTasks, 1, 15*time.Second)
-	if len(devMsgs) == 0 {
-		t.Fatal("expected at least one developer task message on dev.task.development")
+	// Verify: a tester task message appears on agent.task.testing.
+	// The TDD pipeline dispatches tester first (red phase: write failing tests).
+	testerMsgs := collectMessagesFrom(ctx, t, testerTasks, 1, 15*time.Second)
+	if len(testerMsgs) == 0 {
+		t.Fatal("expected at least one tester task message on agent.task.testing")
 	}
 
 	// Verify: at least one entity triple was published.
