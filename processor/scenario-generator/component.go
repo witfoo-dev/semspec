@@ -599,14 +599,26 @@ func (c *Component) callLLMWithRetry(ctx context.Context, systemPrompt, userProm
 // parseScenariosFromResponse extracts and validates scenario JSON from the LLM
 // response, then assigns IDs based on the slug and requirement ID.
 func (c *Component) parseScenariosFromResponse(content, slug, requirementID string) ([]workflow.Scenario, error) {
-	jsonContent := llm.ExtractJSON(content)
+	// Try array extraction first, then fall back to object extraction.
+	jsonContent := llm.ExtractJSONArray(content)
+	if jsonContent == "" {
+		jsonContent = llm.ExtractJSON(content)
+	}
 	if jsonContent == "" {
 		return nil, fmt.Errorf("no JSON found in response")
 	}
 
 	var raw []llmScenario
 	if err := json.Unmarshal([]byte(jsonContent), &raw); err != nil {
-		return nil, fmt.Errorf("parse JSON: %w (content: %s)", err, jsonContent[:min(200, len(jsonContent))])
+		// Try unwrapping from an object with a "scenarios" key.
+		var wrapper struct {
+			Scenarios []llmScenario `json:"scenarios"`
+		}
+		if wrapErr := json.Unmarshal([]byte(jsonContent), &wrapper); wrapErr == nil && len(wrapper.Scenarios) > 0 {
+			raw = wrapper.Scenarios
+		} else {
+			return nil, fmt.Errorf("parse JSON: %w (content: %s)", err, jsonContent[:min(200, len(jsonContent))])
+		}
 	}
 
 	if len(raw) < 2 {

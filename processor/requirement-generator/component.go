@@ -523,14 +523,27 @@ func (c *Component) generateFromMessages(ctx context.Context, systemPrompt, user
 // parseRequirementsFromResponse extracts a JSON array of requirement items
 // from the LLM response, tolerating markdown code fences.
 func parseRequirementsFromResponse(content string) ([]requirementItem, error) {
-	jsonContent := llm.ExtractJSON(content)
+	// Try array extraction first (LLM may return [...] directly),
+	// then fall back to object extraction (LLM may wrap in {requirements: [...]}).
+	jsonContent := llm.ExtractJSONArray(content)
+	if jsonContent == "" {
+		jsonContent = llm.ExtractJSON(content)
+	}
 	if jsonContent == "" {
 		return nil, fmt.Errorf("no JSON found in response")
 	}
 
 	var items []requirementItem
 	if err := json.Unmarshal([]byte(jsonContent), &items); err != nil {
-		return nil, fmt.Errorf("parse JSON array: %w (content: %s)", err, jsonContent[:min(200, len(jsonContent))])
+		// Try unwrapping from an object with a "requirements" key.
+		var wrapper struct {
+			Requirements []requirementItem `json:"requirements"`
+		}
+		if wrapErr := json.Unmarshal([]byte(jsonContent), &wrapper); wrapErr == nil && len(wrapper.Requirements) > 0 {
+			items = wrapper.Requirements
+		} else {
+			return nil, fmt.Errorf("parse JSON array: %w (content: %s)", err, jsonContent[:min(200, len(jsonContent))])
+		}
 	}
 
 	if len(items) == 0 {
