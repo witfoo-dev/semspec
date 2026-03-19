@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/processor/context-builder/gatherers"
 	"github.com/c360studio/semspec/processor/context-builder/strategies"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/answerer"
@@ -39,11 +40,20 @@ type Builder struct {
 
 // NewBuilder creates a new context builder.
 func NewBuilder(config Config, modelRegistry *model.Registry, logger *slog.Logger) *Builder {
-	gatherers := strategies.NewGatherers(
-		config.GraphGatewayURL,
-		config.RepoPath,
-		config.SOPEntityPrefix,
-	)
+	var g *strategies.Gatherers
+	if config.SemsourceURL != "" {
+		// Federated mode: query local graph + semsource instances.
+		reg := gatherers.NewGraphRegistry(gatherers.GraphRegistryConfig{
+			LocalURL:     config.GraphGatewayURL,
+			SemsourceURL: config.SemsourceURL,
+			Logger:       logger,
+		})
+		reg.Start(context.Background())
+		g = strategies.NewFederatedGatherers(reg, config.RepoPath, config.SOPEntityPrefix, logger)
+	} else {
+		// Local-only mode.
+		g = strategies.NewGatherers(config.GraphGatewayURL, config.RepoPath, config.SOPEntityPrefix)
+	}
 
 	// Parse graph readiness budget (default 15s)
 	graphBudget := 15 * time.Second
@@ -64,8 +74,8 @@ func NewBuilder(config Config, modelRegistry *model.Registry, logger *slog.Logge
 	}
 
 	return &Builder{
-		gatherers:       gatherers,
-		strategyFactory: strategies.NewStrategyFactory(gatherers, logger),
+		gatherers:       g,
+		strategyFactory: strategies.NewStrategyFactory(g, logger),
 		calculator:      calculator,
 		modelRegistry:   modelRegistry,
 		logger:          logger,
