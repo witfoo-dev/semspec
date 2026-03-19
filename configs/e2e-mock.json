@@ -554,6 +554,28 @@
         "repo_path": "/workspace"
       }
     },
+    "scenario-orchestrator": {
+      "name": "scenario-orchestrator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "scenario-orchestrator",
+        "trigger_subject": "scenario.orchestrate.*",
+        "workflow_trigger_subject": "workflow.trigger.scenario-execution-loop",
+        "execution_timeout": "120s"
+      }
+    },
+    "scenario-executor": {
+      "name": "scenario-executor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "timeout_seconds": 600,
+        "model": "mock-coder",
+        "sandbox_url": "http://sandbox:8090"
+      }
+    },
     "structural-validator": {
       "name": "structural-validator",
       "type": "processor",
@@ -828,7 +850,8 @@
         "tasks.request.>",
         "approve.request.>",
         "archive.request.>",
-        "github.request.>"
+        "github.request.>",
+        "scenario.orchestrate.>"
       ],
       "max_age": "24h",
       "storage": "memory",

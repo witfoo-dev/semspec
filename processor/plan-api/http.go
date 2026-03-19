@@ -1058,38 +1058,35 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 		return
 	}
 
-	// Trigger batch task dispatcher
+	// Trigger scenario orchestration for execution.
 	requestID := uuid.New().String()
-	batchID := uuid.New().String()
+	subject := fmt.Sprintf("scenario.orchestrate.%s", plan.Slug)
 
-	triggerPayload := &payloads.TaskDispatchRequest{
-		RequestID: requestID,
-		Slug:      plan.Slug,
-		BatchID:   batchID,
+	trigger := struct {
+		PlanSlug string `json:"plan_slug"`
+		TraceID  string `json:"trace_id,omitempty"`
+	}{
+		PlanSlug: plan.Slug,
+		TraceID:  tc.TraceID,
 	}
 
-	baseMsg := message.NewBaseMessage(
-		payloads.TaskDispatchRequestType,
-		triggerPayload,
-		"plan-api",
-	)
-	data, err := json.Marshal(baseMsg)
+	data, err := json.Marshal(trigger)
 	if err != nil {
-		c.logger.Error("Failed to marshal batch trigger", "error", err)
+		c.logger.Error("Failed to marshal execution trigger", "error", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
 
-	if err := c.natsClient.PublishToStream(ctx, "workflow.trigger.task-dispatcher", data); err != nil {
-		c.logger.Error("Failed to publish batch trigger", "error", err)
+	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
+		c.logger.Error("Failed to trigger execution", "error", err)
 		http.Error(w, "Failed to start execution", http.StatusInternalServerError)
 		return
 	}
 
-	c.logger.Info("Triggered plan execution via REST API",
+	c.logger.Info("Triggered scenario execution via REST API",
 		"request_id", requestID,
-		"batch_id", batchID,
 		"slug", plan.Slug,
+		"subject", subject,
 		"trace_id", tc.TraceID)
 
 	resp := &PlanWithStatus{

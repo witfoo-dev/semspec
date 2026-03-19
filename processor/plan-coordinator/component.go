@@ -1010,9 +1010,10 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 	switch verdict {
 	case "approved":
 		if c.config.AutoApprove {
-			// Auto-approve: go directly to approved phase.
+			// Auto-approve: go directly to approved phase + trigger execution.
 			c.advancePhase(ctx, exec, phaseApproved)
 			c.publishPlanApprovedEvent(ctx, exec, verdict, summary)
+			c.triggerExecution(ctx, exec)
 			exec.terminated = true
 			c.coordinationsCompleted.Add(1)
 			c.cleanupExecutionLocked(exec)
@@ -1119,6 +1120,37 @@ func (c *Component) publishPlanApprovedEvent(ctx context.Context, exec *coordina
 	}
 
 	c.logger.Info("Published PlanApprovedEvent",
+		"slug", exec.Slug, "subject", subject)
+}
+
+// triggerExecution publishes a scenario orchestration trigger to start the
+// execution phase. The scenario-orchestrator picks this up and dispatches
+// per-scenario execution.
+func (c *Component) triggerExecution(ctx context.Context, exec *coordinationExecution) {
+	subject := fmt.Sprintf("scenario.orchestrate.%s", exec.Slug)
+
+	// Lightweight trigger — scenario-orchestrator loads scenarios from disk.
+	trigger := struct {
+		PlanSlug string `json:"plan_slug"`
+		TraceID  string `json:"trace_id,omitempty"`
+	}{
+		PlanSlug: exec.Slug,
+		TraceID:  exec.TraceID,
+	}
+
+	data, err := json.Marshal(trigger)
+	if err != nil {
+		c.logger.Error("Failed to marshal execution trigger", "error", err)
+		return
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
+		c.logger.Error("Failed to trigger execution",
+			"subject", subject, "slug", exec.Slug, "error", err)
+		return
+	}
+
+	c.logger.Info("Triggered execution phase",
 		"slug", exec.Slug, "subject", subject)
 }
 
