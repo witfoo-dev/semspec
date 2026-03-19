@@ -841,6 +841,11 @@ test/e2e/
 | NATS JetStream | 4222 | 4322 | Messaging |
 | NATS Monitoring | 8222 | 8322 | HTTP monitoring |
 | Semspec HTTP | 8080 | 8180 | Gateway / API (includes graph-gateway at /graph-gateway) |
+| SemSource | internal | internal | Source graph indexing (AST, git, docs, config) — shared NATS |
 | Sandbox | 8090 | 8190 | Code execution |
 | Mock LLM | — | 11535 | Deterministic test fixtures |
 | Ollama (native) | 11434 | — | LLM inference |
+
+SemSource watches the workspace and publishes entities to `graph.ingest.entity` on the shared NATS.
+Graph-ingest processes these into ENTITY_STATES, making them queryable via graph-gateway.
+Set `SEMSOURCE_URL=http://semsource:8080` for readiness gating (plan-coordinator waits for initial ingest).

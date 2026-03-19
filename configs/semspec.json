@@ -520,8 +520,16 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "rules_files": ["configs/rules/semspec-review/handle-approved.json", "configs/rules/semspec-review/handle-escalated.json", "configs/rules/semspec-review/handle-error.json"],
-        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.*-review.execution.*"]},
+        "rules_files": [
+          "configs/rules/semspec-review/handle-approved.json",
+          "configs/rules/semspec-review/handle-escalated.json",
+          "configs/rules/semspec-review/handle-error.json"
+        ],
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "local.semspec.workflow.*-review.execution.*"
+          ]
+        },
         "entity": {
           "pattern": "local.semspec.workflow.*-review.execution.*",
           "watch_buckets": [
@@ -606,8 +614,16 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "rules_files": ["configs/rules/semspec-task-execution/handle-approved.json", "configs/rules/semspec-task-execution/handle-escalated.json", "configs/rules/semspec-task-execution/handle-error.json"],
-        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.task-execution.execution.*"]},
+        "rules_files": [
+          "configs/rules/semspec-task-execution/handle-approved.json",
+          "configs/rules/semspec-task-execution/handle-escalated.json",
+          "configs/rules/semspec-task-execution/handle-error.json"
+        ],
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "local.semspec.workflow.task-execution.execution.*"
+          ]
+        },
         "entity": {
           "pattern": "local.semspec.workflow.task-execution.execution.*",
           "watch_buckets": [
@@ -643,8 +659,14 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "rules_files": ["configs/rules/semspec-coordination/handle-completed.json"],
-        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.coordination.execution.*"]},
+        "rules_files": [
+          "configs/rules/semspec-coordination/handle-completed.json"
+        ],
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "local.semspec.workflow.coordination.execution.*"
+          ]
+        },
         "entity": {
           "pattern": "local.semspec.workflow.coordination.execution.*",
           "watch_buckets": [
@@ -796,8 +818,16 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "rules_files": ["configs/rules/semspec-scenario-execution/handle-completed.json", "configs/rules/semspec-scenario-execution/handle-error.json", "configs/rules/semspec-scenario-execution/handle-failed.json"],
-        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.scenario-execution.execution.*"]},
+        "rules_files": [
+          "configs/rules/semspec-scenario-execution/handle-completed.json",
+          "configs/rules/semspec-scenario-execution/handle-error.json",
+          "configs/rules/semspec-scenario-execution/handle-failed.json"
+        ],
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "local.semspec.workflow.scenario-execution.execution.*"
+          ]
+        },
         "entity": {
           "pattern": "local.semspec.workflow.scenario-execution.execution.*",
           "watch_buckets": [
@@ -927,26 +957,38 @@
       "enabled": true,
       "config": {
         "ports": {
-          "inputs": [{
-            "name": "entity_watch",
-            "subject": "ENTITY_STATES",
-            "type": "kv-watch"
-          }],
-          "outputs": [{
-            "name": "embeddings",
-            "subject": "EMBEDDINGS_CACHE",
-            "type": "kv"
-          }]
+          "inputs": [
+            {
+              "name": "entity_watch",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "embeddings",
+              "subject": "EMBEDDINGS_CACHE",
+              "type": "kv"
+            }
+          ]
         },
         "embedder_type": "${EMBED_TYPE:-bm25}",
         "batch_size": 50,
         "cache_ttl": "1h",
         "coalesce_ms": 200,
         "text_suffixes": [
-          ".content", ".summary", ".description",
-          ".title", ".name", ".goal", ".context",
-          ".issue", ".suggestion", ".source_code",
-          ".signature", ".body"
+          ".content",
+          ".summary",
+          ".description",
+          ".title",
+          ".name",
+          ".goal",
+          ".context",
+          ".issue",
+          ".suggestion",
+          ".source_code",
+          ".signature",
+          ".body"
         ]
       }
     },
@@ -1052,6 +1094,10 @@
     "GRAPH": {
       "subjects": [
         "graph.ingest.entity",
+        "graph.ingest.batch",
+        "graph.ingest.manifest",
+        "graph.ingest.status",
+        "graph.ingest.predicates",
         "graph.export.>"
       ],
       "max_age": "24h",

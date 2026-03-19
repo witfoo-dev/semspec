@@ -359,26 +359,38 @@
       "enabled": true,
       "config": {
         "ports": {
-          "inputs": [{
-            "name": "entity_watch",
-            "subject": "ENTITY_STATES",
-            "type": "kv-watch"
-          }],
-          "outputs": [{
-            "name": "embeddings",
-            "subject": "EMBEDDINGS_CACHE",
-            "type": "kv"
-          }]
+          "inputs": [
+            {
+              "name": "entity_watch",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "embeddings",
+              "subject": "EMBEDDINGS_CACHE",
+              "type": "kv"
+            }
+          ]
         },
         "embedder_type": "bm25",
         "batch_size": 50,
         "cache_ttl": "1h",
         "coalesce_ms": 200,
         "text_suffixes": [
-          ".content", ".summary", ".description",
-          ".title", ".name", ".goal", ".context",
-          ".issue", ".suggestion", ".source_code",
-          ".signature", ".body"
+          ".content",
+          ".summary",
+          ".description",
+          ".title",
+          ".name",
+          ".goal",
+          ".context",
+          ".issue",
+          ".suggestion",
+          ".source_code",
+          ".signature",
+          ".body"
         ]
       }
     },
@@ -569,17 +581,41 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "rules_files": ["configs/rules/semspec-task-execution/handle-approved.json", "configs/rules/semspec-task-execution/handle-escalated.json", "configs/rules/semspec-task-execution/handle-error.json"],
-        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.task-execution.execution.*"]},
+        "rules_files": [
+          "configs/rules/semspec-task-execution/handle-approved.json",
+          "configs/rules/semspec-task-execution/handle-escalated.json",
+          "configs/rules/semspec-task-execution/handle-error.json"
+        ],
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "local.semspec.workflow.task-execution.execution.*"
+          ]
+        },
         "entity": {
           "pattern": "local.semspec.workflow.task-execution.execution.*",
-          "watch_buckets": ["ENTITY_STATES"]
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
         },
         "ports": {
-          "inputs": [{"name": "entity_states", "subject": "ENTITY_STATES", "type": "kv-watch"}],
+          "inputs": [
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
           "outputs": [
-            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
-            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
+            }
           ]
         }
       }
@@ -589,17 +625,39 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "rules_files": ["configs/rules/semspec-coordination/handle-completed.json"],
-        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.coordination.execution.*"]},
+        "rules_files": [
+          "configs/rules/semspec-coordination/handle-completed.json"
+        ],
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "local.semspec.workflow.coordination.execution.*"
+          ]
+        },
         "entity": {
           "pattern": "local.semspec.workflow.coordination.execution.*",
-          "watch_buckets": ["ENTITY_STATES"]
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
         },
         "ports": {
-          "inputs": [{"name": "entity_states", "subject": "ENTITY_STATES", "type": "kv-watch"}],
+          "inputs": [
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
           "outputs": [
-            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
-            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
+            }
           ]
         }
       }
@@ -614,16 +672,36 @@
           "configs/rules/semspec-plan/handle-escalated.json",
           "configs/rules/semspec-plan/handle-error.json"
         ],
-        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.plan.execution.*"]},
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "local.semspec.workflow.plan.execution.*"
+          ]
+        },
         "entity": {
           "pattern": "local.semspec.workflow.plan.execution.*",
-          "watch_buckets": ["ENTITY_STATES"]
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
         },
         "ports": {
-          "inputs": [{"name": "entity_states", "subject": "ENTITY_STATES", "type": "kv-watch"}],
+          "inputs": [
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
           "outputs": [
-            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
-            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
+            }
           ]
         }
       }
@@ -633,17 +711,41 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "rules_files": ["configs/rules/semspec-scenario-execution/handle-completed.json", "configs/rules/semspec-scenario-execution/handle-error.json", "configs/rules/semspec-scenario-execution/handle-failed.json"],
-        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.scenario-execution.execution.*"]},
+        "rules_files": [
+          "configs/rules/semspec-scenario-execution/handle-completed.json",
+          "configs/rules/semspec-scenario-execution/handle-error.json",
+          "configs/rules/semspec-scenario-execution/handle-failed.json"
+        ],
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "local.semspec.workflow.scenario-execution.execution.*"
+          ]
+        },
         "entity": {
           "pattern": "local.semspec.workflow.scenario-execution.execution.*",
-          "watch_buckets": ["ENTITY_STATES"]
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
         },
         "ports": {
-          "inputs": [{"name": "entity_states", "subject": "ENTITY_STATES", "type": "kv-watch"}],
+          "inputs": [
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
           "outputs": [
-            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
-            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
+            }
           ]
         }
       }
@@ -687,6 +789,10 @@
     "GRAPH": {
       "subjects": [
         "graph.ingest.entity",
+        "graph.ingest.batch",
+        "graph.ingest.manifest",
+        "graph.ingest.status",
+        "graph.ingest.predicates",
         "graph.export.>"
       ],
       "max_age": "24h",

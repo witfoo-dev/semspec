@@ -6,7 +6,9 @@
     "environment": "dev"
   },
   "nats": {
-    "urls": ["nats://localhost:4222"],
+    "urls": [
+      "nats://localhost:4222"
+    ],
     "max_reconnects": -1,
     "reconnect_wait": "2s",
     "jetstream": {

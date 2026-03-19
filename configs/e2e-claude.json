@@ -567,6 +567,10 @@
     "GRAPH": {
       "subjects": [
         "graph.ingest.entity",
+        "graph.ingest.batch",
+        "graph.ingest.manifest",
+        "graph.ingest.status",
+        "graph.ingest.predicates",
         "graph.export.>"
       ],
       "max_age": "24h",

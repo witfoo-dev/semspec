@@ -14,6 +14,25 @@ services:
       retries: 5
       start_period: 5s
 
+  semsource:
+    image: ghcr.io/c360studio/semsource:latest
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SEMSOURCE_WS_BIND=0.0.0.0:7890
+      - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ../../docker/semsource.json:/etc/semsource/semsource.json:ro
+      - ../../test/e2e/workspace:/workspace:ro
+    command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
+    healthcheck:
+      test: ["CMD", "semsource", "version"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
   semspec:
     build:
       context: ../..
@@ -22,17 +41,19 @@ services:
       - "8180:8080"
       # graph-gateway registers handlers with the service manager at /graph-gateway/*
       # standalone :8082 is for unit test support only, not needed in e2e
-    # Use production config (semspec.json) with Docker-aware env var overrides
     command: ["--config", "/app/configs/e2e.json", "--repo", "/workspace", "--log-level", "${LOG_LEVEL:-info}"]
     environment:
       - NATS_URL=nats://nats:4222
       - SEMSPEC_REPO_PATH=/workspace
       - LLM_API_URL=http://host.docker.internal:11434
       - SANDBOX_URL=http://sandbox:8090
+      - SEMSOURCE_URL=http://semsource:8080
     volumes:
       - ../../test/e2e/workspace:/workspace
     depends_on:
       nats:
+        condition: service_healthy
+      semsource:
         condition: service_healthy
     healthcheck:
       # Internal port stays 8080, external mapping is 8180

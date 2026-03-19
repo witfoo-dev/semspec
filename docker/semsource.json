@@ -1,0 +1,11 @@
+{
+  "namespace": "semspec",
+  "sources": [
+    {
+      "type": "repo",
+      "path": "/workspace",
+      "branch": "main",
+      "watch": true
+    }
+  ]
+}

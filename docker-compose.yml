@@ -18,6 +18,25 @@ services:
       timeout: 3s
       retries: 3
 
+  semsource:
+    image: ghcr.io/c360studio/semsource:latest
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SEMSOURCE_WS_BIND=0.0.0.0:7890
+      - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ./docker/semsource.json:/etc/semsource/semsource.json:ro
+      - ${SEMSPEC_REPO:-.}:/workspace:ro
+    command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
+    healthcheck:
+      test: ["CMD", "semsource", "version"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
   sandbox:
     build:
       context: .
@@ -35,11 +54,14 @@ services:
     depends_on:
       nats:
         condition: service_healthy
+      semsource:
+        condition: service_healthy
       sandbox:
         condition: service_healthy
     environment:
       - NATS_URL=nats://nats:4222
       - SANDBOX_URL=http://sandbox:8090
+      - SEMSOURCE_URL=http://semsource:8080
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     healthcheck:
