@@ -59,7 +59,7 @@ func NewTeamRosterScenario(cfg *config.Config) *TeamRosterScenario {
 }
 
 func (s *TeamRosterScenario) Name() string        { return s.name }
-func (s *TeamRosterScenario) Description() string  { return s.description }
+func (s *TeamRosterScenario) Description() string { return s.description }
 
 func (s *TeamRosterScenario) Setup(ctx context.Context) error {
 	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
@@ -180,8 +180,8 @@ func (s *TeamRosterScenario) stageVerifyTeamMembersLinked(ctx context.Context, r
 
 	// Gather member counts per team and warn on any missing agents.
 	type teamSummary struct {
-		MemberCount        int
-		MissingAgentCount  int
+		MemberCount       int
+		MissingAgentCount int
 	}
 	summaries := make(map[string]teamSummary)
 	teamsWithNoMembers := 0

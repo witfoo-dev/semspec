@@ -437,8 +437,8 @@ func TestTeam_ShouldBench(t *testing.T) {
 		{
 			name: "multiple categories, one at threshold",
 			errorCounts: map[ErrorCategory]int{
-				"missing_tests":  1,
-				"wrong_pattern":  DefaultBenchingThreshold,
+				"missing_tests":   1,
+				"wrong_pattern":   DefaultBenchingThreshold,
 				"scope_violation": 2,
 			},
 			threshold: DefaultBenchingThreshold,

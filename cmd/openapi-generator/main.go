@@ -21,13 +21,13 @@ import (
 	// Import all semspec component packages to register their schemas
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	"github.com/c360studio/semspec/processor/constitution"
+	planapi "github.com/c360studio/semspec/processor/plan-api"
 	projectapi "github.com/c360studio/semspec/processor/project-api"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
-	planapi "github.com/c360studio/semspec/processor/plan-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 
 	"github.com/c360studio/semstreams/component"

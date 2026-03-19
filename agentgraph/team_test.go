@@ -261,15 +261,15 @@ func TestHelper_SelectBlueTeam_TieBreakByHighestScore(t *testing.T) {
 
 	// Both teams have 2 total errors; higher OverallAvg wins.
 	teamA := &workflow.Team{
-		ID:     "teamA",
-		Name:   "Team A",
-		Status: workflow.TeamActive,
+		ID:          "teamA",
+		Name:        "Team A",
+		Status:      workflow.TeamActive,
 		ErrorCounts: map[workflow.ErrorCategory]int{"cat1": 2},
 	}
 	teamB := &workflow.Team{
-		ID:     "teamB",
-		Name:   "Team B",
-		Status: workflow.TeamActive,
+		ID:          "teamB",
+		Name:        "Team B",
+		Status:      workflow.TeamActive,
 		ErrorCounts: map[workflow.ErrorCategory]int{"cat1": 2},
 	}
 

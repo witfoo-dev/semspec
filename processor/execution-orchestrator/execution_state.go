@@ -53,9 +53,9 @@ type taskExecution struct {
 
 	// --- Tester output (populated after tester completes) ---
 
-	TesterTaskID  string
-	TesterOutput  json.RawMessage
-	TestsPassed   bool
+	TesterTaskID string
+	TesterOutput json.RawMessage
+	TestsPassed  bool
 
 	// --- Builder output (populated after builder completes) ---
 

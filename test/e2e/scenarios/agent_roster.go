@@ -38,7 +38,7 @@ func NewAgentRosterScenario(cfg *config.Config) *AgentRosterScenario {
 }
 
 func (s *AgentRosterScenario) Name() string        { return s.name }
-func (s *AgentRosterScenario) Description() string  { return s.description }
+func (s *AgentRosterScenario) Description() string { return s.description }
 
 func (s *AgentRosterScenario) Setup(ctx context.Context) error {
 	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)

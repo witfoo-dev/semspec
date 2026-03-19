@@ -16,7 +16,6 @@ import (
 	"github.com/google/uuid"
 )
 
-
 // maxResponseSize limits the LLM response body to prevent memory exhaustion.
 const maxResponseSize = 10 * 1024 * 1024 // 10MB
 

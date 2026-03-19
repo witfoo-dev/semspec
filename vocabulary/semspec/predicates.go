@@ -2077,23 +2077,23 @@ const (
 // Team entities group agents, accumulate aggregated review scores, shared knowledge
 // insights, and red-team assessment statistics across collaborative task executions.
 const (
-	PredicateTeamName        = "team.identity.name"
-	PredicateTeamState       = "team.status.state"
-	PredicateTeamMember      = "team.member.agent_id"
-	PredicateTeamInsight     = "team.knowledge.insight"
-	PredicateTeamQ1Avg       = "team.review.q1_avg"
-	PredicateTeamQ2Avg       = "team.review.q2_avg"
-	PredicateTeamQ3Avg       = "team.review.q3_avg"
-	PredicateTeamOverallAvg  = "team.review.overall_avg"
-	PredicateTeamReviewCount = "team.review.count"
+	PredicateTeamName           = "team.identity.name"
+	PredicateTeamState          = "team.status.state"
+	PredicateTeamMember         = "team.member.agent_id"
+	PredicateTeamInsight        = "team.knowledge.insight"
+	PredicateTeamQ1Avg          = "team.review.q1_avg"
+	PredicateTeamQ2Avg          = "team.review.q2_avg"
+	PredicateTeamQ3Avg          = "team.review.q3_avg"
+	PredicateTeamOverallAvg     = "team.review.overall_avg"
+	PredicateTeamReviewCount    = "team.review.count"
 	PredicateTeamRedQ1Avg       = "team.redteam.q1_avg"
 	PredicateTeamRedQ2Avg       = "team.redteam.q2_avg"
 	PredicateTeamRedQ3Avg       = "team.redteam.q3_avg"
 	PredicateTeamRedOverallAvg  = "team.redteam.overall_avg"
 	PredicateTeamRedReviewCount = "team.redteam.count"
-	PredicateTeamErrorCounts = "team.error.counts"
-	PredicateTeamCreatedAt   = "team.lifecycle.created_at"
-	PredicateTeamUpdatedAt   = "team.lifecycle.updated_at"
+	PredicateTeamErrorCounts    = "team.error.counts"
+	PredicateTeamCreatedAt      = "team.lifecycle.created_at"
+	PredicateTeamUpdatedAt      = "team.lifecycle.updated_at"
 )
 
 func registerAgenticPredicates() {

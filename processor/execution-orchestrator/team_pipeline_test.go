@@ -464,15 +464,15 @@ func TestTruncateInsight(t *testing.T) {
 			name:   "ASCII over limit truncated with ellipsis",
 			input:  "Hello, World!",
 			maxLen: 8,
-			want:   "Hello..." , // 5 chars + "..."
+			want:   "Hello...", // 5 chars + "..."
 		},
 		{
-			name:   "Multi-byte UTF-8 truncated at rune boundary",
+			name: "Multi-byte UTF-8 truncated at rune boundary",
 			// Each of these is a 2-byte rune (U+00E9 = é, etc.)
 			input:  "café résumé",
 			maxLen: 6,
 			// runes[:3] = "caf" + "..." = "caf..."
-			want:   "caf...",
+			want: "caf...",
 		},
 		{
 			name:   "Multi-byte exactly at limit returns unchanged",

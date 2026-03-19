@@ -96,14 +96,14 @@ const (
 	subjectLoopCompleted = "agentic.loop_completed.v1"
 
 	// Downstream dispatch subjects.
-	subjectTesterTask        = "agent.task.testing"               // NEW: tester writes unit tests
-	subjectBuilderTask       = "dev.task.building"                // NEW: builder implements code
-	subjectDeveloperTask     = "dev.task.development"             // kept for backward compat
+	subjectTesterTask        = "agent.task.testing"   // NEW: tester writes unit tests
+	subjectBuilderTask       = "dev.task.building"    // NEW: builder implements code
+	subjectDeveloperTask     = "dev.task.development" // kept for backward compat
 	subjectValidatorAsync    = "workflow.async.structural-validator"
 	subjectCodeReviewerAsync = "workflow.async.task-code-reviewer"
 
 	// Error category IDs that indicate the tester (not builder) should be retried.
-	errorCategoryMissingTests  = "missing_tests"
+	errorCategoryMissingTests   = "missing_tests"
 	errorCategoryEdgeCaseMissed = "edge_case_missed"
 
 	// Rejection types that are NOT retryable — escalate immediately.

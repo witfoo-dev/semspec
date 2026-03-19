@@ -16,7 +16,7 @@ import (
 type GraphSource struct {
 	Name        string    `json:"name"`
 	URL         string    `json:"url"`
-	Phase       string    `json:"phase"`        // seeding, ready, degraded
+	Phase       string    `json:"phase"` // seeding, ready, degraded
 	EntityCount int       `json:"entity_count"`
 	LastSeen    time.Time `json:"last_seen"`
 	IsLocal     bool      `json:"is_local"`

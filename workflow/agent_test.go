@@ -185,8 +185,8 @@ func TestAgent_ShouldBench(t *testing.T) {
 		{
 			name: "multiple categories, one at threshold",
 			errorCounts: map[ErrorCategory]int{
-				"missing_tests": 1,
-				"wrong_pattern": DefaultBenchingThreshold,
+				"missing_tests":   1,
+				"wrong_pattern":   DefaultBenchingThreshold,
 				"scope_violation": 2,
 			},
 			threshold: DefaultBenchingThreshold,
@@ -233,9 +233,9 @@ func TestAgent_TotalErrorCount(t *testing.T) {
 		{
 			name: "multiple categories summed",
 			errorCounts: map[ErrorCategory]int{
-				"missing_tests":  2,
-				"wrong_pattern":  3,
-				"sop_violation":  1,
+				"missing_tests": 2,
+				"wrong_pattern": 3,
+				"sop_violation": 1,
 			},
 			want: 6,
 		},

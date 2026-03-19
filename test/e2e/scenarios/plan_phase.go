@@ -36,9 +36,11 @@ func NewPlanPhaseScenario(cfg *config.Config) *PlanPhaseScenario {
 	}
 }
 
-func (s *PlanPhaseScenario) Name() string        { return "plan-phase" }
-func (s *PlanPhaseScenario) Description() string  { return "Full plan phase: plan → requirements → scenarios → review → approved" }
-func (s *PlanPhaseScenario) Setup(ctx context.Context) error   { return s.setupWorkspace() }
+func (s *PlanPhaseScenario) Name() string { return "plan-phase" }
+func (s *PlanPhaseScenario) Description() string {
+	return "Full plan phase: plan → requirements → scenarios → review → approved"
+}
+func (s *PlanPhaseScenario) Setup(ctx context.Context) error    { return s.setupWorkspace() }
 func (s *PlanPhaseScenario) Teardown(ctx context.Context) error { return nil }
 
 // Execute runs the scenario stages sequentially.
@@ -99,11 +101,11 @@ func (s *PlanPhaseScenario) Execute(ctx context.Context) (*Result, error) {
 func (s *PlanPhaseScenario) setupWorkspace() error {
 	// Write a minimal Python project for the planner to work with.
 	files := map[string]string{
-		"README.md":              "# Hello World\nA simple Python API project.",
-		"api/app.py":             "from flask import Flask, jsonify\n\napp = Flask(__name__)\n\n@app.route('/hello')\ndef hello():\n    return jsonify(message='Hello, World!')\n",
-		"api/requirements.txt":   "flask==3.0.0\npytest==8.0.0\n",
-		"ui/app.js":              "fetch('/hello').then(r => r.json()).then(d => document.getElementById('msg').textContent = d.message);\n",
-		"ui/index.html":          "<!DOCTYPE html><html><body><div id='msg'></div><script src='app.js'></script></body></html>\n",
+		"README.md":            "# Hello World\nA simple Python API project.",
+		"api/app.py":           "from flask import Flask, jsonify\n\napp = Flask(__name__)\n\n@app.route('/hello')\ndef hello():\n    return jsonify(message='Hello, World!')\n",
+		"api/requirements.txt": "flask==3.0.0\npytest==8.0.0\n",
+		"ui/app.js":            "fetch('/hello').then(r => r.json()).then(d => document.getElementById('msg').textContent = d.message);\n",
+		"ui/index.html":        "<!DOCTYPE html><html><body><div id='msg'></div><script src='app.js'></script></body></html>\n",
 	}
 	for path, content := range files {
 		if err := s.fs.WriteFileRelative(path, content); err != nil {

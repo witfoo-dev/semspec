@@ -59,20 +59,20 @@ const (
 	// Phase values written to entity triples.
 	// The plan-coordinator advances through these phases sequentially.
 	// Rules react to terminal phases (approved, escalated, error) to set status.
-	phaseFocusing              = "focusing"
-	phasePlanning              = "planning"
-	phaseSynthesizing          = "synthesizing"
-	phasePlanned               = "planned"
+	phaseFocusing               = "focusing"
+	phasePlanning               = "planning"
+	phaseSynthesizing           = "synthesizing"
+	phasePlanned                = "planned"
 	phaseGeneratingRequirements = "generating_requirements"
-	phaseRequirementsGenerated = "requirements_generated"
-	phaseGeneratingScenarios   = "generating_scenarios"
-	phaseScenariosGenerated    = "scenarios_generated"
-	phaseReviewing             = "reviewing"
-	phaseApproved              = "approved"
-	phaseRevisionNeeded        = "revision_needed"
-	phaseEscalated             = "escalated"
-	phaseAwaitingHuman         = "awaiting_human"
-	phaseError                 = "error"
+	phaseRequirementsGenerated  = "requirements_generated"
+	phaseGeneratingScenarios    = "generating_scenarios"
+	phaseScenariosGenerated     = "scenarios_generated"
+	phaseReviewing              = "reviewing"
+	phaseApproved               = "approved"
+	phaseRevisionNeeded         = "revision_needed"
+	phaseEscalated              = "escalated"
+	phaseAwaitingHuman          = "awaiting_human"
+	phaseError                  = "error"
 
 	// Trigger and completion subjects.
 	subjectCoordinationTrigger = "workflow.trigger.plan-coordinator"
@@ -85,17 +85,17 @@ const (
 	subjectReviewerAsync      = "workflow.async.plan-reviewer"
 
 	// Upstream completion events from generators (WORKFLOW stream).
-	subjectReqsGenerated     = "workflow.events.requirements.generated"
+	subjectReqsGenerated      = "workflow.events.requirements.generated"
 	subjectScenariosGenerated = "workflow.events.scenarios.generated"
 
 	// TaskID separator for encoding role::entityID.
 	taskIDSep = "::"
 
 	// Roles for TaskID encoding.
-	rolePlanner          = "planner"
-	roleReqGenerator     = "requirement-generator"
-	roleScenGenerator    = "scenario-generator"
-	roleReviewer         = "reviewer"
+	rolePlanner       = "planner"
+	roleReqGenerator  = "requirement-generator"
+	roleScenGenerator = "scenario-generator"
+	roleReviewer      = "reviewer"
 )
 
 // llmCompleter is the subset of the LLM client used by plan-coordinator.
@@ -729,16 +729,16 @@ func (c *Component) dispatchPlannersLocked(ctx context.Context, exec *coordinati
 
 		// Build the planner request payload with TaskID for LoopCompletedEvent routing.
 		req := &payloads.PlannerRequest{
-			ExecutionID:  exec.EntityID,
-			TaskID:       taskID,
-			WorkflowSlug: WorkflowSlugPlan,
-			RequestID:    exec.RequestID,
-			Slug:         exec.Slug,
-			Title:        exec.Title,
-			Description:  exec.Description,
-			ProjectID:    exec.ProjectID,
-			TraceID:      exec.TraceID,
-			LoopID:       exec.LoopID,
+			ExecutionID:      exec.EntityID,
+			TaskID:           taskID,
+			WorkflowSlug:     WorkflowSlugPlan,
+			RequestID:        exec.RequestID,
+			Slug:             exec.Slug,
+			Title:            exec.Title,
+			Description:      exec.Description,
+			ProjectID:        exec.ProjectID,
+			TraceID:          exec.TraceID,
+			LoopID:           exec.LoopID,
 			Prompt:           c.buildPlannerPrompt(exec, focus),
 			Revision:         exec.Iteration > 0,
 			PreviousFindings: exec.ReviewFeedback,
@@ -1502,7 +1502,6 @@ func (c *Component) publishBaseMessage(ctx context.Context, subject string, payl
 	}
 	return nil
 }
-
 
 // ---------------------------------------------------------------------------
 // Coordinator result payload

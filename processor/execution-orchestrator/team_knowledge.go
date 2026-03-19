@@ -97,12 +97,12 @@ func (c *Component) extractTeamInsights(ctx context.Context, exec *taskExecution
 	if exec.RedTeamID != "" && exec.RedTeamChallenge != nil {
 		if exec.RedTeamChallenge.OverallScore <= 2 {
 			insight := workflow.TeamInsight{
-				ID:        uuid.New().String(),
-				Source:    "red-team-critique-feedback",
+				ID:         uuid.New().String(),
+				Source:     "red-team-critique-feedback",
 				ScenarioID: exec.TaskID,
-				Summary:   fmt.Sprintf("Critique quality scored %d/5. Focus on accuracy and actionable feedback.", exec.RedTeamChallenge.OverallScore),
-				Skill:     "red-team",
-				CreatedAt: time.Now(),
+				Summary:    fmt.Sprintf("Critique quality scored %d/5. Focus on accuracy and actionable feedback.", exec.RedTeamChallenge.OverallScore),
+				Skill:      "red-team",
+				CreatedAt:  time.Now(),
 			}
 			if err := c.agentHelper.AddTeamInsight(ctx, exec.RedTeamID, insight); err != nil {
 				c.logger.Warn("Failed to add red team insight",
