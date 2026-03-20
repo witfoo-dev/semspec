@@ -35,14 +35,16 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | `processor/context-builder/` | Strategy-based LLM context assembly |
 | `processor/task-generator/` | Plan → task decomposition (or status advance in reactive mode) |
 | `processor/task-dispatcher/` | Dependency-aware task dispatch |
-| `processor/scenario-orchestrator/` | Reactive execution entry point (ADR-025) |
+| `processor/scenario-orchestrator/` | Dispatches pending scenarios for execution |
+| `processor/scenario-executor/` | Decomposes scenarios into DAGs, dispatches nodes serially |
+| `processor/execution-orchestrator/` | TDD pipeline per node: tester → builder → validator → reviewer |
 | `processor/ast/` | AST parsing library |
 | `tools/` | Tool executor implementations (file, git, decompose, spawn, create, tree) |
 | `tools/decompose/` | `decompose_task` — validates LLM-provided TaskDAG |
 | `tools/spawn/` | `spawn_agent` — spawns and awaits a child agentic loop |
 | `tools/create/` | `create_tool` — validates FlowSpec for dynamic tool creation |
 | `tools/tree/` | `query_agent_tree` — agent hierarchy inspection |
-| `workflow/reactive/` | Reactive workflow rules (dag-execution-loop, scenario-execution-loop) |
+| `workflow/reactive/` | Reactive workflow rules (change-proposal OODA loop) |
 | `agentgraph/` | Graph helpers for agent hierarchy tracking (spawn, status, tree) |
 | `vocabulary/` | Predicate vocabularies (source, spec, semspec, ics) |
 | `configs/` | Flow configuration files |
@@ -126,20 +128,18 @@ executed by the semstreams `agentic-tools` component.
 | `change_proposal.rejected` | JetStream | Proposal rejected |
 | `tool.register.<name>` | Core NATS | Tool advertisement (ephemeral) |
 | `tool.heartbeat.semspec` | Core NATS | Provider health (ephemeral) |
-| `scenario.orchestrate.*` | JetStream | Scenario orchestration trigger (reactive mode) |
+| `scenario.orchestrate.*` | JetStream | Scenario orchestration trigger (typed: `ScenarioOrchestrationTrigger`) |
 | `workflow.trigger.scenario-execution-loop` | JetStream | Per-Scenario execution trigger |
-| `workflow.trigger.dag-execution` | JetStream | DAG execution trigger |
-| `workflow.async.scenario-decomposer` | JetStream | Decompose request to agentic loop |
-| `scenario.decomposed.*` | JetStream | Decomposition result (DAG) |
-| `dag.node.complete.*` | JetStream | DAG node completed |
-| `dag.node.failed.*` | JetStream | DAG node failed |
-| `dag.execution.complete.*` | JetStream | Entire DAG execution completed |
-| `dag.execution.failed.*` | JetStream | DAG execution failed |
-| `scenario.complete.*` | JetStream | Scenario execution completed |
-| `scenario.failed.*` | JetStream | Scenario execution failed |
+| `workflow.trigger.task-execution-loop` | JetStream | DAG node → TDD pipeline trigger |
+| `agent.task.development` | JetStream | Decomposer + developer task dispatch |
+| `agent.task.testing` | JetStream | TDD tester stage dispatch |
+| `agent.task.building` | JetStream | TDD builder stage dispatch |
+| `agent.task.validation` | JetStream | TDD validator stage dispatch |
+| `agent.task.reviewer` | JetStream | TDD reviewer stage dispatch |
+| `agent.complete.>` | JetStream | Agentic loop completion (fan-out to all orchestrators) |
 | `agent.signal.cancel.*` | Core NATS | Cancellation signal to running loop (ephemeral) |
 
-See [docs/03-architecture.md](docs/03-architecture.md) for the complete NATS subject reference.
+See [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) for the complete execution pipeline reference with subjects, consumers, and payload types.
 
 ## Project Structure
 
@@ -154,7 +154,9 @@ semspec/
 │   ├── context-builder/      # Strategy-based context assembly
 │   ├── task-generator/       # Plan → task decomposition (static) or status advance (reactive)
 │   ├── task-dispatcher/      # Dependency-aware task dispatch
-│   ├── scenario-orchestrator/ # Reactive execution entry point (ADR-025)
+│   ├── scenario-orchestrator/ # Dispatches pending scenarios for execution
+│   ├── scenario-executor/    # Decomposes scenarios into DAGs, serial node dispatch
+│   ├── execution-orchestrator/ # TDD pipeline: tester → builder → validator → reviewer
 │   ├── question-answerer/    # LLM question answering
 │   ├── question-timeout/     # SLA monitoring and escalation
 │   ├── plan-api/         # Workflow + Requirement/Scenario/ChangeProposal HTTP API
@@ -169,8 +171,6 @@ semspec/
 │   └── reactive/
 │       ├── change_proposal.go         # ChangeProposal OODA reactive rules
 │       ├── change_proposal_actions.go # Cascade logic (graph traversal + dirty marking)
-│       ├── scenario_execution.go      # scenario-execution-loop (7 rules, ADR-025)
-│       ├── dag_execution.go           # dag-execution-loop (6 rules, ADR-025)
 │       └── cancellation.go            # CancellationSignal payload
 ├── agentgraph/
 │   └── graph.go              # RecordSpawn, GetChildren, GetTree, GetStatus
