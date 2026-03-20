@@ -1419,6 +1419,7 @@ func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecutio
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
 		Model:        exec.Model,
+		Prompt:       testerPrompt,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageTest,
 	}
@@ -1497,6 +1498,7 @@ func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecuti
 		Model:        exec.Model,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageBuild,
+		Prompt:       prompt,
 	}
 	c.publishTask(ctx, subjectBuilderTask, task)
 
@@ -1558,6 +1560,7 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 		Model:        exec.Model,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageDevelop,
+		Prompt:       req.Prompt,
 	}
 	c.publishTask(ctx, "agent.task.development", task)
 
@@ -1599,6 +1602,7 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 		Model:        exec.Model,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageValidate,
+		Prompt:       exec.Prompt,
 	}
 	c.publishTask(ctx, "agent.task.validation", task)
 
@@ -1653,6 +1657,7 @@ func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecuti
 		Model:        exec.Model,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageRedTeam,
+		Prompt:       exec.Prompt,
 	}
 	c.publishTask(ctx, subjectRedTeamTask, task)
 
@@ -1741,6 +1746,7 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 		Model:        exec.Model,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageReview,
+		Prompt:       exec.Prompt,
 	}
 	c.publishTask(ctx, "agent.task.reviewer", task)
 
