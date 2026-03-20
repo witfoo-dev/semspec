@@ -100,10 +100,7 @@ const (
 
 	// Downstream dispatch subjects.
 	subjectTesterTask        = "agent.task.testing"   // NEW: tester writes unit tests
-	subjectBuilderTask       = "agent.task.building"   // builder implements code
-	subjectDeveloperTask     = "dev.task.development" // developer (fallback path)
-	subjectValidatorAsync    = "workflow.async.structural-validator"
-	subjectCodeReviewerAsync = "workflow.async.task-code-reviewer"
+	subjectBuilderTask   = "agent.task.building"   // builder implements code
 
 	// Error category IDs that indicate the tester (not builder) should be retried.
 	errorCategoryMissingTests   = "missing_tests"
@@ -1496,48 +1493,18 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 	exec.DeveloperTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
-	// Build the developer request payload.
-	req := &payloads.DeveloperRequest{
-		ExecutionID:      exec.EntityID,
-		RequestID:        exec.RequestID,
-		Slug:             exec.Slug,
-		DeveloperTaskID:  exec.TaskID,
-		Model:            exec.Model,
-		ContextRequestID: exec.ContextRequestID,
-		TraceID:          exec.TraceID,
-		LoopID:           exec.LoopID,
-	}
-
-	// Thread sandbox worktree reference so developer operates in isolation.
-	if c.sandbox != nil && exec.WorktreePath != "" {
-		req.SandboxTaskID = exec.TaskID
-	}
-
+	prompt := exec.Prompt
 	if exec.Iteration > 0 && exec.Feedback != "" {
-		// Revision: prepend original prompt with feedback.
-		req.Revision = true
-		req.Feedback = exec.Feedback
-		req.Prompt = exec.Prompt + "\n\n---\n\nREVISION REQUEST: Your previous implementation was rejected.\n\n" + exec.Feedback
-	} else {
-		req.Prompt = exec.Prompt
+		prompt = exec.Prompt + "\n\n---\n\nREVISION REQUEST: Your previous implementation was rejected.\n\n" + exec.Feedback
 	}
 
-	// Publish typed request to developer's trigger subject.
-	if err := c.publishBaseMessage(ctx, subjectDeveloperTask, req); err != nil {
-		c.logger.Error("Failed to publish developer request",
-			"slug", exec.Slug, "task_id", exec.TaskID, "error", err)
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch developer failed: %v", err))
-		return
-	}
-
-	// Publish TaskMessage for agentic-loop tracking.
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
 		Model:        exec.Model,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageDevelop,
-		Prompt:       req.Prompt,
+		Prompt:       prompt,
 	}
 	c.publishTask(ctx, "agent.task.development", task)
 
@@ -1558,21 +1525,6 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 	exec.ValidatorTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
-	req := &payloads.ValidationRequest{
-		ExecutionID:   exec.EntityID,
-		Slug:          exec.Slug,
-		FilesModified: exec.FilesModified,
-		TraceID:       exec.TraceID,
-	}
-
-	if err := c.publishBaseMessage(ctx, subjectValidatorAsync, req); err != nil {
-		c.logger.Error("Failed to publish validation request",
-			"slug", exec.Slug, "task_id", exec.TaskID, "error", err)
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch validator failed: %v", err))
-		return
-	}
-
-	// Publish TaskMessage for agentic-loop tracking.
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
@@ -1699,23 +1651,6 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 	taskID := fmt.Sprintf("rev-%s-%s", exec.EntityID, uuid.New().String())
 	exec.ReviewerTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
-
-	req := &payloads.TaskCodeReviewRequest{
-		ExecutionID:   exec.EntityID,
-		RequestID:     exec.RequestID,
-		Slug:          exec.Slug,
-		DeveloperTask: exec.TaskID,
-		Output:        exec.DeveloperOutput,
-		TraceID:       exec.TraceID,
-		LoopID:        exec.LoopID,
-	}
-
-	if err := c.publishBaseMessage(ctx, subjectCodeReviewerAsync, req); err != nil {
-		c.logger.Error("Failed to publish code review request",
-			"slug", exec.Slug, "task_id", exec.TaskID, "error", err)
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch reviewer failed: %v", err))
-		return
-	}
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
@@ -1891,22 +1826,6 @@ func (c *Component) publishCompletionEvent(ctx context.Context, exec *taskExecut
 		"outcome", outcome,
 		"slug", exec.Slug,
 	)
-}
-
-// publishBaseMessage wraps a payload in a BaseMessage and publishes to JetStream.
-func (c *Component) publishBaseMessage(ctx context.Context, subject string, payload message.Payload) error {
-	baseMsg := message.NewBaseMessage(payload.Schema(), payload, componentName)
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal base message: %w", err)
-	}
-
-	if c.natsClient != nil {
-		if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
-			return fmt.Errorf("publish to %s: %w", subject, err)
-		}
-	}
-	return nil
 }
 
 // publishTask wraps a TaskMessage in a BaseMessage and publishes to JetStream.
