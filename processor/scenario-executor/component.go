@@ -39,7 +39,7 @@ import (
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 const (
@@ -85,12 +85,11 @@ type Component struct {
 	taskIDIndex sync.Map
 
 	// Lifecycle
-	shutdown      chan struct{}
-	wg            sync.WaitGroup
-	running       bool
-	mu            sync.RWMutex
-	lifecycleMu   sync.Mutex
-	subscriptions []*natsclient.Subscription
+	wg          sync.WaitGroup
+	cancel      context.CancelFunc
+	running     bool
+	mu          sync.RWMutex
+	lifecycleMu sync.Mutex
 
 	// Metrics
 	triggersProcessed  atomic.Int64
@@ -125,7 +124,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		logger:     logger,
 		platform:   deps.Platform,
 		sandbox:    sandbox.NewClient(cfg.SandboxURL),
-		shutdown:   make(chan struct{}),
 		tripleWriter: &graphutil.TripleWriter{
 			NATSClient:    deps.NATSClient,
 			Logger:        logger,
@@ -166,51 +164,39 @@ func (c *Component) Start(ctx context.Context) error {
 
 	c.logger.Info("Starting scenario-executor")
 
-	triggerHandler := func(ctx context.Context, msg *nats.Msg) {
-		c.wg.Add(1)
-		defer c.wg.Done()
-		select {
-		case <-c.shutdown:
-			return
-		default:
-		}
-		c.handleTrigger(ctx, msg)
+	consumeCtx, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
+
+	// Consumer 1: scenario execution triggers from scenario-orchestrator.
+	triggerCfg := natsclient.StreamConsumerConfig{
+		StreamName:    "WORKFLOW",
+		ConsumerName:  "scenario-executor-scenario-trigger",
+		FilterSubject: subjectScenarioTrigger,
+		DeliverPolicy: "new",
+		AckPolicy:     "explicit",
+		MaxDeliver:    3,
+		AckWait:       30 * time.Second,
+		MaxAckPending: 1,
+	}
+	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, triggerCfg, c.handleTrigger); err != nil {
+		cancel()
+		return fmt.Errorf("consume scenario triggers: %w", err)
 	}
 
-	completionHandler := func(ctx context.Context, msg *nats.Msg) {
-		c.wg.Add(1)
-		defer c.wg.Done()
-		select {
-		case <-c.shutdown:
-			return
-		default:
-		}
-		c.handleLoopCompleted(ctx, msg)
+	// Consumer 2: agentic loop completion events.
+	completionCfg := natsclient.StreamConsumerConfig{
+		StreamName:    "AGENT",
+		ConsumerName:  "scenario-executor-loop-completions",
+		FilterSubject: subjectLoopCompleted,
+		DeliverPolicy: "new",
+		AckPolicy:     "explicit",
+		MaxDeliver:    3,
+		AckWait:       30 * time.Second,
+		MaxAckPending: 10,
 	}
-
-	for _, port := range c.inputPorts {
-		subject := graphutil.PortSubject(port)
-		if subject == "" {
-			continue
-		}
-
-		var handler func(context.Context, *nats.Msg)
-		switch subject {
-		case subjectScenarioTrigger:
-			handler = triggerHandler
-		case subjectLoopCompleted:
-			handler = completionHandler
-		default:
-			c.logger.Debug("Skipping unrecognized input port", "subject", subject)
-			continue
-		}
-
-		sub, err := c.natsClient.Subscribe(ctx, subject, handler)
-		if err != nil {
-			return fmt.Errorf("subscribe to %s: %w", subject, err)
-		}
-		c.subscriptions = append(c.subscriptions, sub)
-		c.logger.Debug("Subscribed", "subject", subject)
+	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, completionCfg, c.handleLoopCompleted); err != nil {
+		cancel()
+		return fmt.Errorf("consume loop completions: %w", err)
 	}
 
 	c.mu.Lock()
@@ -238,8 +224,11 @@ func (c *Component) Stop(timeout time.Duration) error {
 		"scenarios_failed", c.scenariosFailed.Load(),
 	)
 
-	close(c.shutdown)
+	if c.cancel != nil {
+		c.cancel()
+	}
 
+	// Drain in-flight timeout goroutines.
 	done := make(chan struct{})
 	go func() {
 		c.wg.Wait()
@@ -251,9 +240,9 @@ func (c *Component) Stop(timeout time.Duration) error {
 	}
 	select {
 	case <-done:
-		c.logger.Debug("All in-flight handlers drained")
+		c.logger.Debug("All in-flight timeout goroutines drained")
 	case <-time.After(timeout):
-		c.logger.Warn("Timed out waiting for in-flight handlers to drain")
+		c.logger.Warn("Timed out waiting for in-flight timeout goroutines to drain")
 	}
 
 	c.activeExecutions.Range(func(_, value any) bool {
@@ -266,13 +255,6 @@ func (c *Component) Stop(timeout time.Duration) error {
 		return true
 	})
 
-	for _, sub := range c.subscriptions {
-		if err := sub.Unsubscribe(); err != nil {
-			c.logger.Debug("Unsubscribe error", "error", err)
-		}
-	}
-	c.subscriptions = nil
-
 	c.mu.Lock()
 	c.running = false
 	c.mu.Unlock()
@@ -284,20 +266,22 @@ func (c *Component) Stop(timeout time.Duration) error {
 // Trigger handler
 // ---------------------------------------------------------------------------
 
-func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
+func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	trigger, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest](msg.Data)
+	trigger, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse scenario execution trigger", "error", err)
 		c.errors.Add(1)
+		_ = msg.Nak()
 		return
 	}
 
 	if trigger.ScenarioID == "" || trigger.Slug == "" {
 		c.logger.Error("Trigger missing scenario_id or slug")
 		c.errors.Add(1)
+		_ = msg.Nak()
 		return
 	}
 
@@ -333,8 +317,12 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 
 	if _, loaded := c.activeExecutions.LoadOrStore(entityID, exec); loaded {
 		c.logger.Debug("Duplicate trigger for active scenario, skipping", "entity_id", entityID)
+		_ = msg.Ack()
 		return
 	}
+
+	// Acknowledge the trigger — execution is now owned by this component.
+	_ = msg.Ack()
 
 	// Create per-scenario branch for worktree isolation.
 	if c.sandbox != nil {
@@ -373,22 +361,27 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 // Loop-completion handler
 // ---------------------------------------------------------------------------
 
-func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
+func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) {
 	var base message.BaseMessage
-	if err := json.Unmarshal(msg.Data, &base); err != nil {
+	if err := json.Unmarshal(msg.Data(), &base); err != nil {
 		c.logger.Debug("Failed to unmarshal loop completed envelope", "error", err)
 		c.errors.Add(1)
+		_ = msg.Nak()
 		return
 	}
 
 	event, ok := base.Payload().(*agentic.LoopCompletedEvent)
 	if !ok {
+		// Not a LoopCompletedEvent — not for us; ack and discard.
+		_ = msg.Ack()
 		return
 	}
 
 	// Accept events from our own slug (decomposer completions) and from the
 	// execution-orchestrator's slug (TDD pipeline node completions).
 	if event.WorkflowSlug != WorkflowSlugScenarioExecution && event.WorkflowSlug != executionorchestrator.WorkflowSlugTaskExecution {
+		// Wrong workflow slug — belongs to another component; ack and discard.
+		_ = msg.Ack()
 		return
 	}
 
@@ -400,6 +393,8 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 			"task_id", event.TaskID,
 			"workflow_step", event.WorkflowStep,
 		)
+		// Unknown task ID — not ours; ack to prevent redelivery.
+		_ = msg.Ack()
 		return
 	}
 	entityID := entityIDVal.(string)
@@ -413,6 +408,9 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
+
+	// Acknowledge before processing — we own this message regardless of outcome.
+	_ = msg.Ack()
 
 	if exec.terminated {
 		return

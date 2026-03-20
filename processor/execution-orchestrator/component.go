@@ -46,7 +46,7 @@ import (
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 const (
@@ -98,7 +98,7 @@ const (
 
 	// Downstream dispatch subjects.
 	subjectTesterTask        = "agent.task.testing"   // NEW: tester writes unit tests
-	subjectBuilderTask       = "dev.task.building"    // builder implements code
+	subjectBuilderTask       = "agent.task.building"   // builder implements code
 	subjectDeveloperTask     = "dev.task.development" // developer (fallback path)
 	subjectValidatorAsync    = "workflow.async.structural-validator"
 	subjectCodeReviewerAsync = "workflow.async.task-code-reviewer"
@@ -157,12 +157,12 @@ type Component struct {
 	taskIDIndex sync.Map
 
 	// Lifecycle
-	shutdown      chan struct{}
-	wg            sync.WaitGroup
-	running       bool
-	mu            sync.RWMutex
-	lifecycleMu   sync.Mutex
-	subscriptions []*natsclient.Subscription
+	cancel      context.CancelFunc
+	consumeCtx  context.Context // cancelled when Stop() is called; used by long-running helpers
+	wg          sync.WaitGroup
+	running     bool
+	mu          sync.RWMutex
+	lifecycleMu sync.Mutex
 
 	// Metrics
 	triggersProcessed   atomic.Int64
@@ -199,7 +199,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		platform:     deps.Platform,
 		sandbox:      newWorktreeManager(cfg.SandboxURL),
 		indexingGate: workflow.NewIndexingGate(cfg.GraphGatewayURL, logger),
-		shutdown:     make(chan struct{}),
 		tripleWriter: &graphutil.TripleWriter{
 			NATSClient:    deps.NATSClient,
 			Logger:        logger,
@@ -241,51 +240,40 @@ func (c *Component) Start(ctx context.Context) error {
 	c.initAgentGraph()
 	c.logger.Info("Starting execution-orchestrator")
 
-	triggerHandler := func(ctx context.Context, msg *nats.Msg) {
-		c.wg.Add(1)
-		defer c.wg.Done()
-		select {
-		case <-c.shutdown:
-			return
-		default:
-		}
-		c.handleTrigger(ctx, msg)
+	consumeCtx, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
+	c.consumeCtx = consumeCtx
+
+	// Consumer 1: task execution triggers from task-dispatcher.
+	triggerCfg := natsclient.StreamConsumerConfig{
+		StreamName:    "WORKFLOW",
+		ConsumerName:  "execution-orchestrator-execution-trigger",
+		FilterSubject: subjectExecutionTrigger,
+		DeliverPolicy: "new",
+		AckPolicy:     "explicit",
+		MaxDeliver:    3,
+		AckWait:       30 * time.Second,
+		MaxAckPending: 1,
+	}
+	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, triggerCfg, c.handleTrigger); err != nil {
+		cancel()
+		return fmt.Errorf("consume execution triggers: %w", err)
 	}
 
-	completionHandler := func(ctx context.Context, msg *nats.Msg) {
-		c.wg.Add(1)
-		defer c.wg.Done()
-		select {
-		case <-c.shutdown:
-			return
-		default:
-		}
-		c.handleLoopCompleted(ctx, msg)
+	// Consumer 2: agentic loop completion events.
+	completionCfg := natsclient.StreamConsumerConfig{
+		StreamName:    "AGENT",
+		ConsumerName:  "execution-orchestrator-loop-completions",
+		FilterSubject: subjectLoopCompleted,
+		DeliverPolicy: "new",
+		AckPolicy:     "explicit",
+		MaxDeliver:    3,
+		AckWait:       30 * time.Second,
+		MaxAckPending: 10,
 	}
-
-	for _, port := range c.inputPorts {
-		subject := graphutil.PortSubject(port)
-		if subject == "" {
-			continue
-		}
-
-		var handler func(context.Context, *nats.Msg)
-		switch subject {
-		case subjectExecutionTrigger:
-			handler = triggerHandler
-		case subjectLoopCompleted:
-			handler = completionHandler
-		default:
-			c.logger.Debug("Skipping unrecognized input port", "subject", subject)
-			continue
-		}
-
-		sub, err := c.natsClient.Subscribe(ctx, subject, handler)
-		if err != nil {
-			return fmt.Errorf("subscribe to %s: %w", subject, err)
-		}
-		c.subscriptions = append(c.subscriptions, sub)
-		c.logger.Debug("Subscribed", "subject", subject)
+	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, completionCfg, c.handleLoopCompleted); err != nil {
+		cancel()
+		return fmt.Errorf("consume loop completions: %w", err)
 	}
 
 	c.mu.Lock()
@@ -313,7 +301,9 @@ func (c *Component) Stop(timeout time.Duration) error {
 		"executions_escalated", c.executionsEscalated.Load(),
 	)
 
-	close(c.shutdown)
+	if c.cancel != nil {
+		c.cancel()
+	}
 
 	done := make(chan struct{})
 	go func() {
@@ -342,13 +332,6 @@ func (c *Component) Stop(timeout time.Duration) error {
 		exec.mu.Unlock()
 		return true
 	})
-
-	for _, sub := range c.subscriptions {
-		if err := sub.Unsubscribe(); err != nil {
-			c.logger.Debug("Unsubscribe error", "error", err)
-		}
-	}
-	c.subscriptions = nil
 
 	c.mu.Lock()
 	c.running = false
@@ -521,20 +504,22 @@ func (c *Component) selectReplacementAgent(ctx context.Context, exec *taskExecut
 // Trigger handler
 // ---------------------------------------------------------------------------
 
-func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
+func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	trigger, err := payloads.ParseReactivePayload[workflow.TriggerPayload](msg.Data)
+	trigger, err := payloads.ParseReactivePayload[workflow.TriggerPayload](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse execution trigger", "error", err)
 		c.errors.Add(1)
+		_ = msg.Nak()
 		return
 	}
 
 	if trigger.Slug == "" || trigger.TaskID == "" {
 		c.logger.Error("Trigger missing slug or task_id")
 		c.errors.Add(1)
+		_ = msg.Nak()
 		return
 	}
 
@@ -595,8 +580,12 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 
 	if _, loaded := c.activeExecutions.LoadOrStore(entityID, exec); loaded {
 		c.logger.Debug("Duplicate trigger for active execution, skipping", "entity_id", entityID)
+		_ = msg.Ack()
 		return
 	}
+
+	// Ack the trigger now that execution is registered and will make forward progress.
+	_ = msg.Ack()
 
 	// Write initial entity triples.
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "task-execution")
@@ -683,20 +672,23 @@ func (c *Component) dispatchFirstStage(ctx context.Context, exec *taskExecution)
 // Loop-completion handler
 // ---------------------------------------------------------------------------
 
-func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
+func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) {
 	var base message.BaseMessage
-	if err := json.Unmarshal(msg.Data, &base); err != nil {
+	if err := json.Unmarshal(msg.Data(), &base); err != nil {
 		c.logger.Debug("Failed to unmarshal loop completed envelope", "error", err)
 		c.errors.Add(1)
+		_ = msg.Nak()
 		return
 	}
 
 	event, ok := base.Payload().(*agentic.LoopCompletedEvent)
 	if !ok {
+		_ = msg.Ack()
 		return
 	}
 
 	if event.WorkflowSlug != WorkflowSlugTaskExecution {
+		_ = msg.Ack()
 		return
 	}
 
@@ -708,8 +700,10 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 			"task_id", event.TaskID,
 			"workflow_step", event.WorkflowStep,
 		)
+		_ = msg.Ack()
 		return
 	}
+	_ = msg.Ack()
 	entityID := entityIDVal.(string)
 
 	execVal, ok := c.activeExecutions.Load(entityID)
@@ -1392,29 +1386,6 @@ func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecutio
 		}
 	}
 
-	req := &payloads.DeveloperRequest{
-		ExecutionID:      exec.EntityID,
-		RequestID:        exec.RequestID,
-		Slug:             exec.Slug,
-		DeveloperTaskID:  exec.TaskID,
-		Model:            exec.Model,
-		ContextRequestID: exec.ContextRequestID,
-		TraceID:          exec.TraceID,
-		LoopID:           exec.LoopID,
-		Prompt:           testerPrompt,
-	}
-
-	if c.sandbox != nil && exec.WorktreePath != "" {
-		req.SandboxTaskID = exec.TaskID
-	}
-
-	if err := c.publishBaseMessage(ctx, subjectTesterTask, req); err != nil {
-		c.logger.Error("Failed to publish tester request",
-			"slug", exec.Slug, "task_id", exec.TaskID, "error", err)
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch tester failed: %v", err))
-		return
-	}
-
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
@@ -1465,31 +1436,6 @@ func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecuti
 		if kb := c.buildTeamKnowledgeBlock(ctx, exec.BlueTeamID, "builder", builderCategories); kb != "" {
 			prompt += kb
 		}
-	}
-
-	req := &payloads.DeveloperRequest{
-		ExecutionID:      exec.EntityID,
-		RequestID:        exec.RequestID,
-		Slug:             exec.Slug,
-		DeveloperTaskID:  exec.TaskID,
-		Model:            exec.Model,
-		ContextRequestID: exec.ContextRequestID,
-		TraceID:          exec.TraceID,
-		LoopID:           exec.LoopID,
-		Prompt:           prompt,
-		Revision:         exec.Iteration > 0 && exec.Feedback != "",
-		Feedback:         exec.Feedback,
-	}
-
-	if c.sandbox != nil && exec.WorktreePath != "" {
-		req.SandboxTaskID = exec.TaskID
-	}
-
-	if err := c.publishBaseMessage(ctx, subjectBuilderTask, req); err != nil {
-		c.logger.Error("Failed to publish builder request",
-			"slug", exec.Slug, "task_id", exec.TaskID, "error", err)
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch builder failed: %v", err))
-		return
 	}
 
 	task := &agentic.TaskMessage{
@@ -1827,14 +1773,7 @@ func (c *Component) awaitIndexing(commitSHA, taskID string) {
 	}
 
 	// Cancel the gate if the component is shutting down.
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		select {
-		case <-c.shutdown:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
+	ctx, cancel := context.WithCancel(c.consumeCtx)
 	defer cancel()
 
 	if err := c.indexingGate.AwaitCommitIndexed(ctx, commitSHA, budget); err != nil {

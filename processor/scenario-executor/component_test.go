@@ -15,16 +15,41 @@ import (
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
-	"github.com/nats-io/nats.go"
+	nats "github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
+
+// ---------------------------------------------------------------------------
+// mockMsg implements jetstream.Msg for unit tests.
+// ---------------------------------------------------------------------------
+
+type mockMsg struct {
+	data    []byte
+	subject string
+	acked   bool
+	naked   bool
+}
+
+func (m *mockMsg) Data() []byte                              { return m.data }
+func (m *mockMsg) Subject() string                           { return m.subject }
+func (m *mockMsg) Reply() string                             { return "" }
+func (m *mockMsg) Headers() nats.Header                      { return nil }
+func (m *mockMsg) Metadata() (*jetstream.MsgMetadata, error) { return nil, nil }
+func (m *mockMsg) Ack() error                                { m.acked = true; return nil }
+func (m *mockMsg) DoubleAck(_ context.Context) error         { m.acked = true; return nil }
+func (m *mockMsg) Nak() error                                { m.naked = true; return nil }
+func (m *mockMsg) NakWithDelay(_ time.Duration) error        { m.naked = true; return nil }
+func (m *mockMsg) InProgress() error                         { return nil }
+func (m *mockMsg) Term() error                               { return nil }
+func (m *mockMsg) TermWithReason(_ string) error             { return nil }
 
 // ---------------------------------------------------------------------------
 // Wire-format helpers
 // ---------------------------------------------------------------------------
 
-// buildTriggerMsg builds a *nats.Msg carrying a ScenarioExecutionRequest
+// buildTriggerMsg builds a *mockMsg carrying a ScenarioExecutionRequest
 // wrapped in the minimal BaseMessage envelope that ParseReactivePayload expects.
-func buildTriggerMsg(req payloads.ScenarioExecutionRequest) *nats.Msg {
+func buildTriggerMsg(req payloads.ScenarioExecutionRequest) *mockMsg {
 	payload, err := json.Marshal(req)
 	if err != nil {
 		panic("buildTriggerMsg: marshal request: " + err.Error())
@@ -34,20 +59,20 @@ func buildTriggerMsg(req payloads.ScenarioExecutionRequest) *nats.Msg {
 	if err != nil {
 		panic("buildTriggerMsg: marshal envelope: " + err.Error())
 	}
-	return &nats.Msg{Data: data}
+	return &mockMsg{data: data, subject: subjectScenarioTrigger}
 }
 
-// buildLoopCompletedMsg builds a *nats.Msg that handleLoopCompleted can parse.
+// buildLoopCompletedMsg builds a *mockMsg that handleLoopCompleted can parse.
 // It constructs a proper BaseMessage so that base.Payload() returns a
 // *agentic.LoopCompletedEvent after registry lookup.
-func buildLoopCompletedMsg(t *testing.T, event agentic.LoopCompletedEvent) *nats.Msg {
+func buildLoopCompletedMsg(t *testing.T, event agentic.LoopCompletedEvent) *mockMsg {
 	t.Helper()
 	baseMsg := message.NewBaseMessage(event.Schema(), &event, "test")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		t.Fatalf("buildLoopCompletedMsg: marshal: %v", err)
 	}
-	return &nats.Msg{Data: data}
+	return &mockMsg{data: data, subject: subjectLoopCompleted}
 }
 
 // minLoopEvent returns a LoopCompletedEvent with the required fields set.
@@ -445,15 +470,13 @@ func newTestComponent(t *testing.T) *Component {
 	if err != nil {
 		t.Fatalf("newTestComponent: %v", err)
 	}
-	c := comp.(*Component)
-	c.shutdown = make(chan struct{})
-	return c
+	return comp.(*Component)
 }
 
 func TestHandleTrigger_MalformedPayload_IncrementsErrors(t *testing.T) {
 	c := newTestComponent(t)
 
-	msg := &nats.Msg{Data: []byte(`not json at all`)}
+	msg := &mockMsg{data: []byte(`not json at all`)}
 	c.handleTrigger(context.Background(), msg)
 
 	if c.errors.Load() != 1 {
@@ -710,7 +733,7 @@ func TestHandleTrigger_DecomposerTaskIDIndexed(t *testing.T) {
 func TestHandleLoopCompleted_MalformedEnvelope_IncrementsErrors(t *testing.T) {
 	c := newTestComponent(t)
 
-	msg := &nats.Msg{Data: []byte(`not json`)}
+	msg := &mockMsg{data: []byte(`not json`)}
 	c.handleLoopCompleted(context.Background(), msg)
 
 	if c.errors.Load() != 1 {
@@ -1690,8 +1713,8 @@ func TestMetrics_TriggersProcessedIncrements(t *testing.T) {
 func TestMetrics_ErrorsIncrementOnMalformedMessage(t *testing.T) {
 	c := newTestComponent(t)
 
-	c.handleTrigger(context.Background(), &nats.Msg{Data: []byte(`bad`)})
-	c.handleTrigger(context.Background(), &nats.Msg{Data: []byte(`also bad`)})
+	c.handleTrigger(context.Background(), &mockMsg{data: []byte(`bad`)})
+	c.handleTrigger(context.Background(), &mockMsg{data: []byte(`also bad`)})
 
 	if c.errors.Load() != 2 {
 		t.Errorf("errors = %d, want 2", c.errors.Load())
@@ -1748,7 +1771,7 @@ func TestParseReactivePayload_ScenarioExecutionRequest_RoundTrip(t *testing.T) {
 	}
 
 	msg := buildTriggerMsg(original)
-	parsed, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest](msg.Data)
+	parsed, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest](msg.Data())
 	if err != nil {
 		t.Fatalf("ParseReactivePayload() error = %v", err)
 	}

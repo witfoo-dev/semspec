@@ -46,7 +46,7 @@ import (
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 const (
@@ -127,12 +127,11 @@ type Component struct {
 	slugIndex sync.Map
 
 	// Lifecycle
-	shutdown chan struct{}
-	wg       sync.WaitGroup
-	running       bool
-	mu            sync.RWMutex
-	lifecycleMu   sync.Mutex
-	subscriptions []*natsclient.Subscription
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	running     bool
+	mu          sync.RWMutex
+	lifecycleMu sync.Mutex
 
 	// Metrics
 	triggersProcessed      atomic.Int64
@@ -182,7 +181,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		modelRegistry: model.Global(),
 		assembler:     assembler,
 		contextHelper: ctxHelper,
-		shutdown:      make(chan struct{}),
 		tripleWriter: &graphutil.TripleWriter{
 			NATSClient:    deps.NATSClient,
 			Logger:        logger,
@@ -228,72 +226,71 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("start context helper: %w", err)
 	}
 
-	// Capture the lifecycle ctx from Start for long-running handlers.
-	// The NATS Subscribe wrapper adds a 30s per-message timeout which is
-	// too short for plan coordination (LLM calls, etc.). Long-running
-	// handlers use lifecycleCtx instead of the message ctx.
-	lifecycleCtx := ctx
+	consumeCtx, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
 
-	triggerHandler := func(_ context.Context, msg *nats.Msg) {
-		c.wg.Add(1)
-		defer c.wg.Done()
-		select {
-		case <-c.shutdown:
-			return
-		default:
-		}
-		// Pass lifecycle ctx — handleTrigger derives an execution-scoped
-		// child context with the configured timeout.
-		c.handleTrigger(lifecycleCtx, msg)
+	// Consumer 1: coordination triggers (WORKFLOW stream).
+	triggerCfg := natsclient.StreamConsumerConfig{
+		StreamName:    "WORKFLOW",
+		ConsumerName:  "plan-coordinator-coordination-trigger",
+		FilterSubject: subjectCoordinationTrigger,
+		DeliverPolicy: "new",
+		AckPolicy:     "explicit",
+		MaxDeliver:    3,
+		AckWait:       30 * time.Second,
+		MaxAckPending: 1,
+	}
+	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, triggerCfg, c.handleTrigger); err != nil {
+		cancel()
+		return fmt.Errorf("consume coordination triggers: %w", err)
 	}
 
-	completionHandler := func(_ context.Context, msg *nats.Msg) {
-		c.wg.Add(1)
-		defer c.wg.Done()
-		select {
-		case <-c.shutdown:
-			return
-		default:
-		}
-		c.handleLoopCompleted(lifecycleCtx, msg)
+	// Consumer 2: agentic loop completion events (AGENT stream).
+	completionCfg := natsclient.StreamConsumerConfig{
+		StreamName:    "AGENT",
+		ConsumerName:  "plan-coordinator-loop-completions",
+		FilterSubject: subjectLoopCompleted,
+		DeliverPolicy: "new",
+		AckPolicy:     "explicit",
+		MaxDeliver:    3,
+		AckWait:       30 * time.Second,
+		MaxAckPending: 10,
+	}
+	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, completionCfg, c.handleLoopCompleted); err != nil {
+		cancel()
+		return fmt.Errorf("consume loop completions: %w", err)
 	}
 
-	for _, port := range c.inputPorts {
-		subject := graphutil.PortSubject(port)
-		if subject == "" {
-			continue
-		}
+	// Consumer 3: requirements generated events (WORKFLOW stream).
+	reqsCfg := natsclient.StreamConsumerConfig{
+		StreamName:    "WORKFLOW",
+		ConsumerName:  "plan-coordinator-reqs-generated",
+		FilterSubject: subjectReqsGenerated,
+		DeliverPolicy: "new",
+		AckPolicy:     "explicit",
+		MaxDeliver:    3,
+		AckWait:       30 * time.Second,
+		MaxAckPending: 5,
+	}
+	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, reqsCfg, c.handleGeneratorEvent); err != nil {
+		cancel()
+		return fmt.Errorf("consume requirements generated events: %w", err)
+	}
 
-		generatorEventHandler := func(_ context.Context, msg *nats.Msg) {
-			c.wg.Add(1)
-			defer c.wg.Done()
-			select {
-			case <-c.shutdown:
-				return
-			default:
-			}
-			c.handleGeneratorEvent(lifecycleCtx, msg)
-		}
-
-		var handler func(context.Context, *nats.Msg)
-		switch subject {
-		case subjectCoordinationTrigger:
-			handler = triggerHandler
-		case subjectLoopCompleted:
-			handler = completionHandler
-		case subjectReqsGenerated, subjectScenariosGenerated:
-			handler = generatorEventHandler
-		default:
-			c.logger.Debug("Skipping unrecognized input port", "subject", subject)
-			continue
-		}
-
-		sub, err := c.natsClient.Subscribe(ctx, subject, handler)
-		if err != nil {
-			return fmt.Errorf("subscribe to %s: %w", subject, err)
-		}
-		c.subscriptions = append(c.subscriptions, sub)
-		c.logger.Debug("Subscribed", "subject", subject)
+	// Consumer 4: scenarios generated events (WORKFLOW stream).
+	scenCfg := natsclient.StreamConsumerConfig{
+		StreamName:    "WORKFLOW",
+		ConsumerName:  "plan-coordinator-scenarios-generated",
+		FilterSubject: subjectScenariosGenerated,
+		DeliverPolicy: "new",
+		AckPolicy:     "explicit",
+		MaxDeliver:    3,
+		AckWait:       30 * time.Second,
+		MaxAckPending: 5,
+	}
+	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, scenCfg, c.handleGeneratorEvent); err != nil {
+		cancel()
+		return fmt.Errorf("consume scenarios generated events: %w", err)
 	}
 
 	c.mu.Lock()
@@ -321,7 +318,9 @@ func (c *Component) Stop(timeout time.Duration) error {
 		"coordinations_failed", c.coordinationsFailed.Load(),
 	)
 
-	close(c.shutdown)
+	if c.cancel != nil {
+		c.cancel()
+	}
 
 	done := make(chan struct{})
 	go func() {
@@ -352,13 +351,6 @@ func (c *Component) Stop(timeout time.Duration) error {
 
 	c.contextHelper.Stop()
 
-	for _, sub := range c.subscriptions {
-		if err := sub.Unsubscribe(); err != nil {
-			c.logger.Debug("Unsubscribe error", "error", err)
-		}
-	}
-	c.subscriptions = nil
-
 	c.mu.Lock()
 	c.running = false
 	c.mu.Unlock()
@@ -372,30 +364,28 @@ func (c *Component) Stop(timeout time.Duration) error {
 
 // handleTrigger parses a coordination trigger, determines focus areas, and
 // dispatches N planner agents in parallel.
-func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
+func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Derive an execution-scoped context from the lifecycle ctx (passed from
-	// Start via closure). This ctx cancels on SIGINT/SIGTERM OR execution timeout.
-	ctx, cancel := context.WithTimeout(ctx, c.config.GetTimeout())
-	defer cancel()
-
-	trigger, err := payloads.ParseReactivePayload[payloads.PlanCoordinatorRequest](msg.Data)
+	trigger, err := payloads.ParseReactivePayload[payloads.PlanCoordinatorRequest](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse coordination trigger", "error", err)
 		c.errors.Add(1)
+		_ = msg.Nak()
 		return
 	}
 
 	if trigger.Slug == "" {
 		c.logger.Error("Trigger missing slug")
 		c.errors.Add(1)
+		_ = msg.Nak()
 		return
 	}
 	if strings.Contains(trigger.Slug, taskIDSep) {
 		c.logger.Error("Slug contains reserved separator", "slug", trigger.Slug, "separator", taskIDSep)
 		c.errors.Add(1)
+		_ = msg.Nak()
 		return
 	}
 
@@ -440,27 +430,39 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 		c.logger.Debug("Duplicate trigger for active coordination, skipping",
 			"entity_id", entityID,
 		)
+		_ = msg.Ack()
 		return
 	}
 
+	// Ack immediately — coordination work (LLM calls) runs well beyond 30s AckWait.
+	_ = msg.Ack()
+
+	// All coordination work uses a background context so it is not bounded by
+	// the JetStream message delivery context or the 30s AckWait.
+	workCtx, workCancel := context.WithTimeout(context.Background(), c.config.GetTimeout())
+	defer workCancel()
+
+	c.wg.Add(1)
+	defer c.wg.Done()
+
 	// Write initial entity triples.
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "coordination")
-	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phaseFocusing); err != nil {
+	_ = c.tripleWriter.WriteTriple(workCtx, entityID, wf.Type, "coordination")
+	if err := c.tripleWriter.WriteTriple(workCtx, entityID, wf.Phase, phaseFocusing); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseFocusing, "error", err)
 	}
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Slug, trigger.Slug)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Title, trigger.Title)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.ProjectID, trigger.ProjectID)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
+	_ = c.tripleWriter.WriteTriple(workCtx, entityID, wf.Slug, trigger.Slug)
+	_ = c.tripleWriter.WriteTriple(workCtx, entityID, wf.Title, trigger.Title)
+	_ = c.tripleWriter.WriteTriple(workCtx, entityID, wf.ProjectID, trigger.ProjectID)
+	_ = c.tripleWriter.WriteTriple(workCtx, entityID, wf.TraceID, trigger.TraceID)
 
 	// Publish initial entity snapshot for graph observability.
-	c.publishEntity(ctx, NewCoordinationEntity(exec).WithPhase(phaseFocusing))
+	c.publishEntity(workCtx, NewCoordinationEntity(exec).WithPhase(phaseFocusing))
 
 	// Determine focus areas BEFORE acquiring exec.mu — the LLM call can take
 	// 30+ seconds and we don't want to block the timeout callback.
-	llmCtx := ctx
+	llmCtx := workCtx
 	if trigger.TraceID != "" || trigger.LoopID != "" {
-		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
+		llmCtx = llm.WithTraceContext(workCtx, llm.TraceContext{
 			TraceID: trigger.TraceID,
 			LoopID:  trigger.LoopID,
 		})
@@ -474,7 +476,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 			"error", err,
 		)
 		exec.mu.Lock()
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("focus determination failed: %v", err))
+		c.markErrorLocked(workCtx, exec, fmt.Sprintf("focus determination failed: %v", err))
 		exec.mu.Unlock()
 		return
 	}
@@ -486,11 +488,11 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 	c.startExecutionTimeoutLocked(exec)
 
 	exec.FocusAreas = focuses
-	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phasePlanning); err != nil {
+	if err := c.tripleWriter.WriteTriple(workCtx, entityID, wf.Phase, phasePlanning); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phasePlanning, "error", err)
 	}
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.focus_areas", focusAreasJSON(focuses))
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.planner_count", len(focuses))
+	_ = c.tripleWriter.WriteTriple(workCtx, entityID, "workflow.focus_areas", focusAreasJSON(focuses))
+	_ = c.tripleWriter.WriteTriple(workCtx, entityID, "workflow.planner_count", len(focuses))
 
 	c.logger.Info("Focus areas determined, dispatching planners",
 		"entity_id", entityID,
@@ -498,23 +500,26 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 	)
 
 	// Dispatch N planner agents.
-	c.dispatchPlannersLocked(ctx, exec)
+	c.dispatchPlannersLocked(workCtx, exec)
 }
 
 // ---------------------------------------------------------------------------
 // Loop-completion handler
 // ---------------------------------------------------------------------------
 
-func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
+func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) {
 	var base message.BaseMessage
-	if err := json.Unmarshal(msg.Data, &base); err != nil {
+	if err := json.Unmarshal(msg.Data(), &base); err != nil {
 		c.logger.Debug("Failed to unmarshal loop completed envelope", "error", err)
 		c.errors.Add(1)
+		_ = msg.Nak()
 		return
 	}
 
 	event, ok := base.Payload().(*agentic.LoopCompletedEvent)
 	if !ok {
+		// Not a loop completed event — ack and ignore.
+		_ = msg.Ack()
 		return
 	}
 
@@ -522,6 +527,7 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 	role, entityID := parseTaskID(event.TaskID)
 	if entityID == "" {
 		// Not our event — TaskID doesn't use our encoding.
+		_ = msg.Ack()
 		return
 	}
 
@@ -530,12 +536,15 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 	execVal, ok := c.activeCoordinations.Load(entityID)
 	if !ok {
 		c.logger.Debug("No active coordination for entity", "entity_id", entityID)
+		_ = msg.Ack()
 		return
 	}
 	exec := execVal.(*coordinationExecution)
 
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
+
+	_ = msg.Ack()
 
 	switch {
 	case strings.HasPrefix(role, rolePlanner):
@@ -884,15 +893,16 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *coordinati
 
 // handleGeneratorEvent routes generator completion events (from WORKFLOW stream)
 // to the appropriate handler based on subject.
-func (c *Component) handleGeneratorEvent(ctx context.Context, msg *nats.Msg) {
+func (c *Component) handleGeneratorEvent(ctx context.Context, msg jetstream.Msg) {
 	c.updateLastActivity()
 
 	// Extract slug from payload to look up active coordination.
 	var envelope struct {
 		Payload json.RawMessage `json:"payload"`
 	}
-	if err := json.Unmarshal(msg.Data, &envelope); err != nil {
+	if err := json.Unmarshal(msg.Data(), &envelope); err != nil {
 		c.logger.Debug("Failed to unmarshal generator event envelope", "error", err)
+		_ = msg.Nak()
 		return
 	}
 
@@ -900,19 +910,22 @@ func (c *Component) handleGeneratorEvent(ctx context.Context, msg *nats.Msg) {
 		Slug string `json:"slug"`
 	}
 	if err := json.Unmarshal(envelope.Payload, &slugHolder); err != nil || slugHolder.Slug == "" {
-		c.logger.Debug("Generator event missing slug", "subject", msg.Subject)
+		c.logger.Debug("Generator event missing slug", "subject", msg.Subject())
+		_ = msg.Ack()
 		return
 	}
 
 	entityIDVal, ok := c.slugIndex.Load(slugHolder.Slug)
 	if !ok {
 		c.logger.Debug("No active coordination for slug", "slug", slugHolder.Slug)
+		_ = msg.Ack()
 		return
 	}
 	entityID := entityIDVal.(string)
 
 	execVal, ok := c.activeCoordinations.Load(entityID)
 	if !ok {
+		_ = msg.Ack()
 		return
 	}
 	exec := execVal.(*coordinationExecution)
@@ -921,10 +934,13 @@ func (c *Component) handleGeneratorEvent(ctx context.Context, msg *nats.Msg) {
 	defer exec.mu.Unlock()
 
 	if exec.terminated {
+		_ = msg.Ack()
 		return
 	}
 
-	switch msg.Subject {
+	_ = msg.Ack()
+
+	switch msg.Subject() {
 	case subjectReqsGenerated:
 		// Guard: only accept if we're actually in the generating_requirements phase.
 		if exec.CurrentPhase != phaseGeneratingRequirements {
@@ -942,7 +958,7 @@ func (c *Component) handleGeneratorEvent(ctx context.Context, msg *nats.Msg) {
 		}
 		c.handleScenariosGeneratedLocked(ctx, exec, envelope.Payload)
 	default:
-		c.logger.Debug("Unknown generator event subject", "subject", msg.Subject)
+		c.logger.Debug("Unknown generator event subject", "subject", msg.Subject())
 	}
 }
 

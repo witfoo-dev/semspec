@@ -5,10 +5,36 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/c360studio/semstreams/component"
-	"github.com/nats-io/nats.go"
+	nats "github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
+
+// ---------------------------------------------------------------------------
+// mockMsg implements jetstream.Msg for unit tests.
+// ---------------------------------------------------------------------------
+
+type mockMsg struct {
+	data    []byte
+	subject string
+	acked   bool
+	naked   bool
+}
+
+func (m *mockMsg) Data() []byte                              { return m.data }
+func (m *mockMsg) Subject() string                           { return m.subject }
+func (m *mockMsg) Reply() string                             { return "" }
+func (m *mockMsg) Headers() nats.Header                      { return nil }
+func (m *mockMsg) Metadata() (*jetstream.MsgMetadata, error) { return nil, nil }
+func (m *mockMsg) Ack() error                                { m.acked = true; return nil }
+func (m *mockMsg) DoubleAck(_ context.Context) error         { m.acked = true; return nil }
+func (m *mockMsg) Nak() error                                { m.naked = true; return nil }
+func (m *mockMsg) NakWithDelay(_ time.Duration) error        { m.naked = true; return nil }
+func (m *mockMsg) InProgress() error                         { return nil }
+func (m *mockMsg) Term() error                               { return nil }
+func (m *mockMsg) TermWithReason(_ string) error             { return nil }
 
 // ---------------------------------------------------------------------------
 // stubRegistry satisfies RegistryInterface for Register() tests.
@@ -67,12 +93,12 @@ func testCtx(t *testing.T) context.Context {
 }
 
 // ---------------------------------------------------------------------------
-// makeNATSMsg wraps raw bytes in a *nats.Msg for handleTrigger / handleLoopCompleted.
+// makeNATSMsg wraps raw bytes in a *mockMsg for handleTrigger / handleLoopCompleted.
 // ---------------------------------------------------------------------------
 
-func makeNATSMsg(t *testing.T, data []byte) *nats.Msg {
+func makeNATSMsg(t *testing.T, data []byte) *mockMsg {
 	t.Helper()
-	return &nats.Msg{Data: data}
+	return &mockMsg{data: data}
 }
 
 // ---------------------------------------------------------------------------
@@ -80,7 +106,7 @@ func makeNATSMsg(t *testing.T, data []byte) *nats.Msg {
 // map of payload fields, suitable for feeding into handleTrigger.
 // ---------------------------------------------------------------------------
 
-func makeTriggerMsg(t *testing.T, payloadFields map[string]any) *nats.Msg {
+func makeTriggerMsg(t *testing.T, payloadFields map[string]any) *mockMsg {
 	t.Helper()
 	payloadBytes, err := json.Marshal(payloadFields)
 	if err != nil {
