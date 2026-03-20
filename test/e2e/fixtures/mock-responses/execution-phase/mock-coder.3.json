@@ -1,0 +1,4 @@
+{
+  "content": "I've written failing tests for the /goodbye endpoint. The tests verify the endpoint returns HTTP 200 with a JSON response containing a goodbye message.",
+  "finish_reason": "stop"
+}

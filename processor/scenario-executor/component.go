@@ -26,9 +26,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	executionorchestrator "github.com/c360studio/semspec/processor/execution-orchestrator"
 	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/tools/sandbox"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
@@ -57,9 +59,10 @@ const (
 	phaseError       = "error"
 
 	// NATS subjects.
-	subjectScenarioTrigger = "workflow.trigger.scenario-execution-loop"
-	subjectLoopCompleted   = "agentic.loop_completed.v1"
-	subjectDecomposer      = "workflow.async.scenario-decomposer"
+	subjectScenarioTrigger   = "workflow.trigger.scenario-execution-loop"
+	subjectLoopCompleted     = "agentic.loop_completed.v1"
+	subjectDecomposer        = "workflow.async.scenario-decomposer"
+	subjectExecutionTrigger  = "workflow.trigger.task-execution-loop"
 )
 
 // Component orchestrates per-scenario execution.
@@ -376,7 +379,9 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
-	if event.WorkflowSlug != WorkflowSlugScenarioExecution {
+	// Accept events from our own slug (decomposer completions) and from the
+	// execution-orchestrator's slug (TDD pipeline node completions).
+	if event.WorkflowSlug != WorkflowSlugScenarioExecution && event.WorkflowSlug != executionorchestrator.WorkflowSlugTaskExecution {
 		return
 	}
 
@@ -488,7 +493,15 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *scenarioExecution) {
 	c.taskIDIndex.Delete(exec.CurrentNodeTaskID)
 
-	nodeID := event.WorkflowStep
+	// Get nodeID from current execution state. Execution is serial, so
+	// CurrentNodeIdx always identifies the active node. This works for both
+	// direct agentic-loop completions (WorkflowStep=nodeID) and
+	// execution-orchestrator completions (WorkflowStep=taskID).
+	if exec.CurrentNodeIdx < 0 || exec.CurrentNodeIdx >= len(exec.SortedNodeIDs) {
+		c.markErrorLocked(ctx, exec, "node completion received but no active node")
+		return
+	}
+	nodeID := exec.SortedNodeIDs[exec.CurrentNodeIdx]
 	exec.VisitedNodes[nodeID] = true
 
 	if event.Outcome != agentic.OutcomeSuccess {
@@ -574,20 +587,21 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *scenarioEx
 	exec.CurrentNodeTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
-	role, subject := normalizeRole(node.Role)
-
-	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         role,
-		Model:        exec.Model,
-		WorkflowSlug: WorkflowSlugScenarioExecution,
-		WorkflowStep: nodeID,
-		Prompt:       node.Prompt,
+	// Dispatch to execution-orchestrator for TDD pipeline processing
+	// (test → build → validate → review) instead of direct agent dispatch.
+	trigger := &workflow.TriggerPayload{
+		WorkflowID:     "task-execution-loop",
+		Slug:           exec.Slug,
+		TaskID:         taskID,
+		Title:          node.Prompt,
+		Prompt:         node.Prompt,
+		Model:          exec.Model,
+		ProjectID:      exec.ProjectID,
+		TraceID:        exec.TraceID,
+		LoopID:         exec.LoopID,
+		RequestID:      fmt.Sprintf("node-%s-%s", exec.ScenarioID, nodeID),
+		ScenarioBranch: exec.ScenarioBranch,
 	}
-	// TODO(sandbox): ScenarioBranch needs to propagate to execution-orchestrator
-	// so worktrees branch from the scenario branch and merge back into it.
-	// agentic.TaskMessage currently has no metadata field; requires semstreams
-	// change to add TaskMessage.Metadata map[string]string or similar.
 
 	// TODO: no vocabulary constant for per-node status predicates; kept as formatted string.
 	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, fmt.Sprintf("workflow.node.%s.status", nodeID), "running")
@@ -595,7 +609,7 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *scenarioEx
 	// Update the DAG node graph entity to reflect that execution has started.
 	c.publishDAGNodeStatus(ctx, exec, nodeID, "executing")
 
-	if err := c.publishTask(ctx, subject, task); err != nil {
+	if err := c.publishTrigger(ctx, subjectExecutionTrigger, trigger); err != nil {
 		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch node %q failed: %v", nodeID, err))
 		return
 	}
@@ -759,6 +773,23 @@ func (c *Component) publishDAGNodeStatus(ctx context.Context, exec *scenarioExec
 	c.publishEntity(ctx, entity)
 }
 
+// publishTrigger wraps a TriggerPayload in a BaseMessage and publishes to JetStream.
+// Used for dispatching nodes to the execution-orchestrator.
+func (c *Component) publishTrigger(ctx context.Context, subject string, trigger *workflow.TriggerPayload) error {
+	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, componentName)
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		return fmt.Errorf("marshal trigger payload: %w", err)
+	}
+
+	if c.natsClient != nil {
+		if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
+			return fmt.Errorf("publish to %s: %w", subject, err)
+		}
+	}
+	return nil
+}
+
 // publishTask wraps a TaskMessage in a BaseMessage and publishes to JetStream.
 // Returns an error for fail-fast dispatch.
 func (c *Component) publishTask(ctx context.Context, subject string, task *agentic.TaskMessage) error {
@@ -790,19 +821,6 @@ func (c *Component) getLastActivity() time.Time {
 	c.lastActivityMu.RLock()
 	defer c.lastActivityMu.RUnlock()
 	return c.lastActivity
-}
-
-// normalizeRole maps an LLM-provided role string to a known agentic role constant
-// and a NATS dispatch subject. Unknown roles default to general.
-func normalizeRole(raw string) (string, string) {
-	switch raw {
-	case "developer", "development", "dev":
-		return agentic.RoleDeveloper, "agent.task.development"
-	case "reviewer", "review":
-		return agentic.RoleReviewer, "agent.task.reviewer"
-	default:
-		return agentic.RoleGeneral, "agent.task.general"
-	}
 }
 
 // ---------------------------------------------------------------------------

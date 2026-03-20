@@ -1092,6 +1092,11 @@ func (c *Component) markApprovedLocked(ctx context.Context, exec *taskExecution)
 		"iteration", exec.Iteration,
 	)
 
+	// Notify callers (e.g. scenario-executor) that the TDD pipeline completed.
+	// Safe against self-receive: the completion event uses exec.TaskID (external),
+	// which is not stored in our taskIDIndex (only internal pipeline task IDs are).
+	c.publishCompletionEvent(ctx, exec, agentic.OutcomeSuccess, "")
+
 	c.publishEntity(context.Background(), NewTaskExecutionEntity(exec).WithPhase(phaseApproved))
 	c.cleanupExecutionLocked(exec)
 }
@@ -1122,6 +1127,9 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 		"reason", reason,
 	)
 
+	// Notify callers that the TDD pipeline escalated (treated as failure).
+	c.publishCompletionEvent(ctx, exec, agentic.OutcomeFailed, reason)
+
 	c.publishEntity(context.Background(), NewTaskExecutionEntity(exec).WithPhase(phaseEscalated).WithErrorReason(reason))
 	c.cleanupExecutionLocked(exec)
 }
@@ -1150,6 +1158,9 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *taskExecution, re
 		"task_id", exec.TaskID,
 		"reason", reason,
 	)
+
+	// Notify callers that the TDD pipeline errored.
+	c.publishCompletionEvent(ctx, exec, agentic.OutcomeFailed, reason)
 
 	c.publishEntity(context.Background(), NewTaskExecutionEntity(exec).WithPhase(phaseError).WithErrorReason(reason))
 	c.cleanupExecutionLocked(exec)
@@ -1857,6 +1868,47 @@ func (c *Component) discardWorktree(exec *taskExecution) {
 // ---------------------------------------------------------------------------
 // Triple and task publishing helpers
 // ---------------------------------------------------------------------------
+
+// publishCompletionEvent emits a LoopCompletedEvent when the TDD pipeline
+// reaches a terminal state. This notifies callers (e.g. scenario-executor)
+// that the dispatched task execution is finished.
+// Caller must hold exec.mu.
+func (c *Component) publishCompletionEvent(ctx context.Context, exec *taskExecution, outcome, result string) {
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       exec.LoopID,
+		TaskID:       exec.TaskID,
+		Outcome:      outcome,
+		Role:         string(agentic.RoleDeveloper),
+		Result:       result,
+		WorkflowSlug: WorkflowSlugTaskExecution,
+		WorkflowStep: exec.TaskID,
+		CompletedAt:  time.Now(),
+		Iterations:   exec.Iteration + 1,
+	}
+
+	baseMsg := message.NewBaseMessage(event.Schema(), event, componentName)
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.logger.Warn("Failed to marshal completion event", "error", err)
+		return
+	}
+
+	if c.natsClient != nil {
+		if err := c.natsClient.PublishToStream(ctx, subjectLoopCompleted, data); err != nil {
+			c.logger.Warn("Failed to publish completion event",
+				"subject", subjectLoopCompleted,
+				"task_id", exec.TaskID,
+				"error", err,
+			)
+		}
+	}
+
+	c.logger.Info("Published TDD pipeline completion event",
+		"task_id", exec.TaskID,
+		"outcome", outcome,
+		"slug", exec.Slug,
+	)
+}
 
 // publishBaseMessage wraps a payload in a BaseMessage and publishes to JetStream.
 func (c *Component) publishBaseMessage(ctx context.Context, subject string, payload message.Payload) error {

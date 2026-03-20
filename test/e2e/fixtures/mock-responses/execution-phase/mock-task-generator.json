@@ -1,0 +1,17 @@
+{
+  "tasks": [
+    {
+      "description": "Add /goodbye endpoint to api/app.py that returns a JSON response with a goodbye message following the same pattern as the existing /hello endpoint",
+      "type": "implement",
+      "depends_on": [],
+      "acceptance_criteria": [
+        {
+          "given": "The Flask API server is running",
+          "when": "A GET request is sent to /goodbye",
+          "then": "A 200 JSON response is returned with a goodbye message field"
+        }
+      ],
+      "files": ["api/app.py"]
+    }
+  ]
+}

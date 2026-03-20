@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -310,22 +311,38 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 // trigger scenarios are dispatched without gating — this preserves backward
 // compatibility with plans that predate the requirements DAG.
 func (c *Component) dispatchScenarios(ctx context.Context, trigger OrchestratorTrigger) error {
-	if len(trigger.Scenarios) == 0 {
-		c.logger.Info("no scenarios to dispatch", "plan_slug", trigger.PlanSlug)
-		return nil
-	}
-
 	// Load requirements and scenarios to apply DAG gating.
 	manager := workflow.NewManager(c.repoRoot)
+
+	// Load scenarios once — reused for both the empty-trigger fallback and DAG gating.
+	allScenarios, err := manager.LoadScenarios(ctx, trigger.PlanSlug)
+	if err != nil {
+		return fmt.Errorf("load scenarios for %s: %w", trigger.PlanSlug, err)
+	}
+
+	// When the trigger has no inline scenarios (e.g. from the execute REST API),
+	// build ScenarioRef entries from pending scenarios on disk.
+	if len(trigger.Scenarios) == 0 {
+		for _, s := range allScenarios {
+			if s.Status == workflow.ScenarioStatusPending || s.Status == "" {
+				trigger.Scenarios = append(trigger.Scenarios, ScenarioRef{
+					ScenarioID: s.ID,
+					Prompt:     buildScenarioPrompt(s),
+				})
+			}
+		}
+		if len(trigger.Scenarios) == 0 {
+			c.logger.Info("no pending scenarios to dispatch", "plan_slug", trigger.PlanSlug)
+			return nil
+		}
+		c.logger.Info("loaded pending scenarios from disk",
+			"plan_slug", trigger.PlanSlug,
+			"count", len(trigger.Scenarios))
+	}
 
 	requirements, err := manager.LoadRequirements(ctx, trigger.PlanSlug)
 	if err != nil {
 		return fmt.Errorf("load requirements for %s: %w", trigger.PlanSlug, err)
-	}
-
-	allScenarios, err := manager.LoadScenarios(ctx, trigger.PlanSlug)
-	if err != nil {
-		return fmt.Errorf("load scenarios for %s: %w", trigger.PlanSlug, err)
 	}
 
 	// Apply DAG gating — only dispatch scenarios for requirements whose
@@ -421,6 +438,24 @@ func (c *Component) triggerScenarioExecution(ctx context.Context, planSlug, trac
 		"subject", c.config.WorkflowTriggerSubject,
 	)
 	return nil
+}
+
+// buildScenarioPrompt constructs an execution prompt from a Scenario's BDD clauses.
+func buildScenarioPrompt(s workflow.Scenario) string {
+	var parts []string
+	if s.Given != "" {
+		parts = append(parts, "Given "+s.Given)
+	}
+	if s.When != "" {
+		parts = append(parts, "When "+s.When)
+	}
+	if len(s.Then) > 0 {
+		parts = append(parts, "Then:")
+		for _, t := range s.Then {
+			parts = append(parts, "  - "+t)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // Stop gracefully stops the component.

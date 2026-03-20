@@ -1,0 +1,4 @@
+{
+  "content": "{\"passed\": true, \"check_results\": [{\"check\": \"file_exists\", \"passed\": true, \"message\": \"api/app.py exists\"}]}",
+  "finish_reason": "stop"
+}

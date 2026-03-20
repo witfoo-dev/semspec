@@ -200,6 +200,8 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewOpenSpecIngestScenario(cfg),
 		// Plan phase pipeline (new architecture)
 		scenarios.NewPlanPhaseScenario(cfg),
+		// Execution phase pipeline (plan → approve → decompose → TDD → complete)
+		scenarios.NewExecutionPhaseScenario(cfg),
 		// Legacy semantic validation scenarios (require LLM, OLD FLOW)
 		scenarios.NewHelloWorldScenario(cfg),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithCodeExecution()),

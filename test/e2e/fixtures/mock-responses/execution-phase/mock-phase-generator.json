@@ -1,0 +1,10 @@
+{
+  "phases": [
+    {
+      "name": "Backend Implementation",
+      "description": "Add the /goodbye endpoint to the Flask API.",
+      "depends_on": [],
+      "requires_approval": false
+    }
+  ]
+}
