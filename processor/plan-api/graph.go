@@ -16,56 +16,6 @@ import (
 
 const graphIngestSubject = "graph.ingest.entity"
 
-// publishPhaseEntity publishes a phase as a graph entity.
-func (c *Component) publishPhaseEntity(ctx context.Context, slug string, phase *workflow.Phase) error {
-	entityID := workflow.PhaseEntityID(slug, phase.Sequence)
-	planEntityID := workflow.PlanEntityID(slug)
-
-	triples := []message.Triple{
-		{Subject: entityID, Predicate: semspec.PhaseName, Object: phase.Name},
-		{Subject: entityID, Predicate: semspec.PhaseStatus, Object: string(phase.Status)},
-		{Subject: entityID, Predicate: semspec.PhaseSequence, Object: phase.Sequence},
-		{Subject: entityID, Predicate: semspec.PhasePlanID, Object: planEntityID},
-		{Subject: entityID, Predicate: semspec.PhaseCreatedAt, Object: phase.CreatedAt.Format(time.RFC3339)},
-		{Subject: entityID, Predicate: semspec.DCTitle, Object: phase.Name},
-	}
-
-	if phase.Description != "" {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PhaseDescription, Object: phase.Description})
-	}
-
-	for _, depID := range phase.DependsOn {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PhaseDependsOn, Object: depID})
-	}
-
-	if phase.Approved {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PhaseApproved, Object: true})
-	}
-	if phase.ApprovedBy != "" {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PhaseApprovedBy, Object: phase.ApprovedBy})
-	}
-	if phase.ApprovedAt != nil {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PhaseApprovedAt, Object: phase.ApprovedAt.Format(time.RFC3339)})
-	}
-	if phase.StartedAt != nil {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PhaseStartedAt, Object: phase.StartedAt.Format(time.RFC3339)})
-	}
-	if phase.CompletedAt != nil {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PhaseCompletedAt, Object: phase.CompletedAt.Format(time.RFC3339)})
-	}
-
-	if phase.AgentConfig != nil {
-		if phase.AgentConfig.Model != "" {
-			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PhaseModel, Object: phase.AgentConfig.Model})
-		}
-		if phase.AgentConfig.MaxConcurrent > 0 {
-			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PhaseMaxConcurrent, Object: phase.AgentConfig.MaxConcurrent})
-		}
-	}
-
-	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.PhaseEntityType, entityID, triples))
-}
-
 // publishPlanEntity publishes a plan as a graph entity.
 func (c *Component) publishPlanEntity(ctx context.Context, plan *workflow.Plan) error {
 	entityID := workflow.PlanEntityID(plan.Slug)
@@ -91,41 +41,6 @@ func (c *Component) publishPlanEntity(ctx context.Context, plan *workflow.Plan) 
 	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.EntityType, entityID, triples))
 }
 
-// publishTaskEntity publishes a task as a graph entity.
-func (c *Component) publishTaskEntity(ctx context.Context, slug string, task *workflow.Task) error {
-	entityID := workflow.TaskEntityID(slug, task.Sequence)
-	planEntityID := workflow.PlanEntityID(slug)
-
-	triples := []message.Triple{
-		{Subject: entityID, Predicate: semspec.TaskTitle, Object: task.Description},
-		{Subject: entityID, Predicate: semspec.TaskDescription, Object: task.Description},
-		{Subject: entityID, Predicate: semspec.PredicateTaskStatus, Object: string(task.Status)},
-		{Subject: entityID, Predicate: semspec.PredicateTaskType, Object: string(task.Type)},
-		{Subject: entityID, Predicate: semspec.TaskOrder, Object: task.Sequence},
-		{Subject: entityID, Predicate: semspec.TaskCreatedAt, Object: task.CreatedAt.Format(time.RFC3339)},
-		{Subject: entityID, Predicate: semspec.TaskPlan, Object: planEntityID},
-		{Subject: entityID, Predicate: semspec.DCTitle, Object: task.Description},
-	}
-
-	if task.PhaseID != "" {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.TaskPhase, Object: task.PhaseID})
-	}
-
-	for _, ac := range task.AcceptanceCriteria {
-		if ac.Given != "" {
-			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.TaskGiven, Object: ac.Given})
-		}
-		if ac.When != "" {
-			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.TaskWhen, Object: ac.When})
-		}
-		if ac.Then != "" {
-			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.TaskThen, Object: ac.Then})
-		}
-	}
-
-	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.TaskEntityType, entityID, triples))
-}
-
 // publishApprovalEntity publishes an approval decision to the graph.
 func (c *Component) publishApprovalEntity(ctx context.Context, targetType, targetID, decision, approvedBy, reason string) error {
 	entityID := workflow.ApprovalEntityID(uuid.New().String())
@@ -146,28 +61,6 @@ func (c *Component) publishApprovalEntity(ctx context.Context, targetType, targe
 	}
 
 	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.ApprovalEntityType, entityID, triples))
-}
-
-// publishPhaseStatusUpdate publishes a phase status change to the graph.
-func (c *Component) publishPhaseStatusUpdate(ctx context.Context, slug string, phase *workflow.Phase) error {
-	// Re-publish the full phase entity with updated status
-	return c.publishPhaseEntity(ctx, slug, phase)
-}
-
-// publishPlanPhasesLink publishes PlanHasPhases and PlanPhase predicates on the plan entity.
-func (c *Component) publishPlanPhasesLink(ctx context.Context, slug string, phases []workflow.Phase) error {
-	planEntityID := workflow.PlanEntityID(slug)
-
-	triples := []message.Triple{
-		{Subject: planEntityID, Predicate: semspec.PlanHasPhases, Object: true},
-	}
-
-	for _, p := range phases {
-		phaseEntityID := workflow.PhaseEntityID(slug, p.Sequence)
-		triples = append(triples, message.Triple{Subject: planEntityID, Predicate: semspec.PlanPhase, Object: phaseEntityID})
-	}
-
-	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.EntityType, planEntityID, triples))
 }
 
 // publishQuestionEntity publishes a question as a graph entity.

@@ -41,7 +41,6 @@ func registerRequestPayloads() {
 	}{
 		{PlannerRequestType, "Planner request from reactive workflow engine", func() any { return &PlannerRequest{} }},
 		{PlanReviewRequestType, "Plan review request from reactive workflow engine", func() any { return &PlanReviewRequest{} }},
-		{PhaseGeneratorRequestType, "Phase generator request from reactive workflow engine", func() any { return &PhaseGeneratorRequest{} }},
 		{PhaseReviewRequestType, "Phase review request from reactive workflow engine", func() any { return &PhaseReviewRequest{} }},
 		{TaskGeneratorRequestType, "Task generator request from reactive workflow engine", func() any { return &TaskGeneratorRequest{} }},
 		{TaskReviewRequestType, "Task review request from reactive workflow engine", func() any { return &TaskReviewRequest{} }},

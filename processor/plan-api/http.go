@@ -11,7 +11,6 @@ import (
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
-	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
@@ -326,43 +325,6 @@ func extractSlugAndEndpoint(path string) (slug, endpoint string) {
 	return slug, endpoint
 }
 
-// extractSlugTaskAndAction extracts slug, taskID, and action from paths like:
-// /plan-api/plans/{slug}/tasks/{taskId}
-// /plan-api/plans/{slug}/tasks/{taskId}/approve
-// /plan-api/plans/{slug}/tasks/{taskId}/reject
-func extractSlugTaskAndAction(path string) (slug, taskID, action string) {
-	// Find /plans/ in the path
-	idx := strings.Index(path, "/plans/")
-	if idx == -1 {
-		return "", "", ""
-	}
-
-	// Get everything after /plans/
-	remainder := path[idx+len("/plans/"):]
-
-	// Split into parts: {slug}/tasks/{taskId}[/action]
-	parts := strings.Split(strings.TrimSuffix(remainder, "/"), "/")
-
-	// Need at least 3 parts: slug, "tasks", taskID
-	if len(parts) < 3 {
-		return "", "", ""
-	}
-
-	// Verify second part is "tasks"
-	if parts[1] != "tasks" {
-		return "", "", ""
-	}
-
-	slug = parts[0]
-	taskID = parts[2]
-
-	// Optional action (approve/reject)
-	if len(parts) > 3 {
-		action = parts[3]
-	}
-
-	return slug, taskID, action
-}
 
 // CreatePlanRequest is the request body for POST /plans.
 type CreatePlanRequest struct {
@@ -400,36 +362,6 @@ type AsyncOperationResponse struct {
 	Message   string `json:"message"`
 }
 
-// ApproveTaskRequest is the request body for POST /plans/{slug}/tasks/{taskId}/approve.
-type ApproveTaskRequest struct {
-	ApprovedBy string `json:"approved_by,omitempty"`
-}
-
-// RejectTaskRequest is the request body for POST /plans/{slug}/tasks/{taskId}/reject.
-type RejectTaskRequest struct {
-	Reason string `json:"reason"`
-}
-
-// CreateTaskHTTPRequest is the HTTP request body for POST /plans/{slug}/tasks.
-// This is separate from workflow.CreateTaskRequest to include JSON tags.
-type CreateTaskHTTPRequest struct {
-	Description        string                         `json:"description"`
-	Type               workflow.TaskType              `json:"type"`
-	AcceptanceCriteria []workflow.AcceptanceCriterion `json:"acceptance_criteria,omitempty"`
-	Files              []string                       `json:"files,omitempty"`
-	DependsOn          []string                       `json:"depends_on,omitempty"`
-}
-
-// UpdateTaskHTTPRequest is the HTTP request body for PATCH /plans/{slug}/tasks/{taskId}.
-// This is separate from workflow.UpdateTaskRequest to include JSON tags.
-type UpdateTaskHTTPRequest struct {
-	Description        *string                        `json:"description,omitempty"`
-	Type               *workflow.TaskType             `json:"type,omitempty"`
-	AcceptanceCriteria []workflow.AcceptanceCriterion `json:"acceptance_criteria,omitempty"`
-	Files              []string                       `json:"files,omitempty"`
-	DependsOn          []string                       `json:"depends_on,omitempty"`
-	Sequence           *int                           `json:"sequence,omitempty"`
-}
 
 // UpdatePlanHTTPRequest is the HTTP request body for PATCH /plans/{slug}.
 // All fields are optional (partial update).
@@ -462,24 +394,6 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 	if err := workflow.ValidateSlug(slug); err != nil {
 		http.Error(w, "Invalid plan slug format", http.StatusBadRequest)
 		return
-	}
-
-	// Route phase-by-ID endpoints (e.g. /phases/{phaseId}/approve).
-	if strings.HasPrefix(endpoint, "phases/") && endpoint != "phases/generate" && endpoint != "phases/approve" && endpoint != "phases/reorder" && endpoint != "phases/retrospective" {
-		_, phaseID, action := extractSlugPhaseAndAction(r.URL.Path)
-		if phaseID != "" {
-			c.handlePhaseByID(w, r, slug, phaseID, action)
-			return
-		}
-	}
-
-	// Route task-by-ID endpoints (e.g. /tasks/{taskId}/approve).
-	if strings.HasPrefix(endpoint, "tasks/") && endpoint != "tasks/generate" && endpoint != "tasks/approve" {
-		_, taskID, action := extractSlugTaskAndAction(r.URL.Path)
-		if taskID != "" {
-			c.handlePlanTask(w, r, slug, taskID, action)
-			return
-		}
 	}
 
 	// Route requirement-by-ID endpoints (e.g. /requirements/{reqId}/deprecate).
@@ -568,14 +482,6 @@ func (c *Component) handlePlanCRUD(w http.ResponseWriter, r *http.Request, slug 
 // Returns true when the endpoint was recognised and handled.
 func (c *Component) handlePhaseCollectionEndpoint(w http.ResponseWriter, r *http.Request, slug, endpoint string) bool {
 	switch endpoint {
-	case "phases":
-		c.handlePlanPhases(w, r, slug)
-	case "phases/generate":
-		requireMethod(w, r, http.MethodPost, func() { c.handleGeneratePhases(w, r, slug) })
-	case "phases/approve":
-		requireMethod(w, r, http.MethodPost, func() { c.handleApproveAllPhases(w, r, slug) })
-	case "phases/reorder":
-		requireMethod(w, r, http.MethodPut, func() { c.handleReorderPhases(w, r, slug) })
 	case "phases/retrospective":
 		requireMethod(w, r, http.MethodGet, func() { c.handlePhasesRetrospective(w, r, slug) })
 	default:
@@ -626,10 +532,6 @@ func (c *Component) handleTaskCollectionEndpoint(w http.ResponseWriter, r *http.
 	switch endpoint {
 	case "tasks":
 		c.handlePlanTasks(w, r, slug)
-	case "tasks/generate":
-		requireMethod(w, r, http.MethodPost, func() { c.handleGenerateTasks(w, r, slug) })
-	case "tasks/approve":
-		requireMethod(w, r, http.MethodPost, func() { c.handleApproveTasksPlan(w, r, slug) })
 	case "execute":
 		requireMethod(w, r, http.MethodPost, func() { c.handleExecutePlan(w, r, slug) })
 	default:
@@ -874,13 +776,11 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 	}
 }
 
-// handlePlanTasks handles GET /plan-api/plans/{slug}/tasks and POST /plan-api/plans/{slug}/tasks.
+// handlePlanTasks handles GET /plan-api/plans/{slug}/tasks.
 func (c *Component) handlePlanTasks(w http.ResponseWriter, r *http.Request, slug string) {
 	switch r.Method {
 	case http.MethodGet:
 		c.handleListTasks(w, r, slug)
-	case http.MethodPost:
-		c.handleCreateTask(w, r, slug)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -910,116 +810,6 @@ func (c *Component) handleListTasks(w http.ResponseWriter, r *http.Request, slug
 	}
 }
 
-// handleGenerateTasks handles POST /plan-api/plans/{slug}/tasks/generate.
-func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, slug string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
-
-	// Create trace context early for consistent usage
-	tc := natsclient.NewTraceContext()
-	ctx := natsclient.ContextWithTrace(r.Context(), tc)
-
-	plan, err := manager.LoadPlan(ctx, slug)
-	if err != nil {
-		if errors.Is(err, workflow.ErrPlanNotFound) {
-			http.Error(w, "Plan not found", http.StatusNotFound)
-			return
-		}
-		c.logger.Error("Failed to load plan", "slug", slug, "error", err)
-		http.Error(w, "Failed to load plan", http.StatusInternalServerError)
-		return
-	}
-
-	// Check if plan is approved and phases are approved
-	if !plan.Approved {
-		http.Error(w, "Plan must be approved before generating tasks", http.StatusBadRequest)
-		return
-	}
-	if !plan.PhasesApproved {
-		http.Error(w, "Phases must be approved before generating tasks. Use POST /phases/generate first.", http.StatusBadRequest)
-		return
-	}
-
-	// Trigger task generator
-	requestID := uuid.New().String()
-
-	// Load phases for phase-aware task generation
-	var phaseInfos []prompts.PhaseInfo
-	phases, err := manager.LoadPhases(ctx, slug)
-	if err == nil && len(phases) > 0 {
-		phaseInfos = make([]prompts.PhaseInfo, len(phases))
-		for i, p := range phases {
-			phaseInfos[i] = prompts.PhaseInfo{
-				ID:          p.ID,
-				Sequence:    p.Sequence,
-				Name:        p.Name,
-				Description: p.Description,
-			}
-		}
-	}
-
-	fullPrompt := prompts.TaskGeneratorPrompt(prompts.TaskGeneratorParams{
-		Goal:           plan.Goal,
-		Context:        plan.Context,
-		ScopeInclude:   plan.Scope.Include,
-		ScopeExclude:   plan.Scope.Exclude,
-		ScopeProtected: plan.Scope.DoNotTouch,
-		Title:          plan.Title,
-		Phases:         phaseInfos,
-	})
-
-	triggerPayload := workflow.NewSemstreamsTrigger(
-		"task-review-loop", // workflowID
-		"task-generator",   // role
-		fullPrompt,         // prompt
-		requestID,          // requestID
-		plan.Slug,          // slug
-		plan.Title,         // title
-		plan.Goal,          // description
-		tc.TraceID,         // traceID
-		plan.ProjectID,     // projectID
-		plan.Scope.Include, // scopePatterns
-		true,               // auto
-	)
-
-	baseMsg := message.NewBaseMessage(
-		workflow.WorkflowTriggerType,
-		triggerPayload,
-		"plan-api",
-	)
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		c.logger.Error("Failed to marshal task-review-loop trigger", "error", err)
-		http.Error(w, "Internal error", http.StatusInternalServerError)
-		return
-	}
-
-	if err := c.natsClient.PublishToStream(ctx, "workflow.trigger.task-review-loop", data); err != nil {
-		c.logger.Error("Failed to publish task-review-loop trigger", "error", err)
-		http.Error(w, "Failed to start task generation", http.StatusInternalServerError)
-		return
-	}
-
-	c.logger.Info("Triggered task-review-loop via REST API",
-		"request_id", requestID,
-		"slug", plan.Slug,
-		"trace_id", tc.TraceID)
-
-	resp := &AsyncOperationResponse{
-		Slug:      plan.Slug,
-		RequestID: requestID,
-		TraceID:   tc.TraceID,
-		Message:   "Task generation started",
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		c.logger.Warn("Failed to encode response", "error", err)
-	}
-}
 
 // handleExecutePlan handles POST /plan-api/plans/{slug}/execute.
 func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, slug string) {
@@ -1046,18 +836,6 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 	// Check if plan is approved
 	if !plan.Approved {
 		http.Error(w, "Plan must be approved before execution", http.StatusBadRequest)
-		return
-	}
-
-	// For plans using the old phase/task model, require tasks to be approved.
-	// Legacy plans (Status empty) still work with just Approved=true.
-	// Reactive-mode plans (status=ready_for_execution or approved with scenarios)
-	// skip this guard because they use requirements/scenarios instead of tasks.
-	if plan.Status != "" &&
-		plan.Status != workflow.StatusReadyForExecution &&
-		plan.Status != workflow.StatusApproved &&
-		!plan.TasksApproved {
-		http.Error(w, "Tasks must be approved before execution", http.StatusBadRequest)
 		return
 	}
 
@@ -1102,228 +880,14 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 	}
 }
 
-// handleApproveTasksPlan handles POST /plan-api/plans/{slug}/tasks/approve.
-// Approves the generated tasks for execution.
-func (c *Component) handleApproveTasksPlan(w http.ResponseWriter, r *http.Request, slug string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
 
-	plan, err := manager.LoadPlan(r.Context(), slug)
-	if err != nil {
-		if errors.Is(err, workflow.ErrPlanNotFound) {
-			http.Error(w, "Plan not found", http.StatusNotFound)
-			return
-		}
-		c.logger.Error("Failed to load plan", "slug", slug, "error", err)
-		http.Error(w, "Failed to load plan", http.StatusInternalServerError)
-		return
-	}
 
-	// Check preconditions
-	if !plan.Approved {
-		http.Error(w, "Plan must be approved before approving tasks", http.StatusBadRequest)
-		return
-	}
 
-	// Verify tasks exist
-	tasks, err := manager.LoadTasks(r.Context(), slug)
-	if err != nil || len(tasks) == 0 {
-		http.Error(w, "Tasks must be generated before they can be approved", http.StatusBadRequest)
-		return
-	}
 
-	// Approve tasks
-	if err := manager.ApproveTasksPlan(r.Context(), plan); err != nil {
-		if errors.Is(err, workflow.ErrTasksAlreadyApproved) {
-			http.Error(w, "Tasks are already approved", http.StatusConflict)
-			return
-		}
-		c.logger.Error("Failed to approve tasks", "slug", slug, "error", err)
-		http.Error(w, "Failed to approve tasks", http.StatusInternalServerError)
-		return
-	}
-
-	c.logger.Info("Tasks approved via REST API", "slug", slug)
-
-	resp := &PlanWithStatus{
-		Plan:  plan,
-		Stage: c.determinePlanStage(plan),
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		c.logger.Warn("Failed to encode response", "error", err)
-	}
-}
-
-// handlePlanTask handles endpoints for individual tasks:
-// GET /plans/{slug}/tasks/{taskId}
-// PATCH /plans/{slug}/tasks/{taskId}
-// DELETE /plans/{slug}/tasks/{taskId}
-// POST /plans/{slug}/tasks/{taskId}/approve
-// POST /plans/{slug}/tasks/{taskId}/reject
-func (c *Component) handlePlanTask(w http.ResponseWriter, r *http.Request, slug, taskID, action string) {
-	switch action {
-	case "":
-		// Task-level operations (GET, PATCH, DELETE)
-		switch r.Method {
-		case http.MethodGet:
-			c.handleGetTask(w, r, slug, taskID)
-		case http.MethodPatch:
-			c.handleUpdateTask(w, r, slug, taskID)
-		case http.MethodDelete:
-			c.handleDeleteTask(w, r, slug, taskID)
-		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	case "approve":
-		// POST /plans/{slug}/tasks/{taskId}/approve
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		c.handleApproveTask(w, r, slug, taskID)
-	case "reject":
-		// POST /plans/{slug}/tasks/{taskId}/reject
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		c.handleRejectTask(w, r, slug, taskID)
-	default:
-		http.Error(w, "Unknown task action", http.StatusNotFound)
-	}
-}
-
-// handleGetTask handles GET /plans/{slug}/tasks/{taskId}.
-func (c *Component) handleGetTask(w http.ResponseWriter, r *http.Request, slug, taskID string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
-
-	task, err := manager.GetTask(r.Context(), slug, taskID)
-	if err != nil {
-		if errors.Is(err, workflow.ErrTaskNotFound) {
-			http.Error(w, "Task not found", http.StatusNotFound)
-			return
-		}
-		c.logger.Error("Failed to get task", "slug", slug, "task_id", taskID, "error", err)
-		http.Error(w, "Failed to get task", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(task); err != nil {
-		c.logger.Warn("Failed to encode response", "error", err)
-	}
-}
-
-// handleApproveTask handles POST /plans/{slug}/tasks/{taskId}/approve.
-func (c *Component) handleApproveTask(w http.ResponseWriter, r *http.Request, slug, taskID string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
-
-	// Limit request body size
-	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
-
-	var req ApproveTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Default approver to "system" if not provided
-	approvedBy := req.ApprovedBy
-	if approvedBy == "" {
-		approvedBy = "system"
-	}
-
-	task, err := manager.ApproveTask(r.Context(), slug, taskID, approvedBy)
-	if err != nil {
-		if errors.Is(err, workflow.ErrTaskNotFound) {
-			http.Error(w, "Task not found", http.StatusNotFound)
-			return
-		}
-		if errors.Is(err, workflow.ErrTaskNotPendingApproval) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-		c.logger.Error("Failed to approve task", "slug", slug, "task_id", taskID, "error", err)
-		http.Error(w, "Failed to approve task", http.StatusInternalServerError)
-		return
-	}
-
-	c.logger.Info("Task approved via REST API", "slug", slug, "task_id", taskID, "approved_by", approvedBy)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(task); err != nil {
-		c.logger.Warn("Failed to encode response", "error", err)
-	}
-}
-
-// handleRejectTask handles POST /plans/{slug}/tasks/{taskId}/reject.
-func (c *Component) handleRejectTask(w http.ResponseWriter, r *http.Request, slug, taskID string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
-
-	// Limit request body size
-	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
-
-	var req RejectTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if req.Reason == "" {
-		http.Error(w, "Rejection reason is required", http.StatusBadRequest)
-		return
-	}
-
-	task, err := manager.RejectTask(r.Context(), slug, taskID, req.Reason)
-	if err != nil {
-		if errors.Is(err, workflow.ErrTaskNotFound) {
-			http.Error(w, "Task not found", http.StatusNotFound)
-			return
-		}
-		if errors.Is(err, workflow.ErrTaskNotPendingApproval) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-		c.logger.Error("Failed to reject task", "slug", slug, "task_id", taskID, "error", err)
-		http.Error(w, "Failed to reject task", http.StatusInternalServerError)
-		return
-	}
-
-	c.logger.Info("Task rejected via REST API", "slug", slug, "task_id", taskID, "reason", req.Reason)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(task); err != nil {
-		c.logger.Warn("Failed to encode response", "error", err)
-	}
-}
 
 // determinePlanStage determines the current stage of a plan.
 func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 	switch plan.EffectiveStatus() {
-	case workflow.StatusTasksApproved:
-		return "tasks_approved"
-	case workflow.StatusTasksGenerated:
-		return "tasks_generated"
-	case workflow.StatusPhasesApproved:
-		return "phases_approved"
-	case workflow.StatusPhasesGenerated:
-		return "phases_generated"
 	case workflow.StatusApproved:
 		return "approved"
 	case workflow.StatusImplementing:
@@ -1346,177 +910,8 @@ func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 	}
 }
 
-// handleCreateTask handles POST /plans/{slug}/tasks.
-func (c *Component) handleCreateTask(w http.ResponseWriter, r *http.Request, slug string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
 
-	// Limit request body size
-	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
-	var req CreateTaskHTTPRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Validate required fields
-	if req.Description == "" {
-		http.Error(w, "description is required", http.StatusBadRequest)
-		return
-	}
-
-	// Validate task type if provided (empty is allowed and will default to TaskTypeImplement)
-	if req.Type != "" {
-		validTypes := []workflow.TaskType{
-			workflow.TaskTypeImplement,
-			workflow.TaskTypeTest,
-			workflow.TaskTypeDocument,
-			workflow.TaskTypeReview,
-			workflow.TaskTypeRefactor,
-		}
-		isValid := false
-		for _, vt := range validTypes {
-			if req.Type == vt {
-				isValid = true
-				break
-			}
-		}
-		if !isValid {
-			http.Error(w, "invalid task type", http.StatusBadRequest)
-			return
-		}
-	}
-
-	// Convert to Manager request
-	managerReq := workflow.CreateTaskRequest{
-		Description:        req.Description,
-		Type:               req.Type,
-		AcceptanceCriteria: req.AcceptanceCriteria,
-		Files:              req.Files,
-		DependsOn:          req.DependsOn,
-	}
-
-	task, err := manager.CreateTaskManual(r.Context(), slug, managerReq)
-	if err != nil {
-		if errors.Is(err, workflow.ErrPlanNotFound) {
-			http.Error(w, "Plan not found", http.StatusNotFound)
-			return
-		}
-		c.logger.Error("Failed to create task", "slug", slug, "error", err)
-		http.Error(w, "Failed to create task", http.StatusInternalServerError)
-		return
-	}
-
-	c.logger.Info("Task created via REST API", "slug", slug, "task_id", task.ID)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(task); err != nil {
-		c.logger.Warn("Failed to encode response", "error", err)
-	}
-}
-
-// handleUpdateTask handles PATCH /plans/{slug}/tasks/{taskId}.
-func (c *Component) handleUpdateTask(w http.ResponseWriter, r *http.Request, slug, taskID string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
-
-	// Limit request body size
-	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
-
-	var req UpdateTaskHTTPRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Validate task type if provided
-	if req.Type != nil && *req.Type != "" {
-		validTypes := []workflow.TaskType{
-			workflow.TaskTypeImplement,
-			workflow.TaskTypeTest,
-			workflow.TaskTypeDocument,
-			workflow.TaskTypeReview,
-			workflow.TaskTypeRefactor,
-		}
-		isValid := false
-		for _, vt := range validTypes {
-			if *req.Type == vt {
-				isValid = true
-				break
-			}
-		}
-		if !isValid {
-			http.Error(w, "Invalid task type", http.StatusBadRequest)
-			return
-		}
-	}
-
-	// Convert to Manager request
-	managerReq := workflow.UpdateTaskRequest{
-		Description:        req.Description,
-		Type:               req.Type,
-		AcceptanceCriteria: req.AcceptanceCriteria,
-		Files:              req.Files,
-		DependsOn:          req.DependsOn,
-		Sequence:           req.Sequence,
-	}
-
-	task, err := manager.UpdateTask(r.Context(), slug, taskID, managerReq)
-	if err != nil {
-		if errors.Is(err, workflow.ErrTaskNotFound) {
-			http.Error(w, "Task not found", http.StatusNotFound)
-			return
-		}
-		if errors.Is(err, workflow.ErrInvalidTransition) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-		c.logger.Error("Failed to update task", "slug", slug, "task_id", taskID, "error", err)
-		http.Error(w, "Failed to update task", http.StatusInternalServerError)
-		return
-	}
-
-	c.logger.Info("Task updated via REST API", "slug", slug, "task_id", taskID)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(task); err != nil {
-		c.logger.Warn("Failed to encode response", "error", err)
-	}
-}
-
-// handleDeleteTask handles DELETE /plans/{slug}/tasks/{taskId}.
-func (c *Component) handleDeleteTask(w http.ResponseWriter, r *http.Request, slug, taskID string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
-
-	err := manager.DeleteTask(r.Context(), slug, taskID)
-	if err != nil {
-		if errors.Is(err, workflow.ErrTaskNotFound) {
-			http.Error(w, "Task not found", http.StatusNotFound)
-			return
-		}
-		if errors.Is(err, workflow.ErrInvalidTransition) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-		c.logger.Error("Failed to delete task", "slug", slug, "task_id", taskID, "error", err)
-		http.Error(w, "Failed to delete task", http.StatusInternalServerError)
-		return
-	}
-
-	c.logger.Info("Task deleted via REST API", "slug", slug, "task_id", taskID)
-
-	w.WriteHeader(http.StatusNoContent)
-}
 
 // handleUpdatePlan handles PATCH /plans/{slug}.
 func (c *Component) handleUpdatePlan(w http.ResponseWriter, r *http.Request, slug string) {

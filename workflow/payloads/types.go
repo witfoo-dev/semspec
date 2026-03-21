@@ -162,61 +162,6 @@ var PlanReviewRequestType = message.Type{
 // Phase review loop payloads
 // ---------------------------------------------------------------------------
 
-// PhaseGeneratorRequest is the typed payload sent to the phase-generator component.
-// Replaces the generic workflow.TriggerPayload for phase generation dispatch.
-type PhaseGeneratorRequest struct {
-	ExecutionID   string   `json:"execution_id,omitempty"`
-	TaskID        string   `json:"task_id,omitempty"`
-	WorkflowSlug  string   `json:"workflow_slug,omitempty"`
-	RequestID     string   `json:"request_id"`
-	Slug          string   `json:"slug"`
-	Title         string   `json:"title"`
-	Description   string   `json:"description,omitempty"`
-	ProjectID     string   `json:"project_id,omitempty"`
-	TraceID       string   `json:"trace_id,omitempty"`
-	LoopID        string   `json:"loop_id,omitempty"`
-	Prompt        string   `json:"prompt,omitempty"`
-	Role          string   `json:"role,omitempty"`
-	Model         string   `json:"model,omitempty"`
-	ScopePatterns []string `json:"scope_patterns,omitempty"`
-
-	// Revision indicates this is a retry with reviewer feedback.
-	Revision         bool   `json:"revision,omitempty"`
-	PreviousFindings string `json:"previous_findings,omitempty"`
-}
-
-// Schema implements message.Payload.
-func (r *PhaseGeneratorRequest) Schema() message.Type {
-	return PhaseGeneratorRequestType
-}
-
-// Validate implements message.Payload.
-func (r *PhaseGeneratorRequest) Validate() error {
-	if r.Slug == "" {
-		return fmt.Errorf("slug is required")
-	}
-	return nil
-}
-
-// MarshalJSON implements json.Marshaler.
-func (r *PhaseGeneratorRequest) MarshalJSON() ([]byte, error) {
-	type Alias PhaseGeneratorRequest
-	return json.Marshal((*Alias)(r))
-}
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (r *PhaseGeneratorRequest) UnmarshalJSON(data []byte) error {
-	type Alias PhaseGeneratorRequest
-	return json.Unmarshal(data, (*Alias)(r))
-}
-
-// PhaseGeneratorRequestType is the message type for phase generator requests.
-var PhaseGeneratorRequestType = message.Type{
-	Domain:   "workflow",
-	Category: "phase-generator-request",
-	Version:  "v1",
-}
-
 // PhaseReviewRequest is the typed payload sent to the plan-reviewer component
 // for phase review. Uses the same reviewer as plan review but with phase content.
 type PhaseReviewRequest struct {

@@ -168,17 +168,16 @@ func TestStatus_CanTransitionTo(t *testing.T) {
 		{StatusDrafted, StatusRejected, true},
 		{StatusReviewed, StatusApproved, true},
 		{StatusReviewed, StatusRejected, true},
-		{StatusApproved, StatusPhasesGenerated, true},
-		{StatusApproved, StatusTasksGenerated, false}, // must go through phases
-		{StatusApproved, StatusImplementing, false},   // must go through phases
-		{StatusPhasesGenerated, StatusPhasesApproved, true},
-		{StatusPhasesGenerated, StatusRejected, true},
-		{StatusPhasesApproved, StatusTasksGenerated, true},
-		{StatusPhasesApproved, StatusRejected, true},
-		{StatusTasksGenerated, StatusTasksApproved, true},
-		{StatusTasksGenerated, StatusImplementing, false},
-		{StatusTasksApproved, StatusImplementing, true},
-		{StatusTasksApproved, StatusComplete, false},
+		{StatusApproved, StatusRequirementsGenerated, true},
+		{StatusApproved, StatusReadyForExecution, true},
+		{StatusApproved, StatusImplementing, false},
+		{StatusRequirementsGenerated, StatusScenariosGenerated, true},
+		{StatusRequirementsGenerated, StatusRejected, true},
+		{StatusScenariosGenerated, StatusReviewed, true},
+		{StatusScenariosGenerated, StatusReadyForExecution, true},
+		{StatusScenariosGenerated, StatusRejected, true},
+		{StatusReadyForExecution, StatusImplementing, true},
+		{StatusReadyForExecution, StatusRejected, true},
 		{StatusImplementing, StatusComplete, true},
 		{StatusComplete, StatusArchived, true},
 		{StatusArchived, StatusCreated, false},
@@ -281,10 +280,9 @@ func TestManager_ArchivePlan(t *testing.T) {
 	_ = m.UpdatePlanStatus(plan.Slug, StatusDrafted)
 	_ = m.UpdatePlanStatus(plan.Slug, StatusReviewed)
 	_ = m.UpdatePlanStatus(plan.Slug, StatusApproved)
-	_ = m.UpdatePlanStatus(plan.Slug, StatusPhasesGenerated)
-	_ = m.UpdatePlanStatus(plan.Slug, StatusPhasesApproved)
-	_ = m.UpdatePlanStatus(plan.Slug, StatusTasksGenerated)
-	_ = m.UpdatePlanStatus(plan.Slug, StatusTasksApproved)
+	_ = m.UpdatePlanStatus(plan.Slug, StatusRequirementsGenerated)
+	_ = m.UpdatePlanStatus(plan.Slug, StatusScenariosGenerated)
+	_ = m.UpdatePlanStatus(plan.Slug, StatusReadyForExecution)
 	_ = m.UpdatePlanStatus(plan.Slug, StatusImplementing)
 	_ = m.UpdatePlanStatus(plan.Slug, StatusComplete)
 

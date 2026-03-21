@@ -41,7 +41,6 @@ func TestSoftwareFragments(t *testing.T) {
 		"software.requirement-generator.system-base",
 		"software.scenario-generator.system-base",
 		"software.task-generator.system-base",
-		"software.phase-generator.system-base",
 		"software.gap-detection",
 	}
 	for _, id := range required {

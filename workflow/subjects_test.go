@@ -47,24 +47,6 @@ func TestPlanRevisionNeededEvent_RoundTrip(t *testing.T) {
 	assert.JSONEq(t, string(event.Findings), string(decoded.Findings))
 }
 
-func TestTasksApprovedEvent_RoundTrip(t *testing.T) {
-	event := TasksApprovedEvent{
-		Slug:      "auth-refresh",
-		Verdict:   "approved",
-		Summary:   "8 tasks generated",
-		TaskCount: 8,
-	}
-
-	data, err := json.Marshal(event)
-	require.NoError(t, err)
-
-	var decoded TasksApprovedEvent
-	err = json.Unmarshal(data, &decoded)
-	require.NoError(t, err)
-
-	assert.Equal(t, event, decoded)
-}
-
 func TestTaskExecutionCompleteEvent_RoundTrip(t *testing.T) {
 	event := TaskExecutionCompleteEvent{
 		TaskID:     "task-001",
@@ -86,9 +68,6 @@ func TestTypedSubjectPatterns(t *testing.T) {
 	assert.Equal(t, "workflow.events.plan.approved", PlanApproved.Pattern)
 	assert.Equal(t, "workflow.events.plan.revision_needed", PlanRevisionNeeded.Pattern)
 	assert.Equal(t, "workflow.events.plan.review_complete", PlanReviewLoopComplete.Pattern)
-	assert.Equal(t, "workflow.events.tasks.approved", TasksApproved.Pattern)
-	assert.Equal(t, "workflow.events.tasks.revision_needed", TasksRevisionNeeded.Pattern)
-	assert.Equal(t, "workflow.events.tasks.review_complete", TaskReviewLoopComplete.Pattern)
 	assert.Equal(t, "workflow.events.task.validation_passed", StructuralValidationPassed.Pattern)
 	assert.Equal(t, "workflow.events.task.rejection_categorized", RejectionCategorized.Pattern)
 	assert.Equal(t, "workflow.events.task.execution_complete", TaskExecutionComplete.Pattern)

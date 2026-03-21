@@ -59,7 +59,6 @@ const (
 	RoleRequirementGenerator Role = "requirement-generator"
 	RoleScenarioGenerator    Role = "scenario-generator"
 	RoleTaskGenerator        Role = "task-generator"
-	RolePhaseGenerator       Role = "phase-generator"
 	RolePlanCoordinator      Role = "plan-coordinator"
 	RoleCoordinator          Role = "coordinator"
 )

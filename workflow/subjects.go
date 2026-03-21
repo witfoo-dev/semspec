@@ -60,69 +60,13 @@ type ScenariosGeneratedEvent struct {
 	TraceID       string `json:"trace_id,omitempty"`
 }
 
-// Phase review lifecycle events (from phase-review-loop workflow)
+// Phase generation lifecycle event (from phase-generator workflow)
 
 // PhasesGeneratedEvent is published when phases are generated from a plan.
 type PhasesGeneratedEvent struct {
 	Slug       string `json:"slug"`
 	PhaseCount int    `json:"phase_count"`
 	RequestID  string `json:"request_id,omitempty"`
-}
-
-// PhasesApprovedEvent is published when generated phases pass review.
-type PhasesApprovedEvent struct {
-	Slug          string          `json:"slug"`
-	Verdict       string          `json:"verdict"`
-	Summary       string          `json:"summary,omitempty"`
-	Findings      json.RawMessage `json:"findings,omitempty"`
-	LLMRequestIDs []string        `json:"llm_request_ids,omitempty"`
-}
-
-// PhasesRevisionNeededEvent is published when generated phases need revision.
-type PhasesRevisionNeededEvent struct {
-	Slug              string          `json:"slug"`
-	Iteration         int             `json:"iteration"`
-	Verdict           string          `json:"verdict"`
-	Findings          json.RawMessage `json:"findings,omitempty"`
-	FormattedFindings string          `json:"formatted_findings,omitempty"`
-	Summary           string          `json:"summary,omitempty"`
-	LLMRequestIDs     []string        `json:"llm_request_ids,omitempty"`
-}
-
-// PhaseReviewLoopCompleteEvent is published when the phase review loop finishes.
-type PhaseReviewLoopCompleteEvent struct {
-	Slug       string `json:"slug"`
-	Iterations int    `json:"iterations"`
-}
-
-// Task review lifecycle events (from task-review-loop workflow)
-
-// TasksApprovedEvent is published when generated tasks pass review.
-type TasksApprovedEvent struct {
-	Slug              string          `json:"slug"`
-	Verdict           string          `json:"verdict"`
-	Summary           string          `json:"summary,omitempty"`
-	TaskCount         int             `json:"task_count,omitempty"`
-	Findings          json.RawMessage `json:"findings,omitempty"`
-	FormattedFindings string          `json:"formatted_findings,omitempty"`
-	LLMRequestIDs     []string        `json:"llm_request_ids,omitempty"`
-}
-
-// TasksRevisionNeededEvent is published when generated tasks need revision.
-type TasksRevisionNeededEvent struct {
-	Slug              string          `json:"slug"`
-	Iteration         int             `json:"iteration"`
-	Verdict           string          `json:"verdict"`
-	Findings          json.RawMessage `json:"findings,omitempty"`
-	FormattedFindings string          `json:"formatted_findings,omitempty"`
-	Summary           string          `json:"summary,omitempty"`
-	LLMRequestIDs     []string        `json:"llm_request_ids,omitempty"`
-}
-
-// TaskReviewLoopCompleteEvent is published when the task review loop finishes.
-type TaskReviewLoopCompleteEvent struct {
-	Slug       string `json:"slug"`
-	Iterations int    `json:"iterations"`
 }
 
 // Task execution lifecycle events (from task-execution-loop workflow)
@@ -178,23 +122,9 @@ var (
 	PlanReviewLoopComplete = natsclient.NewSubject[PlanReviewLoopCompleteEvent](
 		"workflow.events.plan.review_complete")
 
-	// Phase review events
+	// Phase generation event
 	PhasesGenerated = natsclient.NewSubject[PhasesGeneratedEvent](
 		"workflow.events.phases.generated")
-	PhasesApproved = natsclient.NewSubject[PhasesApprovedEvent](
-		"workflow.events.phases.approved")
-	PhasesRevisionNeeded = natsclient.NewSubject[PhasesRevisionNeededEvent](
-		"workflow.events.phases.revision_needed")
-	PhaseReviewLoopComplete = natsclient.NewSubject[PhaseReviewLoopCompleteEvent](
-		"workflow.events.phases.review_complete")
-
-	// Task review events
-	TasksApproved = natsclient.NewSubject[TasksApprovedEvent](
-		"workflow.events.tasks.approved")
-	TasksRevisionNeeded = natsclient.NewSubject[TasksRevisionNeededEvent](
-		"workflow.events.tasks.revision_needed")
-	TaskReviewLoopComplete = natsclient.NewSubject[TaskReviewLoopCompleteEvent](
-		"workflow.events.tasks.review_complete")
 
 	// Requirement/Scenario generation events (ADR-026 cascade)
 	RequirementsGenerated = natsclient.NewSubject[RequirementsGeneratedEvent](

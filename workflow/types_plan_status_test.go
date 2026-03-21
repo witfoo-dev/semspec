@@ -16,10 +16,6 @@ func TestPlanStatus_IsValid_NewStatuses(t *testing.T) {
 		{StatusDrafted, true},
 		{StatusReviewed, true},
 		{StatusApproved, true},
-		{StatusPhasesGenerated, true},
-		{StatusPhasesApproved, true},
-		{StatusTasksGenerated, true},
-		{StatusTasksApproved, true},
 		{StatusImplementing, true},
 		{StatusComplete, true},
 		{StatusArchived, true},
@@ -57,20 +53,16 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		{StatusApproved, StatusRequirementsGenerated, true},
 		// approved -> ready_for_execution (auto-approve skips req/scenario step)
 		{StatusApproved, StatusReadyForExecution, true},
-		// approved -> phases_generated (legacy direct flow still valid)
-		{StatusApproved, StatusPhasesGenerated, true},
+		// approved -> rejected (review loop escalation)
+		{StatusApproved, StatusRejected, true},
 
 		// requirements_generated -> scenarios_generated
 		{StatusRequirementsGenerated, StatusScenariosGenerated, true},
 		// requirements_generated -> rejected
 		{StatusRequirementsGenerated, StatusRejected, true},
-		// requirements_generated -> phases_generated (invalid, must go through scenarios)
-		{StatusRequirementsGenerated, StatusPhasesGenerated, false},
 
 		// scenarios_generated -> reviewed (review happens after scenario generation)
 		{StatusScenariosGenerated, StatusReviewed, true},
-		// scenarios_generated -> phases_generated (static mode, review skipped)
-		{StatusScenariosGenerated, StatusPhasesGenerated, true},
 		// scenarios_generated -> ready_for_execution (reactive mode, review skipped)
 		{StatusScenariosGenerated, StatusReadyForExecution, true},
 		// scenarios_generated -> rejected

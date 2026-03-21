@@ -568,24 +568,10 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 			reflect.TypeOf(aggregation.ReviewerSummary{}),
 			reflect.TypeOf(aggregation.SynthesisStats{}),
 			reflect.TypeOf(prompts.ReviewFinding{}),
-			// Phase types
-			reflect.TypeOf(workflow.Phase{}),
-			reflect.TypeOf(workflow.PhaseStatus("")),
-			reflect.TypeOf(workflow.PhaseAgentConfig{}),
-			reflect.TypeOf(PhaseStats{}),
 		},
 		RequestBodyTypes: []reflect.Type{
 			reflect.TypeOf(CreatePlanRequest{}),
-			reflect.TypeOf(CreatePhaseHTTPRequest{}),
-			reflect.TypeOf(UpdatePhaseHTTPRequest{}),
-			reflect.TypeOf(ReorderPhasesHTTPRequest{}),
-			reflect.TypeOf(ApprovePhaseHTTPRequest{}),
-			reflect.TypeOf(RejectPhaseHTTPRequest{}),
 			reflect.TypeOf(UpdatePlanHTTPRequest{}),
-			reflect.TypeOf(CreateTaskHTTPRequest{}),
-			reflect.TypeOf(UpdateTaskHTTPRequest{}),
-			reflect.TypeOf(ApproveTaskRequest{}),
-			reflect.TypeOf(RejectTaskRequest{}),
 		},
 	}
 }

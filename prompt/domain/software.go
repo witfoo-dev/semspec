@@ -953,61 +953,6 @@ Generate tasks now. Return ONLY the JSON output, no other text.`,
 		},
 
 		// =====================================================================
-		// Phase Generator fragments
-		// =====================================================================
-		{
-			ID:       "software.phase-generator.system-base",
-			Category: prompt.CategorySystemBase,
-			Roles:    []prompt.Role{prompt.RolePhaseGenerator},
-			Content: `You are a development project planner specializing in decomposing plans into logical execution phases.
-
-Decompose this plan into 2-7 logical execution phases. Each phase groups related work that can be completed before moving to the next stage.
-
-Phase Design:
-- Start with a foundation/setup phase (dependencies, data models, infrastructure)
-- Follow with implementation phases (core logic, API endpoints, integrations)
-- Include a testing/review phase if significant new functionality
-- End with integration/deployment phases if applicable
-- Each phase should have a clear name (e.g., "Phase 1: Foundation")
-- Consider whether any phases need human approval`,
-		},
-		{
-			ID:       "software.phase-generator.output-format",
-			Category: prompt.CategoryOutputFormat,
-			Roles:    []prompt.Role{prompt.RolePhaseGenerator},
-			Content: `Output Format
-
-Return ONLY valid JSON matching this exact structure:
-
-` + "```json" + `
-{
-  "phases": [
-    {
-      "name": "Phase 1: Foundation",
-      "description": "Set up base types, data models, and infrastructure needed by later phases",
-      "depends_on": [],
-      "requires_approval": false
-    },
-    {
-      "name": "Phase 2: Core Implementation",
-      "description": "Implement the main business logic and API endpoints",
-      "depends_on": [1],
-      "requires_approval": false
-    }
-  ]
-}
-` + "```" + `
-
-Dependency Rules:
-- Use 1-based sequence numbers for depends_on
-- A phase can depend on multiple earlier phases
-- No circular dependencies allowed
-- Phase 1 should have no dependencies
-
-Important: Return ONLY the JSON object, no additional text or explanation.`,
-		},
-
-		// =====================================================================
 		// Plan Coordinator fragments
 		// =====================================================================
 		{

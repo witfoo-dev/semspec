@@ -81,11 +81,6 @@ func TestProductionSoftwareAllRoles(t *testing.T) {
 			[]string{"code reviewer"},
 		},
 		{
-			prompt.RolePhaseGenerator, prompt.ProviderAnthropic,
-			[]string{"decomposing plans into logical execution phases", "<identity>"},
-			[]string{"code reviewer"},
-		},
-		{
 			prompt.RolePlanCoordinator, prompt.ProviderOpenAI,
 			[]string{"planning coordinator", "## Identity"},
 			[]string{"code reviewer"},
@@ -133,8 +128,7 @@ func TestProductionSoftwareGapDetectionAllRoles(t *testing.T) {
 		prompt.RoleDeveloper, prompt.RolePlanner, prompt.RoleReviewer,
 		prompt.RolePlanReviewer, prompt.RoleTaskReviewer,
 		prompt.RoleRequirementGenerator, prompt.RoleScenarioGenerator,
-		prompt.RoleTaskGenerator, prompt.RolePhaseGenerator,
-		prompt.RolePlanCoordinator,
+		prompt.RoleTaskGenerator, prompt.RolePlanCoordinator,
 	}
 
 	for _, role := range roles {

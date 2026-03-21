@@ -91,40 +91,6 @@ func (r *ReviewResult) UnmarshalJSON(data []byte) error {
 }
 
 // ---------------------------------------------------------------------------
-// Phase generator result
-// ---------------------------------------------------------------------------
-
-// PhaseGeneratorResult is the output from the phase-generator component callback.
-type PhaseGeneratorResult struct {
-	RequestID     string          `json:"request_id"`
-	Slug          string          `json:"slug"`
-	Phases        json.RawMessage `json:"phases"`
-	PhaseCount    int             `json:"phase_count"`
-	Status        string          `json:"status"`
-	LLMRequestIDs []string        `json:"llm_request_ids,omitempty"`
-}
-
-// Schema implements message.Payload.
-func (r *PhaseGeneratorResult) Schema() message.Type {
-	return message.Type{Domain: "workflow", Category: "phase-generator-result", Version: "v1"}
-}
-
-// Validate implements message.Payload.
-func (r *PhaseGeneratorResult) Validate() error { return nil }
-
-// MarshalJSON implements json.Marshaler.
-func (r *PhaseGeneratorResult) MarshalJSON() ([]byte, error) {
-	type Alias PhaseGeneratorResult
-	return json.Marshal((*Alias)(r))
-}
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (r *PhaseGeneratorResult) UnmarshalJSON(data []byte) error {
-	type Alias PhaseGeneratorResult
-	return json.Unmarshal(data, (*Alias)(r))
-}
-
-// ---------------------------------------------------------------------------
 // Task generator result
 // ---------------------------------------------------------------------------
 
