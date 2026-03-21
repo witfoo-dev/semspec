@@ -23,6 +23,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | [docs/09-sop-system.md](docs/09-sop-system.md) | SOP authoring, ingestion, and enforcement |
 | [docs/10-behavioral-controls.md](docs/10-behavioral-controls.md) | Behavioral controls for autonomous agents |
 | [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) | Execution pipeline: NATS subjects, consumers, payload types |
+| [docs/12-plan-api.md](docs/12-plan-api.md) | Plan API: requirements, scenarios, change proposals |
 
 ## What Semspec IS
 

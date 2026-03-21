@@ -78,6 +78,14 @@ Reference for the full semspec execution pipeline — from plan creation through
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Human Review Points
+
+Between plan approval and `/execute`, humans can review, edit, or delete the generated
+Requirements and Scenarios via the REST API. This is the primary quality gate before execution
+commits resources. When `auto_approve` is enabled on plan-coordinator, the pipeline skips this
+gate and flows directly to execution. See [Plan API Reference](12-plan-api.md) for the full
+endpoint reference.
+
 ## NATS Subject Reference
 
 ### Plan Phase
