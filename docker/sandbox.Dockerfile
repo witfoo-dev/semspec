@@ -67,10 +67,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # Usage: docker compose build --build-arg SANDBOX_UID=$(id -u) --build-arg SANDBOX_GID=$(id -g) sandbox
 ARG SANDBOX_UID=1000
 ARG SANDBOX_GID=1000
-RUN groupadd -g ${SANDBOX_GID} sandbox \
-    && useradd -m -s /bin/bash -u ${SANDBOX_UID} -g ${SANDBOX_GID} sandbox \
+RUN groupadd -f -g ${SANDBOX_GID} sandbox \
+    && useradd -m -s /bin/bash -u ${SANDBOX_UID} -g ${SANDBOX_GID} sandbox || true \
     && mkdir -p /go/pkg/mod \
-    && chown -R sandbox:sandbox /go
+    && chown -R ${SANDBOX_UID}:${SANDBOX_GID} /go
 
 COPY --from=builder /sandbox /usr/local/bin/sandbox
 
