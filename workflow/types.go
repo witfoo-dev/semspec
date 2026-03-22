@@ -85,10 +85,12 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusReviewed:
 		return target == StatusApproved || target == StatusRejected
 	case StatusApproved:
-		// approved → requirements_generated (backwards compat: req/scenario gen after approval)
+		// approved → requirements_generated (auto-cascade: generate requirements)
+		// approved → scenarios_generated (auto-cascade race: requirements existed, skip to scenarios)
 		// approved → ready_for_execution (auto-approve skips req/scenario step)
 		// approved → rejected (review loop escalation)
-		return target == StatusRequirementsGenerated || target == StatusReadyForExecution || target == StatusRejected
+		return target == StatusRequirementsGenerated || target == StatusScenariosGenerated ||
+			target == StatusReadyForExecution || target == StatusRejected
 	case StatusRequirementsGenerated:
 		return target == StatusScenariosGenerated || target == StatusRejected
 	case StatusScenariosGenerated:
