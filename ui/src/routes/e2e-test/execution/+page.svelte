@@ -19,15 +19,11 @@
 	 *   retro-view-empty    — RetrospectiveView with no phases
 	 */
 
-	import { dev } from '$app/environment';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
 
-	// Guard: only available in development mode
-	if (!dev) {
-		goto('/');
-	}
+	// No dev guard — this route is only used by Playwright tests and is not
+	// linked from the main navigation. Safe to render in production builds.
 	import AgentTree from '$lib/components/execution/AgentTree.svelte';
 	import DAGView from '$lib/components/execution/DAGView.svelte';
 	import LoopDetail from '$lib/components/execution/LoopDetail.svelte';
