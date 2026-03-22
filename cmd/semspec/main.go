@@ -395,23 +395,51 @@ func loadConfigWithEnvSubstitution(configPath string) (*config.Config, error) {
 }
 
 // initGraphRegistry initializes the global graph source registry from environment.
-// SEMSOURCE_URL enables federated graph queries; empty means local-only.
+//
+// Configuration via environment:
+//
+//	GRAPH_GATEWAY_URL  — local graph-gateway endpoint (default: http://localhost:8082)
+//	GRAPH_SOURCES      — JSON array of graph sources, e.g.:
+//	                     [{"name":"sandbox","url":"http://semsource:8082","type":"semsource"},
+//	                      {"name":"osh","url":"http://semsource-osh:8082","type":"semsource"}]
+//	SEMSOURCE_URL      — legacy single semsource URL (used when GRAPH_SOURCES is empty)
 func initGraphRegistry() {
-	semsourceURL := os.Getenv("SEMSOURCE_URL")
 	graphGatewayURL := os.Getenv("GRAPH_GATEWAY_URL")
 	if graphGatewayURL == "" {
 		graphGatewayURL = "http://localhost:8082"
 	}
 
-	reg := gatherers.NewGraphRegistry(gatherers.GraphRegistryConfig{
-		LocalURL:     graphGatewayURL,
-		SemsourceURL: semsourceURL,
-	})
+	cfg := gatherers.GraphRegistryConfig{
+		LocalURL: graphGatewayURL,
+	}
+
+	// Parse GRAPH_SOURCES if set (preferred over SEMSOURCE_URL).
+	if raw := os.Getenv("GRAPH_SOURCES"); raw != "" {
+		var sources []gatherers.GraphSourceConfig
+		if err := json.Unmarshal([]byte(raw), &sources); err != nil {
+			slog.Error("Failed to parse GRAPH_SOURCES", "error", err)
+		} else {
+			cfg.Sources = sources
+		}
+	}
+
+	// Fallback: legacy SEMSOURCE_URL as a single source.
+	if len(cfg.Sources) == 0 {
+		if u := os.Getenv("SEMSOURCE_URL"); u != "" {
+			cfg.Sources = []gatherers.GraphSourceConfig{
+				{Name: "semsource", URL: u, Type: "semsource"},
+			}
+		}
+	}
+
+	reg := gatherers.NewGraphRegistry(cfg)
 	gatherers.SetGlobalRegistry(reg)
 
-	if semsourceURL != "" {
-		slog.Info("Graph registry initialized with semsource",
-			"local", graphGatewayURL, "semsource", semsourceURL)
+	if len(cfg.Sources) > 0 {
+		slog.Info("Graph registry initialized",
+			"local", graphGatewayURL,
+			"sources", len(cfg.Sources),
+		)
 		reg.Start(context.Background())
 	} else {
 		slog.Info("Graph registry initialized (local-only)", "local", graphGatewayURL)

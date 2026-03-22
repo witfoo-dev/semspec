@@ -42,7 +42,7 @@ type sourceManifestResponse struct {
 type GraphRegistry struct {
 	sources      sync.Map // name → *GraphSource
 	localURL     string
-	semsourceURL string // base URL for semsource manifest endpoint
+	semsourceURLs []semsourceEntry // all semsource sources to poll
 	pollInterval time.Duration
 	queryTimeout time.Duration
 	logger       *slog.Logger
@@ -52,16 +52,33 @@ type GraphRegistry struct {
 	wg     sync.WaitGroup
 }
 
+// semsourceEntry tracks a semsource instance to poll.
+type semsourceEntry struct {
+	name string
+	url  string
+}
+
+// GraphSourceConfig describes a single graph source for the registry.
+type GraphSourceConfig struct {
+	// Name identifies this source (e.g., "osh-core", "sandbox").
+	Name string `json:"name"`
+	// URL is the base URL for this source's GraphQL and manifest endpoints.
+	URL string `json:"url"`
+	// Type is "local" or "semsource". Local sources are always ready and
+	// not polled. Semsource sources are polled for readiness.
+	Type string `json:"type"` // "local" or "semsource"
+}
+
 // GraphRegistryConfig configures the graph source registry.
 type GraphRegistryConfig struct {
 	// LocalURL is the local graph-gateway endpoint (always present).
 	LocalURL string
 
-	// SemsourceURL is the semsource base URL for manifest discovery.
-	// Empty means local-only mode (no semsource).
-	SemsourceURL string
+	// Sources is a list of graph sources to register. Each semsource
+	// source is polled independently for readiness.
+	Sources []GraphSourceConfig
 
-	// PollInterval is how often to poll semsource manifest (default 30s).
+	// PollInterval is how often to poll semsource manifests (default 30s).
 	PollInterval time.Duration
 
 	// QueryTimeout is the per-source timeout for graph queries (default 3s).
@@ -84,7 +101,6 @@ func NewGraphRegistry(cfg GraphRegistryConfig) *GraphRegistry {
 
 	r := &GraphRegistry{
 		localURL:     cfg.LocalURL,
-		semsourceURL: cfg.SemsourceURL,
 		pollInterval: cfg.PollInterval,
 		queryTimeout: cfg.QueryTimeout,
 		logger:       cfg.Logger.With("component", "graph-registry"),
@@ -101,20 +117,43 @@ func NewGraphRegistry(cfg GraphRegistryConfig) *GraphRegistry {
 		})
 	}
 
+	// Register configured sources.
+	for _, src := range cfg.Sources {
+		if src.Type == "local" {
+			if src.URL != cfg.LocalURL {
+				r.sources.Store(src.Name, &GraphSource{
+					Name:    src.Name,
+					URL:     src.URL,
+					Phase:   "ready",
+					IsLocal: true,
+				})
+			}
+			continue
+		}
+		r.semsourceURLs = append(r.semsourceURLs, semsourceEntry{
+			name: src.Name,
+			url:  src.URL,
+		})
+	}
+
 	return r
 }
 
-// Start begins polling semsource for graph source discovery.
-// No-op if no semsource URL is configured.
+// Start begins polling semsource instances for graph source discovery.
+// No-op if no semsource URLs are configured.
 func (r *GraphRegistry) Start(ctx context.Context) {
-	if r.semsourceURL == "" {
-		r.logger.Info("No semsource URL configured, local-only mode")
+	if len(r.semsourceURLs) == 0 {
+		r.logger.Info("No semsource URLs configured, local-only mode")
 		return
 	}
 
 	ctx, r.cancel = context.WithCancel(ctx)
 	r.wg.Add(1)
 	go r.pollLoop(ctx)
+
+	r.logger.Info("Graph registry started",
+		"semsource_count", len(r.semsourceURLs),
+	)
 }
 
 // Stop halts the polling loop.
@@ -151,7 +190,7 @@ func (r *GraphRegistry) AllSources() []*GraphSource {
 // SemsourceReady returns true if at least one semsource is in "ready" phase.
 // Returns true in local-only mode (no semsource configured).
 func (r *GraphRegistry) SemsourceReady() bool {
-	if r.semsourceURL == "" {
+	if len(r.semsourceURLs) == 0 {
 		return true // local-only mode
 	}
 	ready := false
@@ -166,10 +205,10 @@ func (r *GraphRegistry) SemsourceReady() bool {
 	return ready
 }
 
-// WaitForSemsource blocks until semsource is ready or the budget expires.
+// WaitForSemsource blocks until at least one semsource is ready or the budget expires.
 // Returns nil immediately in local-only mode.
 func (r *GraphRegistry) WaitForSemsource(ctx context.Context, budget time.Duration) error {
-	if r.semsourceURL == "" {
+	if len(r.semsourceURLs) == 0 {
 		return nil
 	}
 
@@ -202,9 +241,9 @@ func (r *GraphRegistry) WaitForSemsource(ctx context.Context, budget time.Durati
 	}
 }
 
-// SemsourceConfigured returns true if a semsource URL is configured.
+// SemsourceConfigured returns true if at least one semsource URL is configured.
 func (r *GraphRegistry) SemsourceConfigured() bool {
-	return r.semsourceURL != ""
+	return len(r.semsourceURLs) > 0
 }
 
 // QueryTimeout returns the configured per-source query timeout.
@@ -232,67 +271,12 @@ func (r *GraphRegistry) pollLoop(ctx context.Context) {
 	}
 }
 
-// pollOnce fetches the semsource manifest and updates the source registry.
+// pollOnce fetches manifests from all configured semsource instances and
+// updates the source registry.
 func (r *GraphRegistry) pollOnce() {
-	if r.semsourceURL == "" {
-		return
+	for _, entry := range r.semsourceURLs {
+		r.pollSource(entry)
 	}
-
-	url := r.semsourceURL + "/source-manifest/status"
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		r.logger.Debug("Failed to create manifest request", "url", url, "error", err)
-		return
-	}
-
-	resp, err := r.httpClient.Do(req)
-	if err != nil {
-		r.logger.Debug("Failed to fetch semsource manifest", "url", url, "error", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		r.logger.Debug("Semsource manifest returned non-200", "status", resp.StatusCode)
-		return
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB limit
-	if err != nil {
-		r.logger.Debug("Failed to read manifest body", "error", err)
-		return
-	}
-
-	var manifest sourceManifestResponse
-	if err := json.Unmarshal(body, &manifest); err != nil {
-		r.logger.Debug("Failed to parse manifest", "error", err)
-		return
-	}
-
-	// Register/update the semsource as a graph source.
-	// The semsource GraphQL endpoint is at the same base URL.
-	name := "semsource"
-	if manifest.Namespace != "" {
-		name = "semsource-" + manifest.Namespace
-	}
-
-	r.sources.Store(name, &GraphSource{
-		Name:        name,
-		URL:         r.semsourceURL,
-		Phase:       manifest.Phase,
-		EntityCount: manifest.TotalEntities,
-		LastSeen:    time.Now(),
-	})
-
-	r.logger.Debug("Updated semsource source",
-		"name", name,
-		"phase", manifest.Phase,
-		"entities", manifest.TotalEntities,
-		"sources", len(manifest.Sources),
-	)
 
 	// Remove stale semsource entries (not seen for 2x poll intervals).
 	staleThreshold := time.Now().Add(-2 * r.pollInterval)
@@ -304,4 +288,64 @@ func (r *GraphRegistry) pollOnce() {
 		}
 		return true
 	})
+}
+
+// pollSource fetches the manifest from a single semsource instance.
+func (r *GraphRegistry) pollSource(entry semsourceEntry) {
+	url := entry.url + "/source-manifest/status"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		r.logger.Debug("Failed to create manifest request", "source", entry.name, "url", url, "error", err)
+		return
+	}
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		r.logger.Debug("Failed to fetch semsource manifest", "source", entry.name, "url", url, "error", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		r.logger.Debug("Semsource manifest returned non-200", "source", entry.name, "status", resp.StatusCode)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB limit
+	if err != nil {
+		r.logger.Debug("Failed to read manifest body", "source", entry.name, "error", err)
+		return
+	}
+
+	var manifest sourceManifestResponse
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		r.logger.Debug("Failed to parse manifest", "source", entry.name, "error", err)
+		return
+	}
+
+	// Use configured name, or derive from namespace.
+	name := entry.name
+	if name == "" && manifest.Namespace != "" {
+		name = "semsource-" + manifest.Namespace
+	}
+	if name == "" {
+		name = "semsource"
+	}
+
+	r.sources.Store(name, &GraphSource{
+		Name:        name,
+		URL:         entry.url,
+		Phase:       manifest.Phase,
+		EntityCount: manifest.TotalEntities,
+		LastSeen:    time.Now(),
+	})
+
+	r.logger.Debug("Updated semsource source",
+		"name", name,
+		"phase", manifest.Phase,
+		"entities", manifest.TotalEntities,
+	)
 }
