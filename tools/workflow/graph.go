@@ -61,12 +61,8 @@ func (e *GraphExecutor) Execute(ctx context.Context, call agentic.ToolCall) (age
 		return e.graphSearch(ctx, call)
 	case "graph_query":
 		return e.queryGraph(ctx, call)
-	case "graph_codebase":
-		return e.getCodebaseSummary(ctx, call)
-	case "graph_entity":
-		return e.getEntity(ctx, call)
-	case "graph_traverse":
-		return e.traverseRelationships(ctx, call)
+	// graph_codebase, graph_entity, graph_traverse removed — agents use
+	// graph_search for discovery and graph_query for specific lookups.
 	default:
 		return agentic.ToolResult{
 			CallID: call.ID,
@@ -127,64 +123,8 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 				"required": []string{"query"},
 			},
 		},
-		{
-			Name:        "graph_codebase",
-			Description: "Code structure overview — function, type, interface, and package counts with samples.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"include_samples": map[string]any{
-						"type":        "boolean",
-						"description": "Include sample entities for each category (default: true)",
-					},
-					"max_samples": map[string]any{
-						"type":        "integer",
-						"description": "Maximum number of sample entities per category (default: 5)",
-					},
-				},
-			},
-		},
-		{
-			Name:        "graph_entity",
-			Description: "Get one entity by ID with all predicates.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"entity_id": map[string]any{
-						"type":        "string",
-						"description": "The entity ID to retrieve (e.g., 'code.function.main.Run' or 'c360.semspec.workflow.plan.plan.add-auth')",
-					},
-				},
-				"required": []string{"entity_id"},
-			},
-		},
-		{
-			Name:        "graph_traverse",
-			Description: "Follow relationships from an entity (calls, implements, imports). Max depth 3.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"start_entity": map[string]any{
-						"type":        "string",
-						"description": "Entity ID to start traversal from",
-					},
-					"predicate": map[string]any{
-						"type":        "string",
-						"description": "Relationship predicate to follow (e.g., 'code.relationship.calls', 'code.relationship.implements')",
-					},
-					"direction": map[string]any{
-						"type":        "string",
-						"enum":        []string{"outbound", "inbound"},
-						"description": "Direction to traverse: 'outbound' (what this entity points to) or 'inbound' (what points to this entity)",
-					},
-					"depth": map[string]any{
-						"type":        "integer",
-						"description": "Maximum traversal depth (default: 1, max: 3)",
-					},
-				},
-				"required": []string{"start_entity"},
-			},
-		},
+		// graph_codebase, graph_entity, graph_traverse removed — agents use
+		// graph_search for discovery and graph_query for specific lookups.
 	}
 }
 

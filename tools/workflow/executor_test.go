@@ -84,23 +84,20 @@ Rationale: Documentation enables collaboration.
 // GraphExecutor – ListTools
 // ---------------------------------------------------------------------------
 
-func TestGraphExecutor_ListTools_ReturnsSixDefinitions(t *testing.T) {
+func TestGraphExecutor_ListTools_ReturnsThreeDefinitions(t *testing.T) {
 	t.Parallel()
 
 	exec := NewGraphExecutor()
 	tools := exec.ListTools()
 
-	if len(tools) != 6 {
-		t.Fatalf("ListTools() returned %d definitions, want 6", len(tools))
+	if len(tools) != 3 {
+		t.Fatalf("ListTools() returned %d definitions, want 3", len(tools))
 	}
 
 	want := map[string]bool{
-		"graph_summary":  true,
-		"graph_search":   true,
-		"graph_query":    true,
-		"graph_codebase": true,
-		"graph_entity":   true,
-		"graph_traverse": true,
+		"graph_summary": true,
+		"graph_search":  true,
+		"graph_query":   true,
 	}
 	for _, tool := range tools {
 		if !want[tool.Name] {
@@ -274,148 +271,8 @@ func TestGraphExecutor_QueryGraph_Success_ReturnsJSONContent(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// GraphExecutor – getEntity argument validation
-// ---------------------------------------------------------------------------
-
-func TestGraphExecutor_GetEntity_MissingEntityID_ReturnsError(t *testing.T) {
-	t.Parallel()
-
-	exec := NewGraphExecutor()
-	call := makeCall("c1", "graph_entity", map[string]any{})
-
-	result, err := exec.Execute(context.Background(), call)
-
-	if err != nil {
-		t.Fatalf("Execute() unexpected Go error: %v", err)
-	}
-	if result.Error == "" {
-		t.Error("result.Error is empty, want error about missing entity_id")
-	}
-	if !strings.Contains(strings.ToLower(result.Error), "entity_id") {
-		t.Errorf("result.Error = %q, want mention of 'entity_id'", result.Error)
-	}
-}
-
-func TestGraphExecutor_GetEntity_EmptyEntityID_ReturnsError(t *testing.T) {
-	t.Parallel()
-
-	exec := NewGraphExecutor()
-	call := makeCall("c1", "graph_entity", map[string]any{"entity_id": ""})
-
-	result, err := exec.Execute(context.Background(), call)
-
-	if err != nil {
-		t.Fatalf("Execute() unexpected Go error: %v", err)
-	}
-	if result.Error == "" {
-		t.Error("result.Error is empty for empty entity_id, want error")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// GraphExecutor – traverseRelationships argument validation
-// ---------------------------------------------------------------------------
-
-func TestGraphExecutor_TraverseRelationships_MissingStartEntity_ReturnsError(t *testing.T) {
-	t.Parallel()
-
-	exec := NewGraphExecutor()
-	call := makeCall("c1", "graph_traverse", map[string]any{})
-
-	result, err := exec.Execute(context.Background(), call)
-
-	if err != nil {
-		t.Fatalf("Execute() unexpected Go error: %v", err)
-	}
-	if result.Error == "" {
-		t.Error("result.Error is empty, want error about missing start_entity")
-	}
-	if !strings.Contains(strings.ToLower(result.Error), "start_entity") {
-		t.Errorf("result.Error = %q, want mention of 'start_entity'", result.Error)
-	}
-}
-
-func TestGraphExecutor_TraverseRelationships_DepthClamping(t *testing.T) {
-	t.Parallel()
-
-	// The server captures the variables sent so we can verify depth clamping.
-	var capturedVars map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Variables map[string]any `json:"variables"`
-		}
-		json.NewDecoder(r.Body).Decode(&req)
-		capturedVars = req.Variables
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"data": map[string]any{
-				"traverse": map[string]any{"nodes": []any{}, "edges": []any{}},
-			},
-		})
-	}))
-	defer srv.Close()
-
-	exec := &GraphExecutor{gatewayURL: srv.URL}
-	call := makeCall("c1", "graph_traverse", map[string]any{
-		"start_entity": "code.function.main.Run",
-		"depth":        float64(99), // should be clamped to 3
-	})
-
-	result, err := exec.Execute(context.Background(), call)
-	if err != nil {
-		t.Fatalf("Execute() unexpected Go error: %v", err)
-	}
-	if result.Error != "" {
-		t.Fatalf("result.Error = %q, want empty", result.Error)
-	}
-	if depth, ok := capturedVars["depth"].(float64); ok {
-		if int(depth) > 3 {
-			t.Errorf("depth sent to server = %v, want <= 3", depth)
-		}
-	}
-}
-
-func TestGraphExecutor_TraverseRelationships_InboundDirection(t *testing.T) {
-	t.Parallel()
-
-	var capturedVars map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Variables map[string]any `json:"variables"`
-		}
-		json.NewDecoder(r.Body).Decode(&req)
-		capturedVars = req.Variables
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"data": map[string]any{
-				"traverse": map[string]any{"nodes": []any{}, "edges": []any{}},
-			},
-		})
-	}))
-	defer srv.Close()
-
-	exec := &GraphExecutor{gatewayURL: srv.URL}
-	call := makeCall("c1", "graph_traverse", map[string]any{
-		"start_entity": "code.function.main.Run",
-		"direction":    "inbound",
-	})
-
-	result, err := exec.Execute(context.Background(), call)
-	if err != nil {
-		t.Fatalf("Execute() unexpected Go error: %v", err)
-	}
-	if result.Error != "" {
-		t.Fatalf("result.Error = %q, want empty", result.Error)
-	}
-	if dir, ok := capturedVars["direction"].(string); ok {
-		if dir != "INBOUND" {
-			t.Errorf("direction = %q, want INBOUND", dir)
-		}
-	}
-}
+// Tests for graph_entity and graph_traverse removed — tools dropped in Phase 2.
+// Agents use graph_search for discovery and graph_query for specific lookups.
 
 // ---------------------------------------------------------------------------
 // GraphExecutor – context cancellation
