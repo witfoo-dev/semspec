@@ -12,6 +12,7 @@ import (
 
 	"github.com/c360studio/semspec/tools/bash"
 	"github.com/c360studio/semspec/tools/decompose"
+	"github.com/c360studio/semspec/tools/httptool"
 	"github.com/c360studio/semspec/tools/question"
 	"github.com/c360studio/semspec/tools/review"
 	"github.com/c360studio/semspec/tools/spawn"
@@ -22,6 +23,7 @@ import (
 	_ "github.com/c360studio/semspec/tools/workflow"
 	// Register web search tool via init() — only active when BRAVE_SEARCH_API_KEY is set.
 	_ "github.com/c360studio/semspec/tools/websearch"
+	// httptool is imported above for RegisterWithNATS; its init() registers http_request.
 )
 
 // AgenticToolDeps carries the infrastructure dependencies required by
@@ -62,6 +64,11 @@ func RegisterAgenticTools(deps AgenticToolDeps) {
 	decomposeExec := decompose.NewExecutor()
 	for _, tool := range decomposeExec.ListTools() {
 		_ = agentictools.RegisterTool(tool.Name, decomposeExec)
+	}
+
+	// http_request — re-register with NATS for graph persistence when available.
+	if deps.NATSClient != nil {
+		httptool.RegisterWithNATS(deps.NATSClient)
 	}
 
 	if deps.NATSClient == nil || deps.GraphHelper == nil {
