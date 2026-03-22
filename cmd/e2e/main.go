@@ -69,6 +69,7 @@ Available scenarios:
   todo-app-crud                        - Brownfield Go+Svelte with phase/task CRUD mutations
   context-pressure                     - Claims verification: context truncation, model routing, revision quality
   health-check                         - Tier 2: Go HTTP service — add /health endpoint through full plan+execute pipeline
+  rest-api                             - Tier 3: Go HTTP service — add /users CRUD + logging middleware through full plan+execute pipeline
   epic-meshtastic                      - Full alpha pipeline: federated graph → Meshtastic OSH driver → execution
   all                 - Run all scenarios (default)
 
@@ -155,8 +156,9 @@ func listCmd() *cobra.Command {
 			fmt.Println("  plan-phase                   Full plan pipeline: plan → requirements → scenarios → review")
 			fmt.Println("  execution-phase              Full execution pipeline: plan → approve → decompose → TDD → complete")
 			fmt.Println()
-			fmt.Println("  Tier 2 Real-LLM Scenarios (low token cost):")
+			fmt.Println("  Tier 2-3 Real-LLM Scenarios (low-to-medium token cost):")
 			fmt.Println("  health-check                 Go HTTP service: add /health endpoint (task e2e:llm -- health-check claude)")
+			fmt.Println("  rest-api                     Go HTTP service: add /users CRUD + logging middleware (task e2e:llm -- rest-api claude)")
 			fmt.Println()
 			fmt.Println("  Legacy Scenarios (OLD FLOW — may be stale):")
 			fmt.Println("  hello-world                  Greenfield Python+JS: /goodbye endpoint")
@@ -213,6 +215,8 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewExecutionPhaseScenario(cfg),
 		// Tier 2: small real-LLM scenario (Go HTTP service → /health endpoint)
 		scenarios.NewHealthCheckScenario(cfg),
+		// Tier 3: medium real-LLM scenario (Go HTTP service → /users CRUD + middleware)
+		scenarios.NewRestAPIScenario(cfg),
 		// Epic scenario excluded from "all" — requires federated semsource
 		// infrastructure (task e2e:epic). Registered below for name lookup.
 		// Legacy semantic validation scenarios (require LLM, OLD FLOW)
