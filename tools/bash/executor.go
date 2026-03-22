@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/c360studio/semspec/tools/sandbox"
@@ -121,13 +122,81 @@ func (e *Executor) execSandbox(ctx context.Context, callID, command, taskID stri
 	}, nil
 }
 
+// sensitiveEnvSuffixes lists environment variable name suffixes that indicate
+// secrets. Variables matching these are stripped in local mode to prevent
+// accidental leakage to agent-generated commands.
+var sensitiveEnvSuffixes = []string{
+	"_KEY", "_SECRET", "_TOKEN", "_PASSWORD", "_CREDENTIAL",
+	"_CREDENTIALS", "_AUTH", "_API_KEY", "_APIKEY",
+}
+
+// sensitiveEnvPrefixes lists environment variable name prefixes that indicate
+// secrets or cloud credentials.
+var sensitiveEnvPrefixes = []string{
+	"AWS_", "AZURE_", "GCP_", "GOOGLE_", "GITHUB_TOKEN",
+	"OPENAI_", "ANTHROPIC_", "OPENROUTER_",
+}
+
+// sensitiveEnvExact lists specific environment variables to always strip.
+var sensitiveEnvExact = map[string]bool{
+	"BRAVE_SEARCH_API_KEY": true,
+	"DATABASE_URL":         true,
+	"REDIS_URL":            true,
+	"NATS_TOKEN":           true,
+	"NATS_NKEY":            true,
+	"SSH_AUTH_SOCK":         true,
+	"GPG_AGENT_INFO":       true,
+}
+
+// filterEnv returns a copy of the environment with sensitive variables removed.
+func filterEnv() []string {
+	var filtered []string
+	for _, env := range os.Environ() {
+		name, _, ok := strings.Cut(env, "=")
+		if !ok {
+			continue
+		}
+		upper := strings.ToUpper(name)
+
+		if sensitiveEnvExact[name] {
+			continue
+		}
+
+		skip := false
+		for _, suffix := range sensitiveEnvSuffixes {
+			if strings.HasSuffix(upper, suffix) {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+		for _, prefix := range sensitiveEnvPrefixes {
+			if strings.HasPrefix(upper, prefix) {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+
+		filtered = append(filtered, env)
+	}
+	return filtered
+}
+
 // execLocal runs the command locally via os/exec.
+// Environment variables containing secrets are filtered out to prevent
+// accidental leakage. For full isolation, use sandbox mode (SANDBOX_URL).
 func (e *Executor) execLocal(ctx context.Context, callID, command string) (agentic.ToolResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = e.workDir
+	cmd.Env = filterEnv()
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

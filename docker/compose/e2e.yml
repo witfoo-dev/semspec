@@ -75,6 +75,12 @@ services:
     depends_on:
       nats:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+          pids: 256
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8090/health"]
       interval: 5s
