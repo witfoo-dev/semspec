@@ -29,7 +29,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"file_read", "file_list", "file_write", "exec"},
 		},
 		RoleReviewer: {
-			AllowExact: []string{"file_read", "file_list", "git_diff", "review_scenario"},
+			AllowExact: []string{"file_read", "file_list", "git_diff", "review_scenario", "graph_search", "graph_query", "graph_entity", "read_document"},
 		},
 
 		// --- Planning roles ---

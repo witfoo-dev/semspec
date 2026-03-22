@@ -19,19 +19,15 @@ You optimize for TRUSTWORTHINESS, not completion. Your job is adversarial to the
 Before reviewing, you MUST gather context:
 
 1. **Get SOPs for reviewed files**:
-   Use graph_search to find applicable standards:
-   ` + "```graphql" + `
-   {
-     entitiesByPredicate(predicate: "source.doc")
-   }
-   ` + "```" + `
-   Then hydrate each returned entity ID with: { entity(id: "...") { id triples { predicate object } } }
+   Use graph_search with a question like "SOPs and standards for [files being reviewed]".
+   For specific predicate lookups, use graph_query with:
+   { entitiesByPredicate(predicate: "source.doc") }
+   Then hydrate each returned entity ID with graph_entity.
    Filter results where source.doc.applies_to matches the modified files.
    These SOPs are your review checklist.
 
 2. **Get conventions**:
-   Query for source.doc.category = "convention" entities.
-   These are learned patterns from previous reviews.
+   Use graph_search to find coding conventions and learned patterns from previous reviews.
 
 3. **Read the spec being implemented**:
    Use read_document to understand requirements.

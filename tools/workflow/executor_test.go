@@ -1972,3 +1972,117 @@ func TestAllExecutors_CallIDPropagated(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// formatSearchResult
+// ---------------------------------------------------------------------------
+
+func TestFormatSearchResult(t *testing.T) {
+	tests := []struct {
+		name         string
+		data         map[string]any
+		wantContains []string
+		wantExact    string
+	}{
+		{
+			name:      "nil globalSearch",
+			data:      map[string]any{},
+			wantExact: "No results found.",
+		},
+		{
+			name: "answer only",
+			data: map[string]any{
+				"globalSearch": map[string]any{
+					"answer": "The auth system uses JWT tokens.",
+				},
+			},
+			wantContains: []string{"JWT tokens"},
+		},
+		{
+			name: "answer with model attribution",
+			data: map[string]any{
+				"globalSearch": map[string]any{
+					"answer":       "Error handling uses fmt.Errorf with %w.",
+					"answer_model": "gemini-flash",
+				},
+			},
+			wantContains: []string{"fmt.Errorf", "synthesized by gemini-flash"},
+		},
+		{
+			name: "entity digests without answer",
+			data: map[string]any{
+				"globalSearch": map[string]any{
+					"entity_digests": []any{
+						map[string]any{"id": "code.func.Run", "type": "function", "label": "Run"},
+						map[string]any{"id": "code.type.Config", "type": "type", "label": "Config"},
+					},
+				},
+			},
+			wantContains: []string{"Run [function]", "Config [type]"},
+		},
+		{
+			name: "answer plus digests",
+			data: map[string]any{
+				"globalSearch": map[string]any{
+					"answer": "The system has two main entry points.",
+					"entity_digests": []any{
+						map[string]any{"id": "code.func.Main", "type": "function", "label": "Main"},
+					},
+				},
+			},
+			wantContains: []string{"two main entry points", "Matched entities:", "Main [function]"},
+		},
+		{
+			name: "communities only",
+			data: map[string]any{
+				"globalSearch": map[string]any{
+					"community_summaries": []any{
+						map[string]any{
+							"summary":      "Authentication cluster handling JWT and OAuth.",
+							"member_count": float64(12),
+							"entities": []any{
+								map[string]any{"id": "auth.jwt", "type": "module", "label": "JWT Handler"},
+							},
+						},
+					},
+				},
+			},
+			wantContains: []string{"Knowledge clusters:", "Authentication cluster", "JWT Handler [module]"},
+		},
+		{
+			name: "count only fallback",
+			data: map[string]any{
+				"globalSearch": map[string]any{
+					"count": float64(42),
+				},
+			},
+			wantContains: []string{"Found 42 entities", "graph_query"},
+		},
+		{
+			name: "empty globalSearch map",
+			data: map[string]any{
+				"globalSearch": map[string]any{},
+			},
+			wantExact: "No results found.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatSearchResult(tt.data)
+
+			if tt.wantExact != "" {
+				if got != tt.wantExact {
+					t.Errorf("formatSearchResult() = %q, want %q", got, tt.wantExact)
+				}
+				return
+			}
+
+			for _, want := range tt.wantContains {
+				if !strings.Contains(got, want) {
+					t.Errorf("formatSearchResult() missing %q in:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
