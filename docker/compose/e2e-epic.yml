@@ -24,7 +24,7 @@ services:
       - ../../configs/semsource/osh.json:/etc/semsource/semsource.json:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
-      test: ["CMD", "semsource", "version"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/source-manifest/status"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -44,7 +44,7 @@ services:
       - ../../configs/semsource/meshtastic.json:/etc/semsource/semsource.json:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
-      test: ["CMD", "semsource", "version"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/source-manifest/status"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -59,15 +59,17 @@ services:
       - ../../configs/semsource/ogc.json:/etc/semsource/semsource.json:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
-      test: ["CMD", "semsource", "version"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/source-manifest/status"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
 
   # Override semspec to configure federated graph sources.
+  # Clear SEMSOURCE_URL (set in base e2e.yml) — GRAPH_SOURCES takes precedence.
   semspec:
     environment:
+      - SEMSOURCE_URL=
       - GRAPH_SOURCES=[{"name":"sandbox","url":"http://semsource:8080","type":"semsource"},{"name":"osh","url":"http://semsource-osh:8080","type":"semsource"},{"name":"meshtastic","url":"http://semsource-meshtastic:8080","type":"semsource"},{"name":"ogc","url":"http://semsource-ogc:8080","type":"semsource"}]
     depends_on:
       semsource-osh:

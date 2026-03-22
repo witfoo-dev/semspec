@@ -457,6 +457,10 @@ tasks:
           fi
           sleep 10
         done
+        if [ "$OSH" != "ready" ] || [ "$MESH" != "ready" ] || [ "$OGC" != "ready" ]; then
+          echo "[E2E:EPIC] FATAL: Not all sources ready after 10 minutes"
+          exit 1
+        fi
       - |
         echo "[E2E:EPIC] Running epic-meshtastic scenario..."
         E2E_PROVIDER_NAME={{.PROVIDER}} ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace epic-meshtastic

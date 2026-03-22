@@ -48,7 +48,7 @@ func (e *GrepExecutor) ListTools() []agentic.ToolDefinition {
 
 IMPORTANT: Before using this tool:
 1. First try graph_search to search the indexed knowledge graph
-2. First try graph_codebase to understand what's indexed
+2. First try graph_summary to understand what's indexed
 3. Only use grep if the graph doesn't contain what you need
 
 This tool is slower and uses more tokens than graph queries. The graph contains pre-indexed, structured data about functions, types, and relationships that is more efficient to query.`,
@@ -85,7 +85,7 @@ This tool is slower and uses more tokens than graph queries. The graph contains 
 
 IMPORTANT: Before using this tool:
 1. First try graph_query with code.artifact.path predicate
-2. First try graph_codebase to see indexed packages
+2. First try graph_summary to see indexed packages
 3. Only use this if the graph doesn't have file information
 
 The knowledge graph contains indexed file paths that are faster to query.`,
