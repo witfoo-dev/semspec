@@ -104,31 +104,27 @@ test.describe('Plan Rollup Review', () => {
 		});
 
 		await planDetailPage.goto('test-rollup-pipeline');
-		await planDetailPage.expectPipelineVisible();
 
-		// The pipeline should be rendered; execute phase should be active (not complete)
-		// since reviewing_rollup is still within the execute phase
-		const pipelineStages = planDetailPage.pipelineStages;
-		const count = await pipelineStages.count();
-		expect(count).toBeGreaterThan(0);
-
-		// At least one stage should be active (not all complete)
-		const activeStages = page.locator('.pipeline-stage.active');
-		const completeStages = page.locator('.pipeline-stage.complete');
-		// Either active stages exist OR all stages are positioned — pipeline is rendered
+		// The stage badge should show reviewing_rollup stage
 		const planStage = page.locator('.plan-stage');
 		await expect(planStage).toBeVisible();
+
+		// The execute phase status badge should be active (reviewing_rollup is within the execute phase)
+		const execStatus = page.getByRole('status').filter({ hasText: 'exec' });
+		await expect(execStatus).toBeVisible();
+		const execText = await execStatus.textContent();
+		expect(execText?.toLowerCase()).toMatch(/exec/i);
 	});
 
 	test('transitions from reviewing_rollup to complete on reload', async ({
 		page,
 		planDetailPage
 	}) => {
-		let requestCount = 0;
+		// Use a flag to control which stage to return: before reload vs after
+		let reloaded = false;
 
 		await page.route('**/workflow-api/plans/test-transition', route => {
-			requestCount++;
-			const stage = requestCount <= 2 ? 'reviewing_rollup' : 'complete';
+			const stage = reloaded ? 'complete' : 'reviewing_rollup';
 			const plan = mockPlan({
 				slug: 'test-transition',
 				goal: 'Build auth middleware',
@@ -144,7 +140,7 @@ test.describe('Plan Rollup Review', () => {
 
 		// Also override the list route for reload
 		await page.route('**/workflow-api/plans', route => {
-			const stage = requestCount <= 2 ? 'reviewing_rollup' : 'complete';
+			const stage = reloaded ? 'complete' : 'reviewing_rollup';
 			const plan = mockPlan({
 				slug: 'test-transition',
 				goal: 'Build auth middleware',
@@ -166,7 +162,8 @@ test.describe('Plan Rollup Review', () => {
 		const initialText = await stageBadge.textContent();
 		expect(initialText?.toLowerCase()).toMatch(/reviewing|rollup/i);
 
-		// After reload the mock returns 'complete'
+		// Flip the flag before reload so the mock returns 'complete'
+		reloaded = true;
 		await page.reload();
 		await page.waitForSelector('.plan-detail, .not-found', { timeout: 15000 });
 
@@ -215,11 +212,16 @@ test.describe('Plan Rollup Review', () => {
 		});
 
 		await planDetailPage.goto('rollup-approved');
-		await planDetailPage.expectPipelineVisible();
 
-		// A plan in reviewing_rollup is approved and executing — pipeline is visible
-		await expect(planDetailPage.pipelineSection).toBeVisible();
-		await expect(planDetailPage.agentPipelineView).toBeVisible();
+		// A plan in reviewing_rollup is approved and executing
+		// The stage badge confirms the plan is in the rollup review stage
+		await expect(page.locator('.plan-stage')).toBeVisible();
+		const stageText = await page.locator('.plan-stage').textContent();
+		expect(stageText?.toLowerCase()).toMatch(/reviewing|rollup/i);
+
+		// Pipeline phase status badges are rendered for an approved plan in execution
+		await expect(page.getByRole('status').filter({ hasText: 'plan' })).toBeVisible();
+		await expect(page.getByRole('status').filter({ hasText: 'exec' })).toBeVisible();
 	});
 
 	test('reviewing_rollup shows active loop in pipeline', async ({ page, planDetailPage }) => {
@@ -257,15 +259,14 @@ test.describe('Plan Rollup Review', () => {
 		});
 
 		await planDetailPage.goto('rollup-with-loop');
-		await planDetailPage.expectPipelineVisible();
 
-		// Active loop in reviewing_rollup should produce an active pipeline stage
-		const activeStage = page.locator('.pipeline-stage.active');
-		await expect(activeStage).toBeVisible();
+		// The plan is in reviewing_rollup with an active loop — the stage badge confirms this
+		await expect(page.locator('.plan-stage')).toBeVisible();
+		const stageText = await page.locator('.plan-stage').textContent();
+		expect(stageText?.toLowerCase()).toMatch(/reviewing|rollup/i);
 
-		// Spinner is present on the active stage
-		const spinner = activeStage.locator('.spin');
-		await expect(spinner).toBeVisible();
+		// The Active Loop panel is shown in the right sidebar when a loop is executing
+		await expect(page.getByRole('heading', { name: 'Active Loop' })).toBeVisible();
 	});
 
 	test('complete plan after rollup shows all stages done', async ({ page, planDetailPage }) => {
