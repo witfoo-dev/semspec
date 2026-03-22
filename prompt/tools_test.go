@@ -14,16 +14,16 @@ func TestFilterTools_Builder(t *testing.T) {
 
 	tools := FilterTools(allTools, RoleBuilder)
 
-	// Builder gets: bash, submit_work
-	want := []string{"bash", "submit_work"}
+	// Builder gets: bash, submit_work, ask_question
+	want := []string{"bash", "submit_work", "ask_question"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
 			t.Errorf("builder should have %q", w)
 		}
 	}
 
-	// Builder does NOT get: graph_search, graph_query, decompose_task, spawn_agent, ask_question
-	deny := []string{"graph_search", "graph_query", "decompose_task", "spawn_agent", "ask_question"}
+	// Builder does NOT get: graph_search, graph_query, decompose_task, spawn_agent
+	deny := []string{"graph_search", "graph_query", "decompose_task", "spawn_agent"}
 	for _, d := range deny {
 		if slices.Contains(tools, d) {
 			t.Errorf("builder should NOT have %q", d)
@@ -40,8 +40,8 @@ func TestFilterTools_Tester(t *testing.T) {
 
 	tools := FilterTools(allTools, RoleTester)
 
-	// Tester gets: bash, submit_work
-	want := []string{"bash", "submit_work"}
+	// Tester gets: bash, submit_work, ask_question
+	want := []string{"bash", "submit_work", "ask_question"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
 			t.Errorf("tester should have %q", w)
@@ -132,14 +132,14 @@ func TestFilterTools_Coordinator(t *testing.T) {
 
 func TestFilterTools_DeveloperBackwardCompat(t *testing.T) {
 	allTools := []string{
-		"bash", "submit_work",
+		"bash", "submit_work", "ask_question",
 		"decompose_task", "spawn_agent",
 	}
 
 	tools := FilterTools(allTools, RoleDeveloper)
 
-	// Developer (deprecated) gets bash, submit_work, decompose_task, spawn_agent
-	want := []string{"bash", "submit_work", "decompose_task", "spawn_agent"}
+	// Developer (deprecated) gets bash, submit_work, ask_question, decompose_task, spawn_agent
+	want := []string{"bash", "submit_work", "ask_question", "decompose_task", "spawn_agent"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
 			t.Errorf("developer (compat) should have %q", w)

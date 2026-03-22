@@ -140,7 +140,7 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 	req.Header.Set("User-Agent", "semspec-agent/1.0")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8")
 
-	client := &xhttp.Client{Timeout: requestTimeout}
+	client := e.buildPinnedClient(rawURL)
 	resp, err := client.Do(req)
 	if err != nil {
 		return agentic.ToolResult{
@@ -254,8 +254,61 @@ func (e *Executor) persistToGraph(rawURL, title, content, etag string) {
 	}
 }
 
+// buildPinnedClient constructs an HTTP client that pins the resolved IP address
+// for the given URL, preventing DNS rebinding attacks (TOCTOU between checkSSRF
+// and the actual dial). If IP resolution fails the standard client is returned —
+// checkSSRF has already validated the host at call time.
+func (e *Executor) buildPinnedClient(rawURL string) *xhttp.Client {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return &xhttp.Client{Timeout: requestTimeout}
+	}
+	host := parsed.Hostname()
+
+	ips, err := net.LookupIP(host)
+	if err != nil || len(ips) == 0 {
+		// Fallback — SSRF check already passed; let the HTTP stack handle it.
+		return &xhttp.Client{Timeout: requestTimeout}
+	}
+
+	pinnedIP := ips[0]
+	// Normalize to IPv4 if possible so port joining works correctly.
+	if v4 := pinnedIP.To4(); v4 != nil {
+		pinnedIP = v4
+	}
+
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	transport := &xhttp.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			_, port, err := net.SplitHostPort(addr)
+			if err != nil || port == "" {
+				port = "443"
+				if strings.HasPrefix(rawURL, "http://") {
+					port = "80"
+				}
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(pinnedIP.String(), port))
+		},
+	}
+
+	return &xhttp.Client{
+		Transport: transport,
+		Timeout:   requestTimeout,
+		CheckRedirect: func(req *xhttp.Request, via []*xhttp.Request) error {
+			if err := checkSSRF(req.URL.String()); err != nil {
+				return err
+			}
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
+}
+
 // checkSSRF blocks requests to private/loopback/link-local IP ranges.
 // DNS is resolved before the request to prevent SSRF via hostname rebinding.
+// DNS failure is treated as a block — an unresolvable host cannot be trusted.
 func checkSSRF(rawURL string) error {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -266,13 +319,17 @@ func checkSSRF(rawURL string) error {
 
 	ips, err := net.LookupIP(host)
 	if err != nil {
-		// Allow — network may not be available during testing, or the host may
-		// resolve correctly at request time. The HTTP client will catch failures.
-		return nil
+		return fmt.Errorf("DNS resolution failed for %s: %w", host, err)
 	}
 
 	for _, ip := range ips {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		// Normalize IPv6-mapped IPv4 addresses (e.g. ::ffff:192.168.1.1) so
+		// that the private/loopback checks apply correctly.
+		if v4 := ip.To4(); v4 != nil {
+			ip = v4
+		}
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
 			return fmt.Errorf("blocked: %s resolves to private/reserved IP %s", host, ip)
 		}
 	}

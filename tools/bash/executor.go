@@ -71,14 +71,20 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 	}
 
 	if e.sandbox != nil {
-		return e.execSandbox(ctx, call.ID, command)
+		taskID := "default"
+		if m := call.Metadata; m != nil {
+			if tid, ok := m["task_id"].(string); ok && tid != "" {
+				taskID = tid
+			}
+		}
+		return e.execSandbox(ctx, call.ID, command, taskID)
 	}
 	return e.execLocal(ctx, call.ID, command)
 }
 
 // execSandbox routes the command to the sandbox container.
-func (e *Executor) execSandbox(ctx context.Context, callID, command string) (agentic.ToolResult, error) {
-	result, err := e.sandbox.Exec(ctx, "bash", command, int(defaultTimeout.Milliseconds()))
+func (e *Executor) execSandbox(ctx context.Context, callID, command, taskID string) (agentic.ToolResult, error) {
+	result, err := e.sandbox.Exec(ctx, taskID, command, int(defaultTimeout.Milliseconds()))
 	if err != nil {
 		return agentic.ToolResult{
 			CallID: callID,
@@ -142,12 +148,16 @@ func (e *Executor) execLocal(ctx context.Context, callID, command string) (agent
 	}
 
 	if err != nil {
+		exitCode := -1
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
 		if ctx.Err() == context.DeadlineExceeded {
 			output += "\n[command timed out]"
 		}
 		return agentic.ToolResult{
 			CallID: callID,
-			Error:  fmt.Sprintf("exit code %d\n%s", cmd.ProcessState.ExitCode(), output),
+			Error:  fmt.Sprintf("exit code %d\n%s", exitCode, output),
 		}, nil
 	}
 

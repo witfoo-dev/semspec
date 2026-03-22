@@ -20,13 +20,13 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// --- Execution roles ---
 
 		RoleBuilder: {
-			AllowExact: []string{"bash", "submit_work"},
+			AllowExact: []string{"bash", "submit_work", "ask_question"},
 		},
 		RoleTester: {
-			AllowExact: []string{"bash", "submit_work"},
+			AllowExact: []string{"bash", "submit_work", "ask_question"},
 		},
 		RoleValidator: {
-			AllowExact: []string{"bash", "submit_work"},
+			AllowExact: []string{"bash", "submit_work", "ask_question"},
 		},
 		RoleReviewer: {
 			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
@@ -77,7 +77,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// --- Deprecated: developer gets bash + agentic tools for backward compat ---
 
 		RoleDeveloper: {
-			AllowExact: []string{"bash", "submit_work", "decompose_task", "spawn_agent"},
+			AllowExact: []string{"bash", "submit_work", "ask_question", "decompose_task", "spawn_agent"},
 		},
 	}
 }
