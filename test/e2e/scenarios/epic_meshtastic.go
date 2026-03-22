@@ -20,7 +20,7 @@ package scenarios
 //  7. wait-for-approval       — Poll until plan.Approved == true.
 //  8. trigger-execution       — POST /plan-api/plans/{slug}/execute.
 //  9. wait-for-scenarios      — Poll until at least 3 scenarios are generated.
-// 10. wait-for-execution      — Poll until plan reaches reviewing_rollup or complete.
+// 10. wait-for-execution      — Poll until plan reaches reviewing_rollup.
 // 11. wait-for-rollup         — Poll until plan.Status == "complete".
 // 12. verify-deliverables     — Check workspace for .java source, test, README.
 
@@ -524,13 +524,19 @@ func (s *EpicMeshtasticScenario) stageWaitForExecution(ctx context.Context, resu
 			result.SetDetail("execution_stage_snapshot", plan.Stage)
 
 			switch plan.Status {
-			case "reviewing_rollup", "complete":
-				// Count completed scenarios for the result record.
+			case "reviewing_rollup":
+				// All scenarios done — rollup review pending. Let the next stage handle it.
 				scenarios, _ := s.http.ListScenarios(ctx, s.planSlug, "")
 				completed := countCompletedScenarios(scenarios)
 				result.SetDetail("scenarios_completed", completed)
 				result.SetDetail("scenarios_total", len(scenarios))
 				result.SetDetail("execution_reached_rollup", true)
+				return nil
+
+			case "complete":
+				// Rollup already finished during execution polling.
+				result.SetDetail("execution_reached_rollup", true)
+				result.SetDetail("rollup_completed_during_execution", true)
 				return nil
 
 			case "error", "escalated":

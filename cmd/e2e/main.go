@@ -206,8 +206,8 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewPlanPhaseScenario(cfg),
 		// Execution phase pipeline (plan → approve → decompose → TDD → complete)
 		scenarios.NewExecutionPhaseScenario(cfg),
-		// Epic scenario (requires federated semsource infrastructure)
-		scenarios.NewEpicMeshtasticScenario(cfg),
+		// Epic scenario excluded from "all" — requires federated semsource
+		// infrastructure (task e2e:epic). Registered below for name lookup.
 		// Legacy semantic validation scenarios (require LLM, OLD FLOW)
 		scenarios.NewHelloWorldScenario(cfg),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithCodeExecution()),
@@ -222,6 +222,9 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 	for _, s := range scenarioList {
 		scenarioMap[s.Name()] = s
 	}
+	// Epic scenario: excluded from "all" run — requires federated semsource.
+	// Registered here for explicit name lookup only (task e2e:epic -- claude).
+	scenarioMap["epic-meshtastic"] = scenarios.NewEpicMeshtasticScenario(cfg)
 
 	// Determine which scenarios to run
 	var toRun []scenarios.Scenario
