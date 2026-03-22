@@ -68,6 +68,7 @@ Available scenarios:
   todo-app                             - Brownfield Go+Svelte: add due dates with semantic validation
   todo-app-crud                        - Brownfield Go+Svelte with phase/task CRUD mutations
   context-pressure                     - Claims verification: context truncation, model routing, revision quality
+  health-check                         - Tier 2: Go HTTP service — add /health endpoint through full plan+execute pipeline
   epic-meshtastic                      - Full alpha pipeline: federated graph → Meshtastic OSH driver → execution
   all                 - Run all scenarios (default)
 
@@ -150,8 +151,12 @@ func listCmd() *cobra.Command {
 			fmt.Println("  doc-ingest          Tests document ingestion: markdown, RST parsing and chunking")
 			fmt.Println("  openspec-ingest     Tests OpenSpec specification ingestion")
 			fmt.Println()
-			fmt.Println("  Plan Phase Pipeline:")
+			fmt.Println("  Plan + Execution Phase Pipelines:")
 			fmt.Println("  plan-phase                   Full plan pipeline: plan → requirements → scenarios → review")
+			fmt.Println("  execution-phase              Full execution pipeline: plan → approve → decompose → TDD → complete")
+			fmt.Println()
+			fmt.Println("  Tier 2 Real-LLM Scenarios (low token cost):")
+			fmt.Println("  health-check                 Go HTTP service: add /health endpoint (task e2e:llm -- health-check claude)")
 			fmt.Println()
 			fmt.Println("  Legacy Scenarios (OLD FLOW — may be stale):")
 			fmt.Println("  hello-world                  Greenfield Python+JS: /goodbye endpoint")
@@ -206,6 +211,8 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewPlanPhaseScenario(cfg),
 		// Execution phase pipeline (plan → approve → decompose → TDD → complete)
 		scenarios.NewExecutionPhaseScenario(cfg),
+		// Tier 2: small real-LLM scenario (Go HTTP service → /health endpoint)
+		scenarios.NewHealthCheckScenario(cfg),
 		// Epic scenario excluded from "all" — requires federated semsource
 		// infrastructure (task e2e:epic). Registered below for name lookup.
 		// Legacy semantic validation scenarios (require LLM, OLD FLOW)
