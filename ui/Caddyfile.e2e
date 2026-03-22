@@ -1,5 +1,5 @@
 # Caddy reverse proxy configuration for E2E testing
-# Routes API requests to semspec backend, all else to UI
+# Routes API requests to semspec backend, all else to UI (Node SSR server)
 
 :3000 {
     # Proxy agentic-dispatch API to semspec backend
@@ -37,8 +37,8 @@
         reverse_proxy semspec:8080
     }
 
-    # Proxy all other requests to UI preview server
+    # Proxy all other requests to UI Node SSR server
     handle {
-        reverse_proxy ui:4173
+        reverse_proxy ui:3000
     }
 }

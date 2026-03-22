@@ -57,7 +57,7 @@ test.describe('Full UI Lifecycle', () => {
 
 		await sidebarPage.expectVisible();
 		const items = await sidebarPage.getNavItems();
-		expect(items).toEqual(['Board', 'Plans', 'Activity', 'Sources', 'Settings']);
+		expect(items).toEqual(['Board', 'Plans', 'Activity', 'Trajectories', 'Workspace', 'Settings']);
 	});
 
 	test('system health indicator shows healthy', async ({ page, sidebarPage }) => {
@@ -235,7 +235,7 @@ test.describe('Full UI Lifecycle', () => {
 		// status badges) should always render for approved plans.
 		await planDetailPage.goto(planSlug);
 		await planDetailPage.expectVisible();
-		await expect(page.locator('.pipeline-section')).toBeVisible({ timeout: 10000 });
+		await expect(page.locator('.agent-pipeline-section')).toBeVisible({ timeout: 10000 });
 	});
 
 	// ── Phase 9: Activity Page ─────────────────────────────────────────
@@ -270,17 +270,7 @@ test.describe('Full UI Lifecycle', () => {
 		expect(['ready_for_execution', 'tasks_approved', 'implementing', 'complete']).toContain(plan!.stage);
 	});
 
-	// ── Phase 11: Sources Page ─────────────────────────────────────────
-
-	test('sources page renders correctly', async ({ sourcesPage }) => {
-		await sourcesPage.goto();
-		await sourcesPage.expectVisible();
-		await sourcesPage.expectHeaderText('Sources');
-		await sourcesPage.expectSearchVisible();
-		await sourcesPage.expectUploadBtnVisible();
-	});
-
-	// ── Phase 12: Entities Page ────────────────────────────────────────
+	// ── Phase 11: Entities Page ──────────────────────────────────────────
 
 	test('entities page renders correctly', async ({ entitiesPage }) => {
 		await entitiesPage.goto();
@@ -342,9 +332,13 @@ test.describe('Full UI Lifecycle', () => {
 		await expect(page).toHaveURL(/\/activity/);
 		await sidebarPage.expectActivePage('Activity');
 
-		await sidebarPage.navigateTo('Sources');
-		await expect(page).toHaveURL(/\/sources/);
-		await sidebarPage.expectActivePage('Sources');
+		await sidebarPage.navigateTo('Trajectories');
+		await expect(page).toHaveURL(/\/trajectories/);
+		await sidebarPage.expectActivePage('Trajectories');
+
+		await sidebarPage.navigateTo('Workspace');
+		await expect(page).toHaveURL(/\/workspace/);
+		await sidebarPage.expectActivePage('Workspace');
 
 		await sidebarPage.navigateTo('Settings');
 		await expect(page).toHaveURL(/\/settings/);

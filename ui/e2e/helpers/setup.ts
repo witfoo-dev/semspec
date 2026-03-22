@@ -9,7 +9,7 @@ import { LoopContextPage } from '../pages/LoopContextPage';
 import { SetupWizardPage } from '../pages/SetupWizardPage';
 import { BoardPage } from '../pages/BoardPage';
 import { PlansListPage } from '../pages/PlansListPage';
-import { SourcesPage } from '../pages/SourcesPage';
+
 import { EntitiesPage } from '../pages/EntitiesPage';
 import { SettingsPage } from '../pages/SettingsPage';
 import { ExecutionPage } from '../pages/ExecutionPage';
@@ -43,7 +43,7 @@ export const test = base.extend<{
 	setupWizardPage: SetupWizardPage;
 	boardPage: BoardPage;
 	plansListPage: PlansListPage;
-	sourcesPage: SourcesPage;
+
 	entitiesPage: EntitiesPage;
 	settingsPage: SettingsPage;
 	executionPage: ExecutionPage;
@@ -113,10 +113,8 @@ export const test = base.extend<{
 		const plansListPage = new PlansListPage(page);
 		await use(plansListPage);
 	},
-	sourcesPage: async ({ page }, use) => {
-		const sourcesPage = new SourcesPage(page);
-		await use(sourcesPage);
-	},
+
+
 	entitiesPage: async ({ page }, use) => {
 		const entitiesPage = new EntitiesPage(page);
 		await use(entitiesPage);

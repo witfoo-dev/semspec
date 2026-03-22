@@ -4,27 +4,21 @@
 	import { sidebarStore } from '$lib/stores/sidebar.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { Loop } from '$lib/types';
-	import { api } from '$lib/api/client';
-	import { onMount } from 'svelte';
 
 	interface Props {
 		currentPath: string;
 		plans?: PlanWithStatus[];
 		loops?: Loop[];
 		activeLoopCount: number;
-		systemHealthy: boolean;
 	}
 
-	let { currentPath, plans = [], loops = [], activeLoopCount, systemHealthy }: Props = $props();
+	let { currentPath, plans = [], loops = [], activeLoopCount }: Props = $props();
 
 	// Close sidebar on navigation (mobile)
 	$effect(() => {
 		currentPath;
 		sidebarStore.close();
 	});
-
-	let entityCounts = $state<Record<string, number>>({});
-	let totalEntities = $state(0);
 
 	const navItems = [
 		{ path: '/board', icon: 'layout-grid', label: 'Board' },
@@ -36,23 +30,6 @@
 	];
 
 	const attentionCount = $derived(computeAttentionItems(plans, loops).length);
-
-	// Entity counts from GraphQL — browser-only, not part of server load
-	async function loadEntityCounts() {
-		try {
-			const result = await api.entities.count();
-			entityCounts = result.byType;
-			totalEntities = result.total;
-		} catch {
-			// Silently fail - entity counts are optional
-		}
-	}
-
-	onMount(() => {
-		loadEntityCounts();
-		const interval = setInterval(loadEntityCounts, 60000);
-		return () => clearInterval(interval);
-	});
 
 	function isActive(path: string): boolean {
 		// Board is homepage, so highlight it for root path too
@@ -98,27 +75,6 @@
 			</a>
 		{/each}
 	</nav>
-
-	<div class="sidebar-footer">
-		<div class="system-status" role="status" aria-live="polite">
-			<div class="status-indicator" class:healthy={systemHealthy} aria-hidden="true"></div>
-			<span class="status-text">
-				{systemHealthy ? 'System healthy' : 'System issues'}
-			</span>
-		</div>
-
-		<div class="active-loops" role="status">
-			<Icon name="activity" size={14} />
-			<span>{activeLoopCount} active loops</span>
-		</div>
-
-		{#if totalEntities > 0}
-			<div class="entity-counts" role="status">
-				<Icon name="database" size={14} />
-				<span>{totalEntities} graph entities</span>
-			</div>
-		{/if}
-	</div>
 </aside>
 
 <style>
@@ -221,49 +177,6 @@
 		font-weight: var(--font-weight-semibold);
 		padding: 2px 6px;
 		border-radius: var(--radius-full);
-	}
-
-	.sidebar-footer {
-		padding: var(--space-4);
-		border-top: 1px solid var(--color-border);
-		font-size: var(--font-size-sm);
-	}
-
-	.system-status {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		margin-bottom: var(--space-2);
-	}
-
-	.status-indicator {
-		width: 8px;
-		height: 8px;
-		border-radius: var(--radius-full);
-		background: var(--color-error);
-	}
-
-	.status-indicator.healthy {
-		background: var(--color-success);
-	}
-
-	.status-text {
-		color: var(--color-text-muted);
-	}
-
-	.active-loops {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		color: var(--color-text-muted);
-	}
-
-	.entity-counts {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		color: var(--color-text-muted);
-		margin-top: var(--space-2);
 	}
 
 	.badge-muted {

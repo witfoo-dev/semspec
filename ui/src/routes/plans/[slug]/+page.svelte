@@ -3,17 +3,14 @@
 	import { page } from '$app/state';
 	import { invalidate } from '$app/navigation';
 	import Icon from '$lib/components/shared/Icon.svelte';
-	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
+	// ThreePanelLayout is now at the root layout level — plan detail renders directly in the center panel
 	import ModeIndicator from '$lib/components/board/ModeIndicator.svelte';
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
-	import PlanNavTree from '$lib/components/plan/PlanNavTree.svelte';
 	import PlanDetailPanel from '$lib/components/plan/PlanDetailPanel.svelte';
 	import RejectionBanner from '$lib/components/plan/RejectionBanner.svelte';
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
-	import { ReviewDashboard } from '$lib/components/review';
-	import TrajectoryPanel from '$lib/components/trajectory/TrajectoryPanel.svelte';
-	import { chatBarStore } from '$lib/stores/chatDrawer.svelte';
+	// ReviewDashboard and TrajectoryPanel are now rendered in the layout-level RightPanel
 	import { planSelectionStore, type PlanSelection } from '$lib/stores/planSelection.svelte';
 	import { api } from '$lib/api/client';
 	import { promotePlan, executePlan } from '$lib/actions/plans';
@@ -39,7 +36,6 @@
 	let phases = $state<Phase[]>([]);
 	let requirements = $state<Requirement[]>([]);
 	let scenariosByReq = $state<Record<string, Scenario[]>>({});
-	let activeTab = $state<'nav' | 'detail'>('nav');
 
 	// Sync from load data on initial render and when SvelteKit re-runs the load
 	$effect(() => {
@@ -92,29 +88,10 @@
 		updateLabels(plan, requirements, scenariosByReq, tasks);
 	});
 
-	// Show reviews / trajectory in right panel when plan is executing or complete
-	const canShowReviews = $derived(
-		plan?.approved &&
-			(plan?.stage === 'implementing' ||
-				plan?.stage === 'executing' ||
-				plan?.stage === 'complete')
-	);
-
-	// The most recent active loop ID for TrajectoryPanel
-	const activeLoopId = $derived.by(() => {
-		const loops = plan?.active_loops ?? [];
-		return loops.length > 0 ? loops[0].loop_id : null;
-	});
-
-	// Right panel should open automatically when there's context to show
-	const rightPanelShouldOpen = $derived(canShowReviews || activeLoopId !== null);
-
 	// Browser-only: selection init, chat context, periodic refresh for auto-cascade stages
 	onMount(() => {
 		if (slug) {
 			planSelectionStore.selectPlan(slug);
-			chatBarStore.setContext({ type: 'plan', planSlug: slug });
-			chatBarStore.setPageContext([{ type: 'plan', id: slug, label: slug }]);
 		}
 
 		// Periodically refresh requirements during auto-cascade stages
@@ -127,7 +104,6 @@
 		return () => {
 			clearInterval(interval);
 			planSelectionStore.clear();
-			chatBarStore.clearPageContext();
 		};
 	});
 
@@ -361,148 +337,79 @@
 			<a href="/plans" class="btn btn-primary">Back to Plans</a>
 		</div>
 	{:else}
-		<!-- Mobile tab switcher -->
-		<div class="mobile-tabs">
-			<button
-				class="tab-btn"
-				class:active={activeTab === 'nav'}
-				onclick={() => (activeTab = 'nav')}
-			>
-				<Icon name="list" size={14} />
-				Navigation
-			</button>
-			<button
-				class="tab-btn"
-				class:active={activeTab === 'detail'}
-				onclick={() => (activeTab = 'detail')}
-			>
-				<Icon name="file-text" size={14} />
-				Details
-			</button>
-		</div>
-
-		<div class="workspace-layout">
-			<ThreePanelLayout
-				id="plan-detail"
-				leftOpen={true}
-				rightOpen={rightPanelShouldOpen}
-				leftWidth={260}
-				rightWidth={360}
-			>
-				{#snippet leftPanel()}
-					<PlanNavTree
-						{plan}
-						{requirements}
-						{scenariosByReq}
-						selection={planSelectionStore.selection}
-						onSelect={handleSelect}
-						onExpandRequirement={handleExpandRequirement}
-					/>
-				{/snippet}
-
-				{#snippet centerPanel()}
-					<div class="center-content">
-						{#if plan.approved}
-							<div class="pipeline-bar">
-								<div class="pipeline-left">
-									{#if pipeline}
-										<PipelineIndicator
-											plan={pipeline.plan}
-											requirements={pipeline.requirements}
-											execute={pipeline.execute}
-										/>
-									{/if}
-								</div>
-								<div class="pipeline-right">
-									<ActionBar
-										{plan}
-										onPromote={handlePromote}
-										onExecute={handleExecute}
-										onReplay={handleReplay}
-									/>
-								</div>
-							</div>
-						{:else if !plan.approved && plan.goal}
-							<div class="pipeline-bar">
-								<div class="pipeline-left"></div>
-								<div class="pipeline-right">
-									<ActionBar
-										{plan}
-										onPromote={handlePromote}
-										onExecute={handleExecute}
-										onReplay={handleReplay}
-									/>
-								</div>
-							</div>
-						{/if}
-
-						{#if plan.active_loops && plan.active_loops.length > 0}
-							<div class="agent-pipeline-section">
-								<AgentPipelineView slug={plan.slug} loops={plan.active_loops} />
-							</div>
-						{/if}
-
-						{#if activeRejection}
-							<RejectionBanner
-								rejection={activeRejection.rejection}
-								taskDescription={activeRejection.task.description}
+		<!-- Progressive plan view — content adapts to plan stage -->
+		<div class="plan-content">
+			<!-- Pipeline + Action bar (always visible when plan has content) -->
+			{#if plan.approved}
+				<div class="pipeline-bar">
+					<div class="pipeline-left">
+						{#if pipeline}
+							<PipelineIndicator
+								plan={pipeline.plan}
+								requirements={pipeline.requirements}
+								execute={pipeline.execute}
 							/>
 						{/if}
-
-						<div class="detail-panel">
-							<PlanDetailPanel
-								selection={planSelectionStore.selection}
-								{plan}
-								{phases}
-								{tasksByPhase}
-								{requirements}
-								{scenariosByReq}
-								onRefreshPlan={handleRefreshPlan}
-								onRefreshPhases={handleRefreshPhases}
-								onRefreshTasks={handleRefreshTasks}
-								onRefreshRequirements={handleRefreshRequirements}
-								onRefreshScenarios={handleRefreshScenarios}
-								onDeleteRequirement={handleDeleteRequirement}
-								onApprovePhase={handleApprovePhase}
-								onRejectPhase={handleRejectPhase}
-								onApproveTask={handleApproveTask}
-								onRejectTask={handleRejectTask}
-							/>
-						</div>
 					</div>
-				{/snippet}
-
-				{#snippet rightPanel()}
-					<div class="right-panel-content">
-						{#if activeLoopId}
-							<div class="right-panel-section">
-								<h3 class="right-panel-heading">
-									<Icon name="activity" size={14} />
-									Active Loop
-								</h3>
-								<TrajectoryPanel loopId={activeLoopId} compact={true} />
-							</div>
-						{/if}
-
-						{#if canShowReviews}
-							<div class="right-panel-section">
-								<h3 class="right-panel-heading">
-									<Icon name="check-circle" size={14} />
-									Review Results
-								</h3>
-								<ReviewDashboard slug={plan.slug} />
-							</div>
-						{/if}
-
-						{#if !activeLoopId && !canShowReviews}
-							<div class="right-panel-empty">
-								<Icon name="info" size={32} />
-								<p>Context details will appear here when the plan is executing.</p>
-							</div>
-						{/if}
+					<div class="pipeline-right">
+						<ActionBar
+							{plan}
+							onPromote={handlePromote}
+							onExecute={handleExecute}
+							onReplay={handleReplay}
+						/>
 					</div>
-				{/snippet}
-			</ThreePanelLayout>
+				</div>
+			{:else if !plan.approved && plan.goal}
+				<div class="pipeline-bar">
+					<div class="pipeline-left"></div>
+					<div class="pipeline-right">
+						<ActionBar
+							{plan}
+							onPromote={handlePromote}
+							onExecute={handleExecute}
+							onReplay={handleReplay}
+						/>
+					</div>
+				</div>
+			{/if}
+
+			<!-- Agent pipeline (visible during execution) -->
+			{#if plan.active_loops && plan.active_loops.length > 0}
+				<div class="agent-pipeline-section">
+					<AgentPipelineView slug={plan.slug} loops={plan.active_loops} />
+				</div>
+			{/if}
+
+			<!-- Rejection banner -->
+			{#if activeRejection}
+				<RejectionBanner
+					rejection={activeRejection.rejection}
+					taskDescription={activeRejection.task.description}
+				/>
+			{/if}
+
+			<!-- Stage-driven content -->
+			<div class="stage-content">
+				<PlanDetailPanel
+					selection={planSelectionStore.selection}
+					{plan}
+					{phases}
+					{tasksByPhase}
+					{requirements}
+					{scenariosByReq}
+					onRefreshPlan={handleRefreshPlan}
+					onRefreshPhases={handleRefreshPhases}
+					onRefreshTasks={handleRefreshTasks}
+					onRefreshRequirements={handleRefreshRequirements}
+					onRefreshScenarios={handleRefreshScenarios}
+					onDeleteRequirement={handleDeleteRequirement}
+					onApprovePhase={handleApprovePhase}
+					onRejectPhase={handleRejectPhase}
+					onApproveTask={handleApproveTask}
+					onRejectTask={handleRejectTask}
+				/>
+			</div>
 		</div>
 	{/if}
 </div>
@@ -638,58 +545,18 @@
 		color: var(--color-text-primary);
 	}
 
-	/* Mobile tabs - hidden on desktop */
-	.mobile-tabs {
-		display: none;
-		gap: var(--space-2);
-		margin-bottom: var(--space-2);
-		padding: var(--space-2);
-		background: var(--color-bg-secondary);
-		border-radius: var(--radius-md);
-		flex-shrink: 0;
-	}
-
-	.tab-btn {
-		flex: 1;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: var(--space-2);
-		padding: var(--space-2) var(--space-3);
-		background: transparent;
-		border: none;
-		border-radius: var(--radius-sm);
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-medium);
-		color: var(--color-text-muted);
-		cursor: pointer;
-		transition: all var(--transition-fast);
-	}
-
-	.tab-btn:hover {
-		color: var(--color-text-primary);
-		background: var(--color-bg-tertiary);
-	}
-
-	.tab-btn.active {
-		color: var(--color-accent);
-		background: var(--color-accent-muted);
-	}
-
-	/* Workspace layout — fills remaining vertical space */
-	.workspace-layout {
+	/* Progressive plan content — single scrollable column */
+	.plan-content {
 		flex: 1;
 		min-height: 0;
-		border-top: 1px solid var(--color-border);
+		overflow-y: auto;
+		padding: 0 var(--space-4) var(--space-4);
+		max-width: 900px;
 	}
 
-	/* Center panel content */
-	.center-content {
-		display: flex;
-		flex-direction: column;
-		height: 100%;
-		overflow: auto;
-		padding: var(--space-4);
+	.stage-content {
+		flex: 1;
+		min-height: 0;
 	}
 
 	.pipeline-bar {
@@ -719,59 +586,8 @@
 		border-top: 1px solid var(--color-border);
 	}
 
-	.detail-panel {
-		flex: 1;
-		min-height: 0;
-	}
-
-	/* Right panel content */
-	.right-panel-content {
-		display: flex;
-		flex-direction: column;
-		height: 100%;
-		overflow: auto;
-	}
-
-	.right-panel-section {
-		padding: var(--space-4);
-		border-bottom: 1px solid var(--color-border);
-	}
-
-	.right-panel-heading {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-semibold);
-		color: var(--color-text-secondary);
-		margin: 0 0 var(--space-3);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.right-panel-empty {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		gap: var(--space-3);
-		padding: var(--space-8) var(--space-4);
-		color: var(--color-text-muted);
-		text-align: center;
-		flex: 1;
-	}
-
-	.right-panel-empty p {
-		font-size: var(--font-size-sm);
-		margin: 0;
-	}
-
 	/* Responsive: mobile */
 	@media (max-width: 900px) {
-		.mobile-tabs {
-			display: flex;
-		}
-
 		.detail-header {
 			flex-direction: column;
 			align-items: flex-start;

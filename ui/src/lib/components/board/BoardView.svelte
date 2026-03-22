@@ -5,7 +5,7 @@
 	import KanbanView from '$lib/components/kanban/KanbanView.svelte';
 	import KanbanDetailPanel from '$lib/components/kanban/KanbanDetailPanel.svelte';
 	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
-	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
+	import { goto } from '$app/navigation';
 	import { kanbanStore } from '$lib/stores/kanban.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { Task } from '$lib/types/task';
@@ -16,11 +16,9 @@
 		plans: PlanWithStatus[];
 		loops: Loop[];
 		tasksByPlan: Record<string, Task[]>;
-		activeLoopCount: number;
-		systemHealthy: boolean;
 	}
 
-	let { plans, loops, tasksByPlan, activeLoopCount, systemHealthy }: Props = $props();
+	let { plans, loops, tasksByPlan }: Props = $props();
 
 	const isKanban = $derived(kanbanStore.viewMode === 'kanban');
 	const hasSelection = $derived(kanbanStore.selectedCardId !== null);
@@ -59,7 +57,7 @@
 	});
 
 	function handleNewPlan() {
-		chatDrawerStore.open({ type: 'global' });
+		goto('/plans/new');
 	}
 </script>
 
@@ -103,7 +101,7 @@
 			<Icon name="inbox" size={48} />
 			<h2>No active plans</h2>
 			<p>Click "New Plan" above to describe what you'd like to build.</p>
-			<button class="start-btn" onclick={handleNewPlan}>Create Your First Plan</button>
+			<a href="/plans/new" class="start-btn">Create Your First Plan</a>
 		</div>
 	{:else if isKanban}
 		<div class="kanban-layout">
@@ -133,16 +131,7 @@
 		</div>
 	{/if}
 
-	<footer class="board-footer">
-		<div class="status-item">
-			<div class="status-dot" class:healthy={systemHealthy}></div>
-			<span>{systemHealthy ? 'Connected' : 'Disconnected'}</span>
-		</div>
-		<div class="status-item">
-			<Icon name="activity" size={14} />
-			<span>{activeLoopCount} active loop{activeLoopCount !== 1 ? 's' : ''}</span>
-		</div>
-	</footer>
+
 </div>
 
 <style>
@@ -283,33 +272,6 @@
 
 	.start-btn:hover {
 		opacity: 0.9;
-	}
-
-	.board-footer {
-		display: flex;
-		gap: var(--space-4);
-		padding-top: var(--space-4);
-		border-top: 1px solid var(--color-border);
-		margin-top: var(--space-4);
-	}
-
-	.status-item {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--font-size-sm);
-		color: var(--color-text-muted);
-	}
-
-	.status-dot {
-		width: 8px;
-		height: 8px;
-		border-radius: var(--radius-full);
-		background: var(--color-error);
-	}
-
-	.status-dot.healthy {
-		background: var(--color-success);
 	}
 
 	:global(.spin) {

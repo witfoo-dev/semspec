@@ -1,6 +1,13 @@
 <script lang="ts">
+	import Icon from './Icon.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { setupStore } from '$lib/stores/setup.svelte';
+
+	interface Props {
+		activeLoopCount?: number;
+	}
+
+	let { activeLoopCount = 0 }: Props = $props();
 </script>
 
 <header class="header">
@@ -13,9 +20,17 @@
 				{/if}
 			{/if}
 		</div>
-		<div class="connection-status" class:connected={activityStore.connected}>
-			<span class="status-dot"></span>
-			<span class="status-text">{activityStore.connected ? 'Connected' : 'Disconnected'}</span>
+		<div class="header-status">
+			{#if activeLoopCount > 0}
+				<div class="status-item loops">
+					<Icon name="activity" size={14} />
+					<span>{activeLoopCount} active loop{activeLoopCount !== 1 ? 's' : ''}</span>
+				</div>
+			{/if}
+			<div class="status-item connection" class:connected={activityStore.connected}>
+				<span class="status-dot"></span>
+				<span class="status-text">{activityStore.connected ? 'Connected' : 'Disconnected'}</span>
+			</div>
 		</div>
 	</div>
 </header>
@@ -67,12 +82,22 @@
 		}
 	}
 
-	.connection-status {
+	.header-status {
+		display: flex;
+		align-items: center;
+		gap: var(--space-4);
+	}
+
+	.status-item {
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
 		font-size: var(--font-size-sm);
 		color: var(--color-text-muted);
+	}
+
+	.status-item.loops {
+		color: var(--color-accent);
 	}
 
 	.status-dot {
@@ -82,7 +107,7 @@
 		background: var(--color-error);
 	}
 
-	.connection-status.connected .status-dot {
+	.connection.connected .status-dot {
 		background: var(--color-success);
 	}
 

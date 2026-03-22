@@ -6,7 +6,6 @@ import { type Page, type Locator, expect } from '@playwright/test';
  * Provides methods to interact with and verify:
  * - Plans grid with plan cards
  * - Empty state when no plans exist
- * - Board footer status indicators
  */
 export class BoardPage {
 	readonly page: Page;
@@ -16,7 +15,6 @@ export class BoardPage {
 	readonly emptyState: Locator;
 	readonly newPlanBtn: Locator;
 	readonly startBtn: Locator;
-	readonly boardFooter: Locator;
 	readonly loadingState: Locator;
 	readonly errorState: Locator;
 
@@ -28,7 +26,6 @@ export class BoardPage {
 		this.emptyState = this.boardView.locator('.empty-state');
 		this.newPlanBtn = page.locator('button.new-plan-btn');
 		this.startBtn = page.locator('button.start-btn');
-		this.boardFooter = page.locator('.board-footer');
 		this.loadingState = this.boardView.locator('.loading-state');
 		this.errorState = this.boardView.locator('.error-state');
 	}
@@ -65,14 +62,5 @@ export class BoardPage {
 
 	async clickStartBtn(): Promise<void> {
 		await this.startBtn.click();
-	}
-
-	async expectFooterVisible(): Promise<void> {
-		await expect(this.boardFooter).toBeVisible();
-	}
-
-	async expectHealthyStatus(): Promise<void> {
-		const healthyDot = this.boardFooter.locator('.status-dot.healthy');
-		await expect(healthyDot).toBeVisible();
 	}
 }

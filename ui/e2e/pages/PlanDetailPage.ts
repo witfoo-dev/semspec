@@ -7,8 +7,8 @@ import { type Page, type Locator, expect } from '@playwright/test';
  * - Plan information and metadata
  * - Agent Pipeline View (stages, progress, parallel branches)
  * - Review Dashboard (spec gate, reviewer cards, findings)
- * - Requirements/Scenarios tree navigation (current UI)
- * - Phase/Task tree navigation (legacy plans - kept for backwards compat)
+ * - Requirements/Scenarios tree navigation
+ * - ThreePanelLayout (left nav, center detail, right reviews)
  */
 export class PlanDetailPage {
 	readonly page: Page;
@@ -36,22 +36,19 @@ export class PlanDetailPage {
 	readonly findingsList: Locator;
 	readonly findingsRows: Locator;
 
-	// ActionBar (consolidated action buttons)
+	// ActionBar
 	readonly actionBar: Locator;
 	readonly approvePlanBtn: Locator;
-	// Legacy ActionBar buttons (removed from current UI, kept for old-plan backwards compat)
-	readonly generatePhasesBtn: Locator;
-	readonly generateTasksBtn: Locator;
-	readonly approveAllBtn: Locator;
 	readonly executeBtn: Locator;
-	// Cascade status shown during auto-cascade in requirements/scenarios workflow
 	readonly cascadeStatus: Locator;
 
-	// ResizableSplit (2-panel layout: Plan + Tasks)
-	readonly resizableSplit: Locator;
-	readonly planPanel: Locator;
-	readonly tasksPanel: Locator;
-	readonly resizeDivider: Locator;
+	// ThreePanelLayout
+	readonly threePanel: Locator;
+	readonly panelLeft: Locator;
+	readonly panelCenter: Locator;
+	readonly panelRight: Locator;
+	readonly toggleLeft: Locator;
+	readonly toggleRight: Locator;
 
 	// DataTable (tasks)
 	readonly taskTable: Locator;
@@ -61,7 +58,7 @@ export class PlanDetailPage {
 	readonly taskTablePagination: Locator;
 	readonly addTaskBtn: Locator;
 
-	// Plan editing (inside .detail-panel-container which wraps PlanDetail)
+	// Plan editing
 	readonly planEditBtn: Locator;
 	readonly planGoalTextarea: Locator;
 	readonly planContextTextarea: Locator;
@@ -79,14 +76,12 @@ export class PlanDetailPage {
 	// Navigation tree
 	readonly navTree: Locator;
 	readonly treeNodes: Locator;
-	// Requirement/scenario tree nodes (current UI)
 	readonly requirementNodes: Locator;
 	readonly scenarioNodes: Locator;
-	// Requirement detail panel (shown when requirement selected in tree)
 	readonly requirementDetail: Locator;
 	readonly requirementDetailTitle: Locator;
 
-	// Task detail panel (shown when task selected in tree)
+	// Task detail panel
 	readonly taskDetail: Locator;
 	readonly taskDetailTitle: Locator;
 	readonly taskApproveBtn: Locator;
@@ -98,26 +93,21 @@ export class PlanDetailPage {
 		this.page = page;
 		this.planDetail = page.locator('.plan-detail').first();
 		this.backLink = page.locator('.back-link');
-		this.planTitle = page.locator('.plan-title');
+		this.planTitle = page.locator('.detail-title');
 		this.planStage = page.locator('.plan-stage');
 		this.notFound = page.locator('.not-found');
 
 		// Pipeline section
 		this.pipelineSection = page.locator('.agent-pipeline-section');
-		// PipelineIndicator renders .pipeline (not .pipeline-indicator)
 		this.pipelineIndicator = page.locator('.pipeline');
 		this.agentPipelineView = page.locator('.pipeline-view');
 		this.pipelineStages = page.locator('.pipeline-stage');
 		this.mainPipeline = page.locator('.main-pipeline');
 		this.reviewBranch = page.locator('.review-branch');
 
-		// Reviews section — rendered in the right panel as .right-panel-section containing ReviewDashboard
-		// The plan detail page has no .reviews-section, .reviews-toggle, or .reviews-content
-		// Reviews are shown in the right panel when the plan is approved and executing/complete
+		// Reviews section — rendered in the right panel as ReviewDashboard
 		this.reviewsSection = page.locator('[data-testid="panel-right"]').filter({ has: page.locator('.review-dashboard') });
-		// Reviews toggle: the right panel toggle button in ThreePanelLayout (data-testid="toggle-right")
 		this.reviewsToggle = page.locator('[data-testid="toggle-right"]');
-		// Reviews content is the review dashboard itself
 		this.reviewsContent = page.locator('.review-dashboard');
 		this.reviewDashboard = page.locator('.review-dashboard');
 		this.specGate = page.locator('.spec-gate');
@@ -125,20 +115,19 @@ export class PlanDetailPage {
 		this.findingsList = page.locator('.findings-list');
 		this.findingsRows = page.locator('.finding-row');
 
-		// ActionBar (consolidated action buttons)
+		// ActionBar
 		this.actionBar = page.locator('.action-bar');
 		this.approvePlanBtn = this.actionBar.locator('button', { hasText: 'Approve Plan' });
-		this.generatePhasesBtn = this.actionBar.locator('button', { hasText: 'Generate Phases' });
-		this.generateTasksBtn = this.actionBar.locator('button', { hasText: 'Generate Tasks' });
-		this.approveAllBtn = this.actionBar.locator('button', { hasText: /Approve All/ });
 		this.executeBtn = this.actionBar.locator('button', { hasText: /Start Execution/ });
 		this.cascadeStatus = page.locator('.cascade-status');
 
-		// ResizableSplit (2-panel layout: Nav Tree + Detail/Chat)
-		this.resizableSplit = page.locator('.resizable-split').first();
-		this.planPanel = this.resizableSplit.locator('.panel-left');
-		this.tasksPanel = this.resizableSplit.locator('.panel-right');
-		this.resizeDivider = this.resizableSplit.locator(':scope > .divider');
+		// ThreePanelLayout (replaces old ResizableSplit)
+		this.threePanel = page.locator('[data-testid="three-panel-layout"]');
+		this.panelLeft = page.locator('[data-testid="panel-left"]');
+		this.panelCenter = page.locator('[data-testid="panel-center"]');
+		this.panelRight = page.locator('[data-testid="panel-right"]');
+		this.toggleLeft = page.locator('[data-testid="toggle-left"]');
+		this.toggleRight = page.locator('[data-testid="toggle-right"]');
 
 		// DataTable (tasks)
 		this.taskTable = page.locator('[data-testid="task-list"]');
@@ -148,7 +137,7 @@ export class PlanDetailPage {
 		this.taskTablePagination = page.locator('[data-testid="task-list-pagination"]');
 		this.addTaskBtn = page.locator('.add-task-btn');
 
-		// Plan editing (inside .detail-panel-container which wraps PlanDetail)
+		// Plan editing
 		const detailPanel = page.locator('.detail-panel-container');
 		this.planEditBtn = detailPanel.locator('.detail-header button', { hasText: 'Edit' });
 		this.planGoalTextarea = page.locator('#edit-goal');
@@ -167,14 +156,12 @@ export class PlanDetailPage {
 		// Navigation tree (PlanNavTree)
 		this.navTree = page.locator('.plan-nav-tree');
 		this.treeNodes = page.locator('.tree-node');
-		// Requirement/scenario tree nodes (current UI)
 		this.requirementNodes = this.navTree.locator('.tree-node.req-node');
 		this.scenarioNodes = this.navTree.locator('.tree-node.scenario-node');
-		// Requirement detail panel
 		this.requirementDetail = page.locator('.requirement-detail');
 		this.requirementDetailTitle = this.requirementDetail.locator('.detail-title');
 
-		// Task detail panel (TaskDetail rendered when task selected in tree)
+		// Task detail panel
 		this.taskDetail = page.locator('.task-detail');
 		this.taskDetailTitle = this.taskDetail.locator('.detail-title');
 		this.taskApproveBtn = this.taskDetail.locator('button', { hasText: 'Approve Task' });
@@ -185,7 +172,6 @@ export class PlanDetailPage {
 
 	async goto(slug: string): Promise<void> {
 		await this.page.goto(`/plans/${slug}`);
-		// Wait for either the plan detail (successful load) or not-found message
 		await this.page.waitForSelector('.plan-detail, .not-found', { timeout: 15000 });
 	}
 
@@ -216,7 +202,6 @@ export class PlanDetailPage {
 	}
 
 	async getStage(stageId: string): Promise<Locator> {
-		// Stage ID is used to find pipeline stages by their data attributes or labels
 		return this.pipelineStages.filter({ hasText: stageId });
 	}
 
@@ -255,7 +240,6 @@ export class PlanDetailPage {
 	}
 
 	async expandReviews(): Promise<void> {
-		// Reviews are shown in the right panel — ensure right panel is open
 		const isExpanded = await this.reviewsContent.isVisible();
 		if (!isExpanded && await this.reviewsToggle.isVisible()) {
 			await this.reviewsToggle.click();
@@ -263,7 +247,6 @@ export class PlanDetailPage {
 	}
 
 	async collapseReviews(): Promise<void> {
-		// Reviews are shown in the right panel — close the right panel
 		const isExpanded = await this.reviewsContent.isVisible();
 		if (isExpanded && await this.reviewsToggle.isVisible()) {
 			await this.reviewsToggle.click();
@@ -395,50 +378,43 @@ export class PlanDetailPage {
 		await this.executeBtn.click();
 	}
 
-	// Legacy ActionBar methods - removed from current UI, kept for old-plan backwards compat
-	async expectGeneratePhasesBtnVisible(): Promise<void> {
-		await expect(this.generatePhasesBtn).toBeVisible();
-	}
-
-	async expectGenerateTasksBtnVisible(): Promise<void> {
-		await expect(this.generateTasksBtn).toBeVisible();
-	}
-
-	async expectApproveAllBtnVisible(): Promise<void> {
-		await expect(this.approveAllBtn).toBeVisible();
-	}
-
-	async clickGeneratePhases(): Promise<void> {
-		await this.generatePhasesBtn.click();
-	}
-
-	async clickGenerateTasks(): Promise<void> {
-		await this.generateTasksBtn.click();
-	}
-
-	async clickApproveAll(): Promise<void> {
-		await this.approveAllBtn.click();
-	}
-
 	async goBack(): Promise<void> {
 		await this.backLink.click();
 	}
 
-	// ResizableSplit Panel methods
+	// ThreePanelLayout methods
+	async expectThreePanelVisible(): Promise<void> {
+		await expect(this.threePanel).toBeVisible();
+	}
+
+	async expectPanelLeftVisible(): Promise<void> {
+		await expect(this.panelLeft).toBeVisible();
+	}
+
+	async expectPanelCenterVisible(): Promise<void> {
+		await expect(this.panelCenter).toBeVisible();
+	}
+
+	async expectPanelRightVisible(): Promise<void> {
+		await expect(this.panelRight).toBeVisible();
+	}
+
+	// Backwards-compat aliases for tests using old ResizableSplit names
 	async expectResizableSplitVisible(): Promise<void> {
-		await expect(this.resizableSplit).toBeVisible();
+		await this.expectThreePanelVisible();
 	}
 
 	async expectPlanPanelVisible(): Promise<void> {
-		await expect(this.planPanel).toBeVisible();
+		await this.expectPanelLeftVisible();
 	}
 
 	async expectTasksPanelVisible(): Promise<void> {
-		await expect(this.tasksPanel).toBeVisible();
+		await this.expectPanelCenterVisible();
 	}
 
 	async expectResizeDividerVisible(): Promise<void> {
-		await expect(this.resizeDivider).toBeVisible();
+		// ThreePanelLayout uses toggle buttons instead of a drag divider
+		await expect(this.toggleLeft.or(this.toggleRight)).toBeVisible();
 	}
 
 	// DataTable methods
@@ -468,21 +444,16 @@ export class PlanDetailPage {
 	}
 
 	async expandTaskRow(index: number): Promise<void> {
-		// Use aria-label to find expand buttons more reliably
 		const expandBtns = this.taskTable.locator('button[aria-label="Expand row"]');
 		const btn = expandBtns.nth(index);
-		// Scroll the row into view first
 		await btn.scrollIntoViewIfNeeded();
-		// Use JavaScript click to bypass overlay issues
-		await btn.evaluate((el) => (el as HTMLButtonElement).click());
-		// Wait for Svelte reactivity to update
-		await this.page.waitForTimeout(100);
+		await btn.click();
+		// Wait for the expanded content to appear
+		await expect(this.taskTable.locator('button[aria-label="Collapse row"]').first()).toBeVisible();
 	}
 
 	async expectTaskRowExpanded(index: number): Promise<void> {
-		// When a row is expanded, the button's aria-expanded changes to true
 		const expandBtns = this.taskTable.locator('button[aria-label="Collapse row"]');
-		// At least one button should have the Collapse label (meaning row is expanded)
 		await expect(expandBtns.first()).toBeVisible();
 	}
 
@@ -499,11 +470,9 @@ export class PlanDetailPage {
 	}
 
 	async goToPage(pageNum: number): Promise<void> {
-		// Navigate to specific page - for page 1, click first, for last click last
 		if (pageNum === 1) {
 			await this.taskTablePagination.locator('button').first().click();
 		} else {
-			// Click next until we reach the desired page
 			const nextBtn = this.taskTablePagination.locator('button').nth(3);
 			for (let i = 1; i < pageNum; i++) {
 				await nextBtn.click();
@@ -603,7 +572,7 @@ export class PlanDetailPage {
 		await row.locator('button[title="Edit task"]').click();
 	}
 
-	// Requirement/scenario tree navigation methods (current UI)
+	// Requirement/scenario tree navigation methods
 	async selectRequirementInTree(title: string): Promise<void> {
 		const reqNode = this.navTree.locator('.tree-node.req-node', { hasText: title });
 		await reqNode.click();
@@ -620,7 +589,7 @@ export class PlanDetailPage {
 	}
 
 	async selectScenarioInTree(scenarioText: string): Promise<void> {
-		const scenarioNode = this.navTree.locator('.tree-node.scenario-node', { hasText: scenarioText });
+		const scenarioNode = this.navTree.locator('.tree-node.scenario-node', { hasText: scenarioText }).first();
 		await scenarioNode.click();
 	}
 
@@ -630,11 +599,11 @@ export class PlanDetailPage {
 	}
 
 	async expectScenarioInTree(scenarioText: string): Promise<void> {
-		const scenarioNode = this.navTree.locator('.tree-node.scenario-node', { hasText: scenarioText });
+		const scenarioNode = this.navTree.locator('.tree-node.scenario-node', { hasText: scenarioText }).first();
 		await expect(scenarioNode).toBeVisible();
 	}
 
-	// Requirement detail methods (current UI)
+	// Requirement detail methods
 	async expectRequirementDetailVisible(): Promise<void> {
 		await expect(this.requirementDetail).toBeVisible();
 	}
@@ -643,46 +612,11 @@ export class PlanDetailPage {
 		await expect(this.requirementDetailTitle).toContainText(title);
 	}
 
-	// Legacy tree navigation methods - phase/task UI, kept for backwards compat with old plans
-	async selectPhaseInTree(phaseName: string): Promise<void> {
-		const phaseNode = this.navTree.locator('.tree-node.phase-node', { hasText: phaseName });
-		await phaseNode.click();
-		// Wait for detail panel to update
-		await expect(this.page.locator('.phase-detail')).toBeVisible({ timeout: 5000 });
-	}
-
-	async selectTaskInTree(taskDescription: string): Promise<void> {
-		const taskNode = this.navTree.locator('.tree-node.task-node', { hasText: taskDescription });
-		await taskNode.click();
-		// Wait for task detail panel to update
-		await expect(this.taskDetail).toBeVisible({ timeout: 5000 });
-	}
-
-	async expandPhaseInTree(phaseName: string): Promise<void> {
-		const phaseRow = this.navTree.locator('.phase-row').filter({ hasText: phaseName });
-		const expandBtn = phaseRow.locator('.expand-btn');
-		const isExpanded = await expandBtn.getAttribute('aria-expanded');
-		if (isExpanded !== 'true') {
-			await expandBtn.click();
-		}
-	}
-
 	async expectNavTreeVisible(): Promise<void> {
 		await expect(this.navTree).toBeVisible();
 	}
 
-	// Legacy: phase/task tree assertions for old plans
-	async expectPhaseInTree(phaseName: string): Promise<void> {
-		const phaseNode = this.navTree.locator('.tree-node.phase-node', { hasText: phaseName });
-		await expect(phaseNode).toBeVisible();
-	}
-
-	async expectTaskInTree(taskDescription: string): Promise<void> {
-		const taskNode = this.navTree.locator('.tree-node.task-node', { hasText: taskDescription });
-		await expect(taskNode).toBeVisible();
-	}
-
-	// Task detail methods (when task selected via tree - legacy phase/task plans)
+	// Task detail methods
 	async expectTaskDetailVisible(): Promise<void> {
 		await expect(this.taskDetail).toBeVisible();
 	}

@@ -1,9 +1,13 @@
 # Production Caddy configuration
-# Serves static UI files and proxies API requests to semspec backend
+# Proxies API requests to semspec backend, all else to UI Node SSR server
 
 :8080 {
     # API routes to semspec backend
     handle /agentic-dispatch/* {
+        reverse_proxy semspec:8080
+    }
+
+    handle /workflow-api/* {
         reverse_proxy semspec:8080
     }
 
@@ -23,10 +27,8 @@
         reverse_proxy semspec:8080
     }
 
-    # Static UI files (SPA fallback for client-side routing)
+    # All other routes to UI Node SSR server
     handle {
-        root * /srv
-        try_files {path} /index.html
-        file_server
+        reverse_proxy ui:3000
     }
 }

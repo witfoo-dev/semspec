@@ -11,8 +11,8 @@ test.describe('Semspec Workflow', () => {
 			const isMac = process.platform === 'darwin';
 			await page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
 
-			await expect(page.locator('.chat-drawer')).toBeVisible();
-			await expect(page.locator('.chat-drawer .message-input')).toBeVisible();
+			await expect(page.locator('[data-testid="bottom-chat-bar"]')).toBeVisible();
+			await expect(page.locator('[data-testid="bottom-chat-bar"] textarea[aria-label="Message input"]')).toBeVisible();
 		});
 	});
 

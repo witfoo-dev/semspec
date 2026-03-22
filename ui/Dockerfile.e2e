@@ -16,11 +16,12 @@ COPY . .
 ARG VITE_USE_MOCKS=false
 ENV VITE_USE_MOCKS=$VITE_USE_MOCKS
 
-# Build for production (bundles all CSS properly)
+# Build for production (adapter-node outputs to build/)
 RUN npm run build
 
-# Expose preview server port
-EXPOSE 4173
+# Expose Node server port
+EXPOSE 3000
 
-# Run production preview server
-CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0"]
+# Run the Node server (adapter-node output)
+ENV PORT=3000
+CMD ["node", "build"]
