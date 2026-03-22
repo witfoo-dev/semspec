@@ -67,10 +67,16 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # Usage: docker compose build --build-arg SANDBOX_UID=$(id -u) --build-arg SANDBOX_GID=$(id -g) sandbox
 ARG SANDBOX_UID=1000
 ARG SANDBOX_GID=1000
-RUN groupadd -f -g ${SANDBOX_GID} sandbox \
-    && useradd -m -s /bin/bash -u ${SANDBOX_UID} -g ${SANDBOX_GID} sandbox || true \
+# Remove any pre-existing user/group at the target UID/GID, then create sandbox.
+# Ubuntu 24.04 ships with user 'ubuntu' at UID/GID 1000 which conflicts.
+RUN existing_user=$(getent passwd ${SANDBOX_UID} | cut -d: -f1) \
+    && if [ -n "$existing_user" ] && [ "$existing_user" != "sandbox" ]; then userdel -r "$existing_user" 2>/dev/null || true; fi \
+    && existing_group=$(getent group ${SANDBOX_GID} | cut -d: -f1) \
+    && if [ -n "$existing_group" ] && [ "$existing_group" != "sandbox" ]; then groupdel "$existing_group" 2>/dev/null || true; fi \
+    && groupadd -g ${SANDBOX_GID} sandbox \
+    && useradd -m -s /bin/bash -u ${SANDBOX_UID} -g ${SANDBOX_GID} sandbox \
     && mkdir -p /go/pkg/mod \
-    && chown -R ${SANDBOX_UID}:${SANDBOX_GID} /go
+    && chown -R sandbox:sandbox /go
 
 COPY --from=builder /sandbox /usr/local/bin/sandbox
 
