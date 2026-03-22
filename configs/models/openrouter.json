@@ -1,0 +1,24 @@
+{
+  "capabilities": {
+    "planning": {
+      "models": ["anthropic/claude-sonnet-4-6"],
+      "provider": "openrouter",
+      "endpoint": "https://openrouter.ai/api/v1"
+    },
+    "coding": {
+      "models": ["anthropic/claude-sonnet-4-6"],
+      "provider": "openrouter",
+      "endpoint": "https://openrouter.ai/api/v1"
+    },
+    "reviewing": {
+      "models": ["google/gemini-2.5-flash"],
+      "provider": "openrouter",
+      "endpoint": "https://openrouter.ai/api/v1"
+    },
+    "fast": {
+      "models": ["google/gemini-2.5-flash"],
+      "provider": "openrouter",
+      "endpoint": "https://openrouter.ai/api/v1"
+    }
+  }
+}

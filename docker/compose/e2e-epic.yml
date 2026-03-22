@@ -1,0 +1,78 @@
+# Docker Compose overlay for the Meshtastic/OSH epic E2E scenario.
+# Adds 3 external semsource instances for knowledge graph indexing.
+#
+# Usage:
+#   docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml -f docker/compose/e2e-epic.yml up -d
+#
+# Or via task:
+#   task e2e:epic -- claude
+#
+# This overlay:
+#   1. Adds semsource-osh (OpenSensorHub Java code)
+#   2. Adds semsource-meshtastic (Meshtastic documentation)
+#   3. Adds semsource-ogc (OGC Connected Systems spec)
+#   4. Configures semspec with GRAPH_SOURCES pointing to all instances
+#   5. Adds semembed for vector embeddings (required for graph_search)
+
+services:
+  # External semsource: OpenSensorHub core (Java)
+  semsource-osh:
+    image: ghcr.io/c360studio/semsource:latest
+    environment:
+      - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ../../configs/semsource/osh.json:/etc/semsource/semsource.json:ro
+    command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
+    healthcheck:
+      test: ["CMD", "semsource", "version"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s  # OSH repo is large — cloning takes time
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+
+  # External semsource: Meshtastic documentation
+  semsource-meshtastic:
+    image: ghcr.io/c360studio/semsource:latest
+    environment:
+      - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ../../configs/semsource/meshtastic.json:/etc/semsource/semsource.json:ro
+    command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
+    healthcheck:
+      test: ["CMD", "semsource", "version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # External semsource: OGC Connected Systems spec
+  semsource-ogc:
+    image: ghcr.io/c360studio/semsource:latest
+    environment:
+      - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ../../configs/semsource/ogc.json:/etc/semsource/semsource.json:ro
+    command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
+    healthcheck:
+      test: ["CMD", "semsource", "version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Override semspec to configure federated graph sources.
+  semspec:
+    environment:
+      - GRAPH_SOURCES=[{"name":"sandbox","url":"http://semsource:8080","type":"semsource"},{"name":"osh","url":"http://semsource-osh:8080","type":"semsource"},{"name":"meshtastic","url":"http://semsource-meshtastic:8080","type":"semsource"},{"name":"ogc","url":"http://semsource-ogc:8080","type":"semsource"}]
+    depends_on:
+      semsource-osh:
+        condition: service_healthy
+      semsource-meshtastic:
+        condition: service_healthy
+      semsource-ogc:
+        condition: service_healthy

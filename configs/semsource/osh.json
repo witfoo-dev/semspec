@@ -1,0 +1,22 @@
+{
+  "namespace": "osh",
+  "sources": [
+    {
+      "type": "git",
+      "url": "https://github.com/opensensorhub/osh-core",
+      "branch": "master",
+      "watch": false
+    },
+    {
+      "type": "ast",
+      "path": "./",
+      "language": "java",
+      "watch": false
+    },
+    {
+      "type": "docs",
+      "paths": ["README.md", "docs/", "sensorhub-core/src/main/java/org/sensorhub/api/"],
+      "watch": false
+    }
+  ]
+}

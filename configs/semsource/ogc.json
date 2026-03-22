@@ -1,0 +1,16 @@
+{
+  "namespace": "ogc",
+  "sources": [
+    {
+      "type": "git",
+      "url": "https://github.com/opengeospatial/ogcapi-connected-systems",
+      "branch": "master",
+      "watch": false
+    },
+    {
+      "type": "docs",
+      "paths": ["api/", "README.md", "docs/"],
+      "watch": false
+    }
+  ]
+}
