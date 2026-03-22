@@ -62,8 +62,8 @@ func TestPlannerSystemPrompt(t *testing.T) {
 	tools := []string{
 		"file_read",
 		"file_list",
-		"workflow_read_document",
-		"workflow_query_graph",
+		"read_document",
+		"graph_search",
 	}
 	for _, tool := range tools {
 		if !strings.Contains(prompt, tool) {

@@ -629,7 +629,7 @@ the rest.
 |------|-------|
 | Builder | `file_read`, `file_write`, `file_list`, `git_status`, `git_diff` |
 | Tester | `file_read`, `file_write`, `file_list`, `exec` |
-| Planner | `file_read`, `file_list`, `git_log`, `graph_query`, `workflow_graph_summary` |
+| Planner | `file_read`, `file_list`, `git_log`, `graph_search`, `graph_query`, `graph_summary` |
 | Reviewer | `file_read`, `file_list`, `git_diff`, `review_scenario` |
 
 ## Serial Decomposition

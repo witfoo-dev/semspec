@@ -25,8 +25,8 @@ func TestReviewerPrompt(t *testing.T) {
 	}
 
 	// Should include SOP query instructions
-	if !strings.Contains(prompt, "workflow_query_graph") {
-		t.Error("ReviewerPrompt should include workflow_query_graph for SOP queries")
+	if !strings.Contains(prompt, "graph_search") {
+		t.Error("ReviewerPrompt should include graph_search for SOP queries")
 	}
 
 	// Should include all rejection types

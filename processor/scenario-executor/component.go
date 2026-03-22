@@ -867,8 +867,8 @@ func availableToolNames() []string {
 	return []string{
 		"file_read", "file_write", "file_list",
 		"git_status", "git_diff", "git_commit",
-		"workflow_graph_summary", "workflow_query_graph", "workflow_get_codebase_summary",
-		"workflow_get_entity", "workflow_traverse_relationships", "workflow_read_document",
+		"graph_summary", "graph_search", "graph_query", "graph_codebase",
+		"graph_entity", "graph_traverse", "read_document",
 		"web_search", "exec",
 		"review_scenario",
 	}

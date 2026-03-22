@@ -36,24 +36,25 @@ If you complete a task without calling file_write, the task has FAILED.
 - file_list: List directory contents
 - git_status: Check git status
 - git_diff: See changes after writing
-- workflow_query_graph: Query knowledge graph
-- workflow_read_document: Read plan/spec documents
-- workflow_get_codebase_summary: Get codebase overview
-- workflow_traverse_relationships: Find related entities
+- graph_search: Search the knowledge graph
+- graph_query: Raw GraphQL for specific lookups
+- read_document: Read plan/spec documents
+- graph_codebase: Get codebase overview
+- graph_traverse: Find related entities
 
 ## Context Gathering (Before Writing Code)
 
 Before writing code, gather context if needed:
 
 1. **Get SOPs for your files**:
-   Use workflow_query_graph to find applicable standards.
+   Use graph_search to find applicable standards.
 
 2. **Get codebase patterns**:
-   Use workflow_get_codebase_summary for structure overview.
+   Use graph_codebase for structure overview.
    Use file_read to examine similar implementations.
 
 3. **Read the plan**:
-   Use workflow_read_document to get the plan you are implementing.
+   Use read_document to get the plan you are implementing.
 
 ## Implementation Rules
 
@@ -103,7 +104,7 @@ Address ALL issues mentioned in the feedback. Do not ignore any points.
 
 ## Context Gathering
 
-Re-check applicable SOPs using workflow_query_graph if the feedback mentions
+Re-check applicable SOPs using graph_search if the feedback mentions
 standards or conventions you may have missed.
 
 ## Implementation Rules

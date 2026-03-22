@@ -25,7 +25,7 @@ func NewDocumentExecutor(repoRoot string) *DocumentExecutor {
 // Execute executes a document tool call.
 func (e *DocumentExecutor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 	switch call.Name {
-	case "workflow_read_document":
+	case "read_document":
 		return e.readDocument(ctx, call)
 	case "workflow_write_document":
 		return e.writeDocument(ctx, call)
@@ -45,7 +45,7 @@ func (e *DocumentExecutor) Execute(ctx context.Context, call agentic.ToolCall) (
 func (e *DocumentExecutor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{
 		{
-			Name:        "workflow_read_document",
+			Name:        "read_document",
 			Description: "Read a workflow document (plan.md, tasks.md) for a plan. Use this to read previously generated documents as context for generating subsequent documents.",
 			Parameters: map[string]any{
 				"type": "object",

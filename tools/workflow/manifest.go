@@ -80,7 +80,7 @@ func (m *GraphManifest) FormatForPrompt() string {
 		}
 	}
 
-	sb.WriteString("\nUse workflow_get_codebase_summary for overview, or workflow_query_graph\n")
+	sb.WriteString("\nUse graph_codebase for overview, or graph_query\n")
 	sb.WriteString("with entitiesByPredicate(predicate: \"...\") for targeted lookups.\n")
 
 	return sb.String()

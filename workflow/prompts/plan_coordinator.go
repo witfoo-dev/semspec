@@ -17,9 +17,9 @@ func PlanCoordinatorSystemPrompt() string {
 
 ### Step 1: Query Knowledge Graph
 FIRST, understand the codebase using the graph tools:
-- workflow_get_codebase_summary: Get packages, types, functions overview
-- workflow_query_graph: Find entities relevant to the task topic
-- workflow_traverse_relationships: Explore connections from key entities
+- graph_codebase: Get packages, types, functions overview
+- graph_search: Find entities relevant to the task topic
+- graph_traverse: Explore connections from key entities
 
 ### Step 2: Analyze and Decide Focus Areas
 Based on graph results, decide how many planners to spawn (1-3):

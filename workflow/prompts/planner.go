@@ -80,8 +80,8 @@ Use gap format for any critical missing information:
 - file_read: Read file contents
 - file_list: List directory contents
 - git_status: Check git status
-- workflow_read_document: Read existing plan/spec documents
-- workflow_query_graph: Query knowledge graph
+- read_document: Read existing plan/spec documents
+- graph_search: Search the knowledge graph
 
 ` + GapDetectionInstructions
 }

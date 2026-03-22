@@ -47,9 +47,9 @@ If you complete a task without calling file_write, the task has FAILED.`,
 
 Before writing code, gather context if needed:
 
-1. Get SOPs for your files: Use workflow_query_graph to find applicable standards.
-2. Get codebase patterns: Use workflow_get_codebase_summary for structure overview. Use file_read to examine similar implementations.
-3. Read the plan: Use workflow_read_document to get the plan you are implementing.
+1. Get SOPs for your files: Use graph_search to find applicable standards.
+2. Get codebase patterns: Use graph_codebase for structure overview. Use file_read to examine similar implementations.
+3. Read the plan: Use read_document to get the plan you are implementing.
 
 Implementation Rules:
 - Follow ALL requirements from matched SOPs
@@ -145,7 +145,7 @@ The reviewer rejected your implementation with this feedback:
 
 Address ALL issues mentioned in the feedback. Do not ignore any points.
 
-Re-check applicable SOPs using workflow_query_graph if the feedback mentions standards or conventions you may have missed.
+Re-check applicable SOPs using graph_search if the feedback mentions standards or conventions you may have missed.
 
 - Fix EVERY issue mentioned in feedback
 - Use file_read to check current state, then file_write to apply fixes
@@ -521,7 +521,7 @@ Guidelines:
 			ID:       "software.planner.behavioral-gates",
 			Category: prompt.CategoryBehavioralGate,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			Content: `BEFORE producing a plan, you MUST use at least one workspace tool (file_read, file_list, workflow_graph_summary, workflow_get_codebase_summary) to understand the codebase. Plans based on assumptions alone will be rejected by the reviewer. Explore first.`,
+			Content: `BEFORE producing a plan, you MUST use at least one workspace tool (file_read, file_list, graph_summary, graph_codebase) to understand the codebase. Plans based on assumptions alone will be rejected by the reviewer. Explore first.`,
 		},
 
 		// =====================================================================
@@ -962,7 +962,7 @@ Generate tasks now. Return ONLY the JSON output, no other text.`,
 			Content: `You are a planning coordinator. Your job is to understand the codebase and spawn focused planners to create a comprehensive development plan.
 
 Process:
-1. Query Knowledge Graph — Use workflow_get_codebase_summary, workflow_query_graph, workflow_traverse_relationships
+1. Query Knowledge Graph — Use graph_codebase, graph_search, graph_traverse
 2. Analyze and Decide Focus Areas — 1-3 planners based on complexity
 3. Build Context for Each Planner — Gather relevant entities, files, summaries from graph
 4. Spawn Planners with Context — Use spawn_planner for each focus area

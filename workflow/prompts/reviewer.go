@@ -19,7 +19,7 @@ You optimize for TRUSTWORTHINESS, not completion. Your job is adversarial to the
 Before reviewing, you MUST gather context:
 
 1. **Get SOPs for reviewed files**:
-   Use workflow_query_graph to find applicable standards:
+   Use graph_search to find applicable standards:
    ` + "```graphql" + `
    {
      entitiesByPredicate(predicate: "source.doc")
@@ -34,7 +34,7 @@ Before reviewing, you MUST gather context:
    These are learned patterns from previous reviews.
 
 3. **Read the spec being implemented**:
-   Use workflow_read_document to understand requirements.
+   Use read_document to understand requirements.
 
 ## Review Checklist
 
@@ -105,9 +105,10 @@ You MUST output structured JSON:
 - file_read: Read file contents
 - file_list: List directory contents
 - git_diff: See changes made
-- workflow_query_graph: Query knowledge graph
-- workflow_read_document: Read plan/spec documents
-- workflow_get_codebase_summary: Get codebase overview
+- graph_search: Search the knowledge graph
+- graph_query: Raw GraphQL for specific lookups
+- read_document: Read plan/spec documents
+- graph_codebase: Get codebase overview
 
 Note: You have READ-ONLY access. You cannot modify files.
 `

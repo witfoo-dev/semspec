@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/c360studio/semstreams/agentic"
@@ -54,15 +55,17 @@ func getGatewayURL() string {
 // Execute executes a graph tool call.
 func (e *GraphExecutor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 	switch call.Name {
-	case "workflow_graph_summary":
+	case "graph_summary":
 		return e.graphSummary(ctx, call)
-	case "workflow_query_graph":
+	case "graph_search":
+		return e.graphSearch(ctx, call)
+	case "graph_query":
 		return e.queryGraph(ctx, call)
-	case "workflow_get_codebase_summary":
+	case "graph_codebase":
 		return e.getCodebaseSummary(ctx, call)
-	case "workflow_get_entity":
+	case "graph_entity":
 		return e.getEntity(ctx, call)
-	case "workflow_traverse_relationships":
+	case "graph_traverse":
 		return e.traverseRelationships(ctx, call)
 	default:
 		return agentic.ToolResult{
@@ -76,8 +79,8 @@ func (e *GraphExecutor) Execute(ctx context.Context, call agentic.ToolCall) (age
 func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{
 		{
-			Name:        "workflow_graph_summary",
-			Description: "Get an overview of all indexed knowledge sources — entity types, domains, counts, and predicate schemas. Call ONCE before workflow_query_graph to understand what data is available. Aggregates across all connected semsource instances.",
+			Name:        "graph_summary",
+			Description: "What's in the knowledge graph. Call ONCE first to see entity types, domains, and counts.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -89,22 +92,44 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 			},
 		},
 		{
-			Name:        "workflow_query_graph",
-			Description: "Query the semantic knowledge graph using GraphQL. Broad queries (>50 results) return auto-summarized community summaries + entity IDs — drill into specific entities by ID if needed. The graph contains indexed code entities (functions, types, interfaces), their relationships (calls, implements, imports), and workflow entities (plans, specs).",
+			Name:        "graph_search",
+			Description: "Search the knowledge graph. Returns a synthesized answer about your question. Use for any question about the codebase, architecture, or project.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"query": map[string]any{
 						"type":        "string",
-						"description": "GraphQL query to execute against the graph. Example: { entitiesByPredicate(predicate: \"code.function\") } or { entity(id: \"my.entity.id\") { id triples { predicate object } } }",
+						"description": "Natural language question or keyword search (e.g., 'how does authentication work' or 'error handling patterns')",
+					},
+					"level": map[string]any{
+						"type":        "integer",
+						"description": "Community level 0-3. Higher levels give broader answers (default: 1)",
+					},
+					"max_communities": map[string]any{
+						"type":        "integer",
+						"description": "Maximum communities to search (default: 10)",
 					},
 				},
 				"required": []string{"query"},
 			},
 		},
 		{
-			Name:        "workflow_get_codebase_summary",
-			Description: "Get a high-level summary of the codebase from the knowledge graph. Returns counts and samples of functions, types, interfaces, packages, and their relationships. Use this to understand the overall structure before diving into specifics.",
+			Name:        "graph_query",
+			Description: "Raw GraphQL query for specific lookups. Use entitiesByPredicate(predicate), entity(id), or entitiesByPrefix(prefix). For general questions, use graph_search instead.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type":        "string",
+						"description": "GraphQL query string. Example: { entity(id: \"my.entity.id\") { id triples { predicate object } } }",
+					},
+				},
+				"required": []string{"query"},
+			},
+		},
+		{
+			Name:        "graph_codebase",
+			Description: "Code structure overview — function, type, interface, and package counts with samples.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -120,8 +145,8 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 			},
 		},
 		{
-			Name:        "workflow_get_entity",
-			Description: "Get a specific entity from the knowledge graph by ID. Returns all triples (predicate-object pairs) for the entity. Use this to get details about a specific function, type, or workflow entity.",
+			Name:        "graph_entity",
+			Description: "Get one entity by ID with all predicates.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -134,8 +159,8 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 			},
 		},
 		{
-			Name:        "workflow_traverse_relationships",
-			Description: "Traverse relationships from a starting entity in the knowledge graph. Results capped at 100KB. Max depth 3. Use this to find related code (what calls a function, what implements an interface, what a type depends on).",
+			Name:        "graph_traverse",
+			Description: "Follow relationships from an entity (calls, implements, imports). Max depth 3.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -229,6 +254,135 @@ func (e *GraphExecutor) graphSummary(ctx context.Context, call agentic.ToolCall)
 		CallID:  call.ID,
 		Content: string(body),
 	}, nil
+}
+
+// graphSearch executes a natural language search via globalSearch and returns
+// the synthesized answer first, then entity digests.
+func (e *GraphExecutor) graphSearch(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	query, ok := call.Arguments["query"].(string)
+	if !ok || query == "" {
+		return agentic.ToolResult{
+			CallID: call.ID,
+			Error:  "query argument is required",
+		}, nil
+	}
+
+	level := 1
+	if v, ok := call.Arguments["level"].(float64); ok {
+		level = int(v)
+	}
+	maxCommunities := 10
+	if v, ok := call.Arguments["max_communities"].(float64); ok {
+		maxCommunities = int(v)
+	}
+
+	gql := `query($query: String!, $level: Int, $maxCommunities: Int) {
+		globalSearch(query: $query, level: $level, maxCommunities: $maxCommunities) {
+			answer
+			answer_model
+			entity_digests { id type label relevance }
+			community_summaries {
+				communityId summary keywords level relevance
+				member_count
+				entities { id type label relevance }
+			}
+			count
+		}
+	}`
+
+	vars := map[string]any{
+		"query":          query,
+		"level":          level,
+		"maxCommunities": maxCommunities,
+	}
+
+	result, err := e.executeGraphQL(ctx, gql, vars)
+	if err != nil {
+		return agentic.ToolResult{
+			CallID: call.ID,
+			Error:  fmt.Sprintf("graph search failed: %v", err),
+		}, nil
+	}
+
+	return agentic.ToolResult{
+		CallID:  call.ID,
+		Content: formatSearchResult(result),
+	}, nil
+}
+
+// formatSearchResult formats a globalSearch response for LLM consumption.
+// Priority: answer > entity_digests > community_summaries > raw count.
+func formatSearchResult(data map[string]any) string {
+	search, ok := data["globalSearch"].(map[string]any)
+	if !ok {
+		return "No results found."
+	}
+
+	var sb strings.Builder
+
+	// 1. Answer — the synthesized knowledge summary
+	if answer, ok := search["answer"].(string); ok && answer != "" {
+		sb.WriteString(answer)
+		if model, ok := search["answer_model"].(string); ok && model != "" {
+			sb.WriteString(fmt.Sprintf("\n\n(synthesized by %s)", model))
+		}
+	}
+
+	// 2. Entity digests — lightweight context for matched entities
+	if digests, ok := search["entity_digests"].([]any); ok && len(digests) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n---\nMatched entities:\n")
+		} else {
+			sb.WriteString("Matched entities:\n")
+		}
+		for _, d := range digests {
+			if digest, ok := d.(map[string]any); ok {
+				label, _ := digest["label"].(string)
+				etype, _ := digest["type"].(string)
+				id, _ := digest["id"].(string)
+				if label != "" {
+					sb.WriteString(fmt.Sprintf("- %s [%s] %s\n", label, etype, id))
+				} else {
+					sb.WriteString(fmt.Sprintf("- [%s] %s\n", etype, id))
+				}
+			}
+		}
+	}
+
+	// 3. Community summaries — clustered knowledge (only when no answer and no digests)
+	if communities, ok := search["community_summaries"].([]any); ok && len(communities) > 0 && sb.Len() == 0 {
+		sb.WriteString("Knowledge clusters:\n")
+		for _, c := range communities {
+			if comm, ok := c.(map[string]any); ok {
+				summary, _ := comm["summary"].(string)
+				if summary != "" {
+					sb.WriteString(fmt.Sprintf("\n%s\n", summary))
+				}
+				// Show representative entities
+				if entities, ok := comm["entities"].([]any); ok {
+					for _, e := range entities {
+						if ent, ok := e.(map[string]any); ok {
+							label, _ := ent["label"].(string)
+							etype, _ := ent["type"].(string)
+							if label != "" {
+								sb.WriteString(fmt.Sprintf("  - %s [%s]\n", label, etype))
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback: count only
+	if sb.Len() == 0 {
+		if count, ok := search["count"].(float64); ok {
+			return fmt.Sprintf("Found %d entities but no summary available. Use graph_query for specific lookups.", int(count))
+		}
+		return "No results found."
+	}
+
+	return sb.String()
 }
 
 // queryGraph executes a raw GraphQL query.

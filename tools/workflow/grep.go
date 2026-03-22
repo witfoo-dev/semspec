@@ -14,7 +14,7 @@ import (
 
 // GrepExecutor implements grep fallback tools for when graph lacks data.
 // IMPORTANT: This should only be used as a fallback when the knowledge graph
-// doesn't have the information needed. Prefer using workflow_query_graph first.
+// doesn't have the information needed. Prefer using graph_search first.
 type GrepExecutor struct {
 	repoRoot string
 }
@@ -47,8 +47,8 @@ func (e *GrepExecutor) ListTools() []agentic.ToolDefinition {
 			Description: `FALLBACK ONLY: Search codebase using grep when the knowledge graph doesn't have the information needed.
 
 IMPORTANT: Before using this tool:
-1. First try workflow_query_graph to search the indexed knowledge graph
-2. First try workflow_get_codebase_summary to understand what's indexed
+1. First try graph_search to search the indexed knowledge graph
+2. First try graph_codebase to understand what's indexed
 3. Only use grep if the graph doesn't contain what you need
 
 This tool is slower and uses more tokens than graph queries. The graph contains pre-indexed, structured data about functions, types, and relationships that is more efficient to query.`,
@@ -84,8 +84,8 @@ This tool is slower and uses more tokens than graph queries. The graph contains 
 			Description: `FALLBACK ONLY: Find files matching a pattern when the knowledge graph doesn't have file information.
 
 IMPORTANT: Before using this tool:
-1. First try workflow_query_graph with code.artifact.path predicate
-2. First try workflow_get_codebase_summary to see indexed packages
+1. First try graph_query with code.artifact.path predicate
+2. First try graph_codebase to see indexed packages
 3. Only use this if the graph doesn't have file information
 
 The knowledge graph contains indexed file paths that are faster to query.`,

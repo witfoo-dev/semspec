@@ -36,12 +36,13 @@ func DefaultToolGuidance() []ToolGuidance {
 		{Name: "git_commit", Order: 30, Guidance: "Commit changes after implementation is complete and verified.", Roles: []Role{RoleDeveloper}},
 
 		// Graph tools — summary first so agents know what to query
-		{Name: "workflow_graph_summary", Order: 40, Guidance: "Overview of indexed knowledge sources — entity types, domains, counts, predicates. Call ONCE before workflow_query_graph to understand available data."},
-		{Name: "workflow_get_codebase_summary", Order: 45, Guidance: "Get code entity counts and samples. Use after workflow_graph_summary for code-specific details."},
-		{Name: "workflow_query_graph", Order: 50, Guidance: "Query the knowledge graph using GraphQL. Call workflow_graph_summary first to learn available predicates. Use entitiesByPredicate for targeted lookups, entity(id) for specifics. Results capped at 100KB."},
-		{Name: "workflow_read_document", Order: 52, Guidance: "Read plan or specification documents from the workflow."},
-		{Name: "workflow_get_entity", Order: 55, Guidance: "Get a specific entity by ID with all triples. Use when you know the exact entity ID."},
-		{Name: "workflow_traverse_relationships", Order: 58, Guidance: "Follow relationships from a known entity (calls, implements, imports). Max depth 3. Start from a specific entity ID, not a broad search."},
+		{Name: "graph_summary", Order: 40, Guidance: "What's in the knowledge graph. Call ONCE first to see entity types, domains, and counts."},
+		{Name: "graph_search", Order: 42, Guidance: "Search the knowledge graph with a natural language question. Returns a synthesized answer. Use this for any codebase question."},
+		{Name: "graph_codebase", Order: 45, Guidance: "Code entity counts and samples. Use after graph_summary for code-specific structure."},
+		{Name: "graph_query", Order: 50, Guidance: "Raw GraphQL query for specific lookups: entitiesByPredicate, entity(id), entitiesByPrefix. Use graph_search for general questions."},
+		{Name: "read_document", Order: 52, Guidance: "Read plan or specification documents from the workflow."},
+		{Name: "graph_entity", Order: 55, Guidance: "Get a specific entity by ID with all predicates."},
+		{Name: "graph_traverse", Order: 58, Guidance: "Follow relationships from a known entity (calls, implements, imports). Max depth 3."},
 
 		// Web search
 		{Name: "web_search", Order: 60, Guidance: "Search the web for external documentation, API references, or library usage. Max 10 results. Use specific queries, not broad topics."},

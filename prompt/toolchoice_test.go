@@ -46,7 +46,7 @@ func TestResolveToolChoice_ReviewerNil(t *testing.T) {
 }
 
 func TestResolveToolChoice_PlannerNil(t *testing.T) {
-	tools := []string{"file_read", "workflow_query_graph"}
+	tools := []string{"file_read", "graph_search"}
 
 	for _, role := range []Role{RolePlanner, RolePlanCoordinator} {
 		tc := ResolveToolChoice(role, tools)

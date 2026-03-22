@@ -78,7 +78,7 @@ func TestGraphSummary_WithQuerier_ReturnsSummary(t *testing.T) {
 		querier: &mockGraphQuerier{summaries: []gatherers.SourceSummary{expected}},
 	}
 
-	call := makeCall("c1", "workflow_graph_summary", map[string]any{})
+	call := makeCall("c1", "graph_summary", map[string]any{})
 	result, err := executor.Execute(context.Background(), call)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -114,7 +114,7 @@ func TestGraphSummary_IncludePredicatesFalse_StripsPredicates(t *testing.T) {
 		querier: &mockGraphQuerier{summaries: []gatherers.SourceSummary{fixtureSummary()}},
 	}
 
-	call := makeCall("c2", "workflow_graph_summary", map[string]any{
+	call := makeCall("c2", "graph_summary", map[string]any{
 		"include_predicates": false,
 	})
 	result, err := executor.Execute(context.Background(), call)
@@ -160,7 +160,7 @@ func TestGraphSummary_FallbackHTTP_ReturnsBody(t *testing.T) {
 	// querier is nil → triggers fallback path.
 	executor := &GraphExecutor{querier: nil, gatewayURL: srv.URL}
 
-	call := makeCall("c3", "workflow_graph_summary", map[string]any{})
+	call := makeCall("c3", "graph_summary", map[string]any{})
 	result, err := executor.Execute(context.Background(), call)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -189,7 +189,7 @@ func TestGraphSummary_FallbackHTTP_Non200_ReturnsError(t *testing.T) {
 
 	executor := &GraphExecutor{querier: nil, gatewayURL: srv.URL}
 
-	call := makeCall("c4", "workflow_graph_summary", map[string]any{})
+	call := makeCall("c4", "graph_summary", map[string]any{})
 	result, err := executor.Execute(context.Background(), call)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -206,7 +206,7 @@ func TestGraphSummary_NoSemsourceConfigured_ReturnsError(t *testing.T) {
 
 	executor := &GraphExecutor{querier: nil}
 
-	call := makeCall("c5", "workflow_graph_summary", map[string]any{})
+	call := makeCall("c5", "graph_summary", map[string]any{})
 	result, err := executor.Execute(context.Background(), call)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

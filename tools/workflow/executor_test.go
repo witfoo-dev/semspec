@@ -84,22 +84,23 @@ Rationale: Documentation enables collaboration.
 // GraphExecutor – ListTools
 // ---------------------------------------------------------------------------
 
-func TestGraphExecutor_ListTools_ReturnsFiveDefinitions(t *testing.T) {
+func TestGraphExecutor_ListTools_ReturnsSixDefinitions(t *testing.T) {
 	t.Parallel()
 
 	exec := NewGraphExecutor()
 	tools := exec.ListTools()
 
-	if len(tools) != 5 {
-		t.Fatalf("ListTools() returned %d definitions, want 5", len(tools))
+	if len(tools) != 6 {
+		t.Fatalf("ListTools() returned %d definitions, want 6", len(tools))
 	}
 
 	want := map[string]bool{
-		"workflow_graph_summary":          true,
-		"workflow_query_graph":            true,
-		"workflow_get_codebase_summary":   true,
-		"workflow_get_entity":             true,
-		"workflow_traverse_relationships": true,
+		"graph_summary":  true,
+		"graph_search":   true,
+		"graph_query":    true,
+		"graph_codebase": true,
+		"graph_entity":   true,
+		"graph_traverse": true,
 	}
 	for _, tool := range tools {
 		if !want[tool.Name] {
@@ -145,7 +146,7 @@ func TestGraphExecutor_QueryGraph_MissingQuery_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	exec := NewGraphExecutor()
-	call := makeCall("c1", "workflow_query_graph", map[string]any{})
+	call := makeCall("c1", "graph_query", map[string]any{})
 
 	result, err := exec.Execute(context.Background(), call)
 
@@ -164,7 +165,7 @@ func TestGraphExecutor_QueryGraph_EmptyQuery_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	exec := NewGraphExecutor()
-	call := makeCall("c1", "workflow_query_graph", map[string]any{"query": ""})
+	call := makeCall("c1", "graph_query", map[string]any{"query": ""})
 
 	result, err := exec.Execute(context.Background(), call)
 
@@ -191,7 +192,7 @@ func TestGraphExecutor_QueryGraph_HTTPError_ReturnsError(t *testing.T) {
 	defer srv.Close()
 
 	exec := &GraphExecutor{gatewayURL: srv.URL}
-	call := makeCall("c1", "workflow_query_graph", map[string]any{
+	call := makeCall("c1", "graph_query", map[string]any{
 		"query": "{ entitiesByPredicate(predicate: \"code.function\") }",
 	})
 
@@ -220,7 +221,7 @@ func TestGraphExecutor_QueryGraph_GraphQLError_ReturnsError(t *testing.T) {
 	defer srv.Close()
 
 	exec := &GraphExecutor{gatewayURL: srv.URL}
-	call := makeCall("c1", "workflow_query_graph", map[string]any{
+	call := makeCall("c1", "graph_query", map[string]any{
 		"query": "{ bad }",
 	})
 
@@ -253,7 +254,7 @@ func TestGraphExecutor_QueryGraph_Success_ReturnsJSONContent(t *testing.T) {
 	defer srv.Close()
 
 	exec := &GraphExecutor{gatewayURL: srv.URL}
-	call := makeCall("c1", "workflow_query_graph", map[string]any{
+	call := makeCall("c1", "graph_query", map[string]any{
 		"query": "{ entitiesByPredicate(predicate: \"code.function\") }",
 	})
 
@@ -281,7 +282,7 @@ func TestGraphExecutor_GetEntity_MissingEntityID_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	exec := NewGraphExecutor()
-	call := makeCall("c1", "workflow_get_entity", map[string]any{})
+	call := makeCall("c1", "graph_entity", map[string]any{})
 
 	result, err := exec.Execute(context.Background(), call)
 
@@ -300,7 +301,7 @@ func TestGraphExecutor_GetEntity_EmptyEntityID_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	exec := NewGraphExecutor()
-	call := makeCall("c1", "workflow_get_entity", map[string]any{"entity_id": ""})
+	call := makeCall("c1", "graph_entity", map[string]any{"entity_id": ""})
 
 	result, err := exec.Execute(context.Background(), call)
 
@@ -320,7 +321,7 @@ func TestGraphExecutor_TraverseRelationships_MissingStartEntity_ReturnsError(t *
 	t.Parallel()
 
 	exec := NewGraphExecutor()
-	call := makeCall("c1", "workflow_traverse_relationships", map[string]any{})
+	call := makeCall("c1", "graph_traverse", map[string]any{})
 
 	result, err := exec.Execute(context.Background(), call)
 
@@ -357,7 +358,7 @@ func TestGraphExecutor_TraverseRelationships_DepthClamping(t *testing.T) {
 	defer srv.Close()
 
 	exec := &GraphExecutor{gatewayURL: srv.URL}
-	call := makeCall("c1", "workflow_traverse_relationships", map[string]any{
+	call := makeCall("c1", "graph_traverse", map[string]any{
 		"start_entity": "code.function.main.Run",
 		"depth":        float64(99), // should be clamped to 3
 	})
@@ -397,7 +398,7 @@ func TestGraphExecutor_TraverseRelationships_InboundDirection(t *testing.T) {
 	defer srv.Close()
 
 	exec := &GraphExecutor{gatewayURL: srv.URL}
-	call := makeCall("c1", "workflow_traverse_relationships", map[string]any{
+	call := makeCall("c1", "graph_traverse", map[string]any{
 		"start_entity": "code.function.main.Run",
 		"direction":    "inbound",
 	})
@@ -435,7 +436,7 @@ func TestGraphExecutor_QueryGraph_CancelledContext_ReturnsError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
-	call := makeCall("c1", "workflow_query_graph", map[string]any{
+	call := makeCall("c1", "graph_query", map[string]any{
 		"query": "{ entitiesByPredicate(predicate: \"code.function\") }",
 	})
 
@@ -464,7 +465,7 @@ func TestDocumentExecutor_ListTools_ReturnsFourDefinitions(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		"workflow_read_document":   true,
+		"read_document":            true,
 		"workflow_write_document":  true,
 		"workflow_list_documents":  true,
 		"workflow_get_plan_status": true,
@@ -507,7 +508,7 @@ func TestDocumentExecutor_ReadDocument_MissingSlug_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	exec := NewDocumentExecutor(t.TempDir())
-	call := makeCall("c1", "workflow_read_document", map[string]any{
+	call := makeCall("c1", "read_document", map[string]any{
 		"document": "plan",
 	})
 
@@ -528,7 +529,7 @@ func TestDocumentExecutor_ReadDocument_MissingDocumentType_ReturnsError(t *testi
 	t.Parallel()
 
 	exec := NewDocumentExecutor(t.TempDir())
-	call := makeCall("c1", "workflow_read_document", map[string]any{
+	call := makeCall("c1", "read_document", map[string]any{
 		"slug": "my-plan",
 	})
 
@@ -552,7 +553,7 @@ func TestDocumentExecutor_ReadDocument_UnknownDocumentType_ReturnsError(t *testi
 	setupPlanDir(t, tmpDir, "my-plan")
 
 	exec := NewDocumentExecutor(tmpDir)
-	call := makeCall("c1", "workflow_read_document", map[string]any{
+	call := makeCall("c1", "read_document", map[string]any{
 		"slug":     "my-plan",
 		"document": "invalid-type",
 	})
@@ -577,7 +578,7 @@ func TestDocumentExecutor_ReadDocument_NonExistentPlanDoc_ReturnsError(t *testin
 	setupPlanDir(t, tmpDir, "my-plan") // dir exists but no plan.md
 
 	exec := NewDocumentExecutor(tmpDir)
-	call := makeCall("c1", "workflow_read_document", map[string]any{
+	call := makeCall("c1", "read_document", map[string]any{
 		"slug":     "my-plan",
 		"document": "plan",
 	})
@@ -604,7 +605,7 @@ func TestDocumentExecutor_ReadDocument_Plan_ReturnsContent(t *testing.T) {
 	}
 
 	exec := NewDocumentExecutor(tmpDir)
-	call := makeCall("c1", "workflow_read_document", map[string]any{
+	call := makeCall("c1", "read_document", map[string]any{
 		"slug":     "my-plan",
 		"document": "plan",
 	})
@@ -634,7 +635,7 @@ func TestDocumentExecutor_ReadDocument_Tasks_ReturnsContent(t *testing.T) {
 	}
 
 	exec := NewDocumentExecutor(tmpDir)
-	call := makeCall("c1", "workflow_read_document", map[string]any{
+	call := makeCall("c1", "read_document", map[string]any{
 		"slug":     "my-plan",
 		"document": "tasks",
 	})
@@ -660,7 +661,7 @@ func TestDocumentExecutor_ReadDocument_Constitution_NoFile_ReturnsError(t *testi
 	// No constitution.md written.
 
 	exec := NewDocumentExecutor(tmpDir)
-	call := makeCall("c1", "workflow_read_document", map[string]any{
+	call := makeCall("c1", "read_document", map[string]any{
 		"slug":     "my-plan",
 		"document": "constitution",
 	})
@@ -683,7 +684,7 @@ func TestDocumentExecutor_ReadDocument_Constitution_ReturnsFormattedContent(t *t
 	writeConstitution(t, tmpDir)
 
 	exec := NewDocumentExecutor(tmpDir)
-	call := makeCall("c1", "workflow_read_document", map[string]any{
+	call := makeCall("c1", "read_document", map[string]any{
 		"slug":     "my-plan",
 		"document": "constitution",
 	})
@@ -1079,7 +1080,7 @@ func TestDocumentExecutor_ReadDocument_CancelledContext_ReturnsError(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	call := makeCall("c1", "workflow_read_document", map[string]any{
+	call := makeCall("c1", "read_document", map[string]any{
 		"slug":     "my-plan",
 		"document": "plan",
 	})
@@ -1942,7 +1943,7 @@ func TestAllExecutors_CallIDPropagated(t *testing.T) {
 		{
 			name:     "DocumentExecutor missing slug",
 			executor: NewDocumentExecutor(tmpDir),
-			call:     makeCall(wantCallID, "workflow_read_document", map[string]any{}),
+			call:     makeCall(wantCallID, "read_document", map[string]any{}),
 		},
 		{
 			name:     "ConstitutionExecutor missing content",
@@ -1957,7 +1958,7 @@ func TestAllExecutors_CallIDPropagated(t *testing.T) {
 		{
 			name:     "GraphExecutor missing query",
 			executor: NewGraphExecutor(),
-			call:     makeCall(wantCallID, "workflow_query_graph", map[string]any{}),
+			call:     makeCall(wantCallID, "graph_query", map[string]any{}),
 		},
 	}
 

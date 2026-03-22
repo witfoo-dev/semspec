@@ -25,8 +25,8 @@ func TestDeveloperPrompt(t *testing.T) {
 	}
 
 	// Should include SOP query instructions
-	if !strings.Contains(prompt, "workflow_query_graph") {
-		t.Error("DeveloperPrompt should include workflow_query_graph for SOP queries")
+	if !strings.Contains(prompt, "graph_search") {
+		t.Error("DeveloperPrompt should include graph_search for SOP queries")
 	}
 
 	// Should include output format

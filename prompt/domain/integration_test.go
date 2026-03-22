@@ -16,8 +16,8 @@ import (
 var allTools = []string{
 	"file_read", "file_write", "file_list",
 	"git_status", "git_diff", "git_commit",
-	"workflow_query_graph", "workflow_read_document",
-	"workflow_get_codebase_summary", "workflow_traverse_relationships",
+	"graph_summary", "graph_search", "graph_query", "graph_codebase",
+	"graph_entity", "graph_traverse", "read_document",
 	"decompose_task", "spawn_agent", "create_tool", "query_agent_tree",
 }
 

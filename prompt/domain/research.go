@@ -25,7 +25,7 @@ Prioritize accuracy and completeness over speed.`,
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `Research Process
 
-1. Gather sources: Use workflow_query_graph to find relevant entities and documents.
+1. Gather sources: Use graph_search to find relevant entities and documents.
 2. Cross-reference: Verify claims across multiple sources before stating them as findings.
 3. Identify gaps: Note where evidence is insufficient or contradictory.
 4. Synthesize: Combine findings into a coherent analysis.
