@@ -156,6 +156,70 @@
 		}
 	}
 
+	// Scenario edit state
+	let editingScenarioId = $state<string | null>(null);
+	let editGiven = $state('');
+	let editWhen = $state('');
+	let editThen = $state<string[]>([]);
+	let scenarioSaving = $state(false);
+
+	function startScenarioEdit(scenario: Scenario) {
+		editingScenarioId = scenario.id;
+		editGiven = scenario.given;
+		editWhen = scenario.when;
+		editThen = [...scenario.then];
+	}
+
+	function cancelScenarioEdit() {
+		editingScenarioId = null;
+	}
+
+	async function saveScenarioEdit(scenarioId: string, reqId: string): Promise<void> {
+		scenarioSaving = true;
+		try {
+			const updated = await api.scenarios.update(slug, scenarioId, {
+				given: editGiven.trim(),
+				when: editWhen.trim(),
+				then: editThen.map((t) => t.trim()).filter(Boolean)
+			});
+			const scenarios = scenariosByReq[reqId] ?? [];
+			scenariosByReq = {
+				...scenariosByReq,
+				[reqId]: scenarios.map((s) => (s.id === scenarioId ? updated : s))
+			};
+			editingScenarioId = null;
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to update scenario';
+		} finally {
+			scenarioSaving = false;
+		}
+	}
+
+	async function deleteScenario(scenarioId: string, reqId: string): Promise<void> {
+		try {
+			await api.scenarios.delete(slug, scenarioId);
+			const scenarios = scenariosByReq[reqId] ?? [];
+			scenariosByReq = {
+				...scenariosByReq,
+				[reqId]: scenarios.filter((s) => s.id !== scenarioId)
+			};
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to delete scenario';
+		}
+	}
+
+	function updateThenItem(index: number, value: string) {
+		editThen = editThen.map((t, i) => (i === index ? value : t));
+	}
+
+	function addThenItem() {
+		editThen = [...editThen, ''];
+	}
+
+	function removeThenItem(index: number) {
+		editThen = editThen.filter((_, i) => i !== index);
+	}
+
 	function statusBadgeClass(status: RequirementStatus): string {
 		const info = getRequirementStatusInfo(status);
 		switch (info.color) {
@@ -351,7 +415,50 @@
 							{:else}
 								<div class="scenarios-list">
 									{#each scenarios as scenario (scenario.id)}
-										<ScenarioDetail {scenario} />
+										{#if editingScenarioId === scenario.id}
+											<div class="scenario-edit-form">
+												<div class="form-group">
+													<label class="form-label" for="edit-given">Given</label>
+													<input id="edit-given" class="form-input" bind:value={editGiven} disabled={scenarioSaving} />
+												</div>
+												<div class="form-group">
+													<label class="form-label" for="edit-when">When</label>
+													<input id="edit-when" class="form-input" bind:value={editWhen} disabled={scenarioSaving} />
+												</div>
+												<div class="form-group">
+													<label class="form-label" for="edit-then-0">Then</label>
+													{#each editThen as item, i}
+														<div class="then-edit-row">
+															<input class="form-input" value={item} oninput={(e) => updateThenItem(i, e.currentTarget.value)} disabled={scenarioSaving} />
+															{#if editThen.length > 1}
+																<button class="btn btn-ghost btn-xs" onclick={() => removeThenItem(i)} title="Remove">
+																	<Icon name="x" size={12} />
+																</button>
+															{/if}
+														</div>
+													{/each}
+													<button class="btn-link" onclick={addThenItem}>+ Add outcome</button>
+												</div>
+												<div class="edit-actions">
+													<button class="btn btn-ghost btn-sm" onclick={cancelScenarioEdit} disabled={scenarioSaving}>Cancel</button>
+													<button class="btn btn-primary btn-sm" onclick={() => saveScenarioEdit(scenario.id, req.id)} disabled={scenarioSaving}>
+														{scenarioSaving ? 'Saving...' : 'Save'}
+													</button>
+												</div>
+											</div>
+										{:else}
+											<div class="scenario-wrapper">
+												<ScenarioDetail {scenario} />
+												<div class="scenario-actions">
+													<button class="btn btn-ghost btn-xs action-btn" onclick={() => startScenarioEdit(scenario)} title="Edit scenario">
+														<Icon name="pencil" size={12} />
+													</button>
+													<button class="btn btn-ghost btn-xs action-btn" onclick={() => deleteScenario(scenario.id, req.id)} title="Delete scenario">
+														<Icon name="trash" size={12} />
+													</button>
+												</div>
+											</div>
+										{/if}
 									{/each}
 								</div>
 							{/if}
@@ -657,6 +764,44 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-2);
+	}
+
+	.scenario-wrapper {
+		position: relative;
+	}
+
+	.scenario-actions {
+		position: absolute;
+		top: var(--space-2);
+		right: var(--space-2);
+		display: flex;
+		gap: 2px;
+		opacity: 0;
+		transition: opacity var(--transition-fast);
+	}
+
+	.scenario-wrapper:hover .scenario-actions {
+		opacity: 1;
+	}
+
+	.scenario-edit-form {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		padding: var(--space-3);
+		background: var(--color-bg-tertiary);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--color-accent);
+	}
+
+	.then-edit-row {
+		display: flex;
+		gap: var(--space-2);
+		align-items: center;
+	}
+
+	.then-edit-row .form-input {
+		flex: 1;
 	}
 
 	/* Buttons */

@@ -78,7 +78,14 @@
 		'arrow-left': icons.ArrowLeft,
 		scissors: icons.Scissors,
 		'skip-forward': icons.SkipForward,
-		'arrow-right-circle': icons.ArrowRightCircle
+		'arrow-right-circle': icons.ArrowRightCircle,
+		pencil: icons.Pencil,
+		'pencil-line': icons.PencilLine,
+		'minus-circle': icons.MinusCircle,
+		'rotate-ccw': icons.RotateCcw,
+		'arrow-up': icons.ArrowUp,
+		columns: icons.Columns3,
+		users: icons.Users
 	};
 
 	const IconComponent = $derived(iconMap[name] || icons.Circle);
