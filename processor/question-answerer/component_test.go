@@ -29,12 +29,10 @@ func TestNewComponent(t *testing.T) {
 		{
 			name: "valid custom config",
 			config: Config{
-				StreamName:           "TEST_STREAM",
-				ConsumerName:         "test-consumer",
-				TaskSubject:          "test.task.question",
-				DefaultCapability:    "analysis",
-				ContextSubjectPrefix: "ctx.build",
-				ContextTimeout:       "60s",
+				StreamName:        "TEST_STREAM",
+				ConsumerName:      "test-consumer",
+				TaskSubject:       "test.task.question",
+				DefaultCapability: "analysis",
 			},
 			wantErr: false,
 		},
@@ -525,12 +523,6 @@ func TestDefaultConfig(t *testing.T) {
 	if config.DefaultCapability != "planning" {
 		t.Errorf("DefaultCapability = %q, want %q", config.DefaultCapability, "planning")
 	}
-	if config.ContextSubjectPrefix != "context.build" {
-		t.Errorf("ContextSubjectPrefix = %q, want %q", config.ContextSubjectPrefix, "context.build")
-	}
-	if config.ContextTimeout != "30s" {
-		t.Errorf("ContextTimeout = %q, want %q", config.ContextTimeout, "30s")
-	}
 	if config.Ports == nil {
 		t.Error("Ports should not be nil")
 	}
@@ -542,51 +534,6 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
-func TestGetContextTimeout(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		timeout string
-		want    time.Duration
-	}{
-		{
-			name:    "valid duration string",
-			timeout: "30s",
-			want:    30 * time.Second,
-		},
-		{
-			name:    "valid minute duration",
-			timeout: "2m",
-			want:    2 * time.Minute,
-		},
-		{
-			name:    "empty string defaults to 30s",
-			timeout: "",
-			want:    30 * time.Second,
-		},
-		{
-			name:    "invalid duration defaults to 30s",
-			timeout: "invalid",
-			want:    30 * time.Second,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			config := Config{
-				ContextTimeout: tt.timeout,
-			}
-
-			got := config.GetContextTimeout()
-			if got != tt.want {
-				t.Errorf("GetContextTimeout() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
 
 func TestMeta(t *testing.T) {
 	t.Parallel()

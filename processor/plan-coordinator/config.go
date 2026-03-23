@@ -37,12 +37,6 @@ type Config struct {
 	// (focus determination and synthesis).
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for coordination,category:basic,default:planning"`
 
-	// ContextSubjectPrefix is the subject prefix for context build requests.
-	ContextSubjectPrefix string `json:"context_subject_prefix" schema:"type:string,description:Subject prefix for context build requests,category:advanced,default:context.build"`
-
-	// ContextTimeout is the timeout for context building.
-	ContextTimeout string `json:"context_timeout" schema:"type:string,description:Timeout for context building,category:advanced,default:30s"`
-
 	// RepoPath is the workspace/repository root path. Defaults to SEMSPEC_REPO_PATH env var or ".".
 	RepoPath string `json:"repo_path,omitempty" schema:"type:string,description:Repository root path,category:advanced"`
 
@@ -74,8 +68,6 @@ func DefaultConfig() Config {
 		TimeoutSeconds:        1800,
 		Model:                 "default",
 		DefaultCapability:     "planning",
-		ContextSubjectPrefix:  "context.build",
-		ContextTimeout:        "30s",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
@@ -149,12 +141,6 @@ func (c Config) withDefaults() Config {
 	if c.DefaultCapability == "" {
 		c.DefaultCapability = d.DefaultCapability
 	}
-	if c.ContextSubjectPrefix == "" {
-		c.ContextSubjectPrefix = d.ContextSubjectPrefix
-	}
-	if c.ContextTimeout == "" {
-		c.ContextTimeout = d.ContextTimeout
-	}
 	if c.RepoPath == "" {
 		c.RepoPath = os.Getenv("SEMSPEC_REPO_PATH")
 		if c.RepoPath == "" {
@@ -186,14 +172,3 @@ func (c *Config) GetTimeout() time.Duration {
 	return time.Duration(c.TimeoutSeconds) * time.Second
 }
 
-// GetContextTimeout parses the context timeout duration.
-func (c *Config) GetContextTimeout() time.Duration {
-	if c.ContextTimeout == "" {
-		return 30 * time.Second
-	}
-	d, err := time.ParseDuration(c.ContextTimeout)
-	if err != nil {
-		return 30 * time.Second
-	}
-	return d
-}

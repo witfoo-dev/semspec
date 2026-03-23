@@ -35,7 +35,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | `processor/plan-coordinator/` | Parallel planner orchestration |
 | `processor/planner/` | Single-planner path |
 | `processor/plan-reviewer/` | SOP-aware plan validation |
-| `processor/context-builder/` | Strategy-based LLM context assembly |
+| `graph/` | Graph querying (GraphQL client, federated fan-out, registry) |
 | `processor/task-generator/` | Plan → task decomposition (or status advance in reactive mode) |
 | `processor/task-dispatcher/` | Dependency-aware task dispatch |
 | `processor/scenario-orchestrator/` | Dispatches pending scenarios for execution |
@@ -50,6 +50,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | `tools/question/` | `ask_question` — terminal tool for blocker escalation (StopLoop) |
 | `tools/review/` | `review_scenario` — scenario review verdict tool |
 | `workflow/reactive/` | Reactive workflow rules (change-proposal OODA loop) |
+| `graph/` | Graph querying: GraphQL client, federated fan-out, registry, global singleton |
 | `agentgraph/` | Graph helpers for agent hierarchy tracking (spawn, status, tree) |
 | `vocabulary/` | Predicate vocabularies (source, spec, semspec, ics) |
 | `configs/` | Flow configuration files |
@@ -118,7 +119,6 @@ set `StopLoop: true` to signal loop completion directly.
 | `workflow.trigger.planner` | JetStream | Single-planner trigger |
 | `workflow.trigger.plan-reviewer` | JetStream | Plan review trigger |
 | `workflow.trigger.change-proposal-loop` | JetStream | ChangeProposal OODA loop trigger |
-| `context.build.<strategy>` | JetStream | Context build requests |
 | `context.built.<strategy>` | JetStream | Context build responses |
 | `source.ingest.>` | JetStream | Source/SOP ingestion |
 | `agent.task.>` | JetStream | Agent task dispatch |
@@ -162,7 +162,6 @@ semspec/
 │   ├── plan-coordinator/     # Parallel planner orchestration
 │   ├── planner/              # Single-planner path
 │   ├── plan-reviewer/        # SOP-aware plan validation
-│   ├── context-builder/      # Strategy-based context assembly
 │   ├── task-generator/       # Plan → task decomposition (static) or status advance (reactive)
 │   ├── task-dispatcher/      # Dependency-aware task dispatch
 │   ├── scenario-orchestrator/ # Dispatches pending scenarios for execution
@@ -343,7 +342,7 @@ Architecture docs, API references, and design documents should be:
 1. Written to `sources/` with YAML frontmatter (`category`, `scope`, `domain`)
 2. Ingested via semsource (external service that watches repo branches)
 3. Stored as graph entities with `source.doc.*` predicates
-4. Discovered by context-builder strategies via `QueryEntitiesByPredicate("source.doc")`
+4. Discoverable by agents via `graph_search` tool or graph-gateway queries
 
 The `scope` field controls which strategies can discover the document:
 - `plan` — planning and plan-review strategies
@@ -656,13 +655,13 @@ NATS supports wildcards for subscriptions and message-logger queries:
 
 | Pattern | Matches | Example |
 |---------|---------|---------|
-| `context.build` | Exact match only | Only `context.build` |
-| `context.build.*` | Single token wildcard | `context.build.implementation`, `context.build.review` |
-| `context.build.>` | Multi-token wildcard | `context.build.impl.task1`, `context.build.a.b.c` |
+| `agent.task` | Exact match only | Only `agent.task` |
+| `agent.task.*` | Single token wildcard | `agent.task.development`, `agent.task.testing` |
+| `agent.task.>` | Multi-token wildcard | `agent.task.a.b.c` |
 
 ```go
 // Query message-logger with wildcards
-entries, err := s.http.GetMessageLogEntries(ctx, 100, "context.build.*")
+entries, err := s.http.GetMessageLogEntries(ctx, 100, "agent.task.*")
 ```
 
 ## Payload Registry Pattern (CRITICAL)
@@ -783,7 +782,7 @@ Use wildcards to filter entries:
 curl "http://localhost:8080/message-logger/entries?subject=agent.task.development"
 
 # Single-token wildcard
-curl "http://localhost:8080/message-logger/entries?subject=context.build.*"
+curl "http://localhost:8080/message-logger/entries?subject=agent.task.*"
 
 # Multi-token wildcard
 curl "http://localhost:8080/message-logger/entries?subject=workflow.>"

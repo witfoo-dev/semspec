@@ -29,8 +29,7 @@ import (
 	"github.com/c360studio/semspec/model"
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	changeproposalhandler "github.com/c360studio/semspec/processor/change-proposal-handler"
-	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
-	"github.com/c360studio/semspec/processor/context-builder/gatherers"
+	"github.com/c360studio/semspec/graph"
 	executionorchestrator "github.com/c360studio/semspec/processor/execution-orchestrator"
 	planapi "github.com/c360studio/semspec/processor/plan-api"
 	plancoordinator "github.com/c360studio/semspec/processor/plan-coordinator"
@@ -238,7 +237,6 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return requirementgenerator.Register(componentRegistry) },
 		func() error { return scenariogenerator.Register(componentRegistry) },
 		func() error { return planner.Register(componentRegistry) },
-		func() error { return contextbuilder.Register(componentRegistry) },
 		func() error { return planapi.Register(componentRegistry) },
 		func() error { return trajectoryapi.Register(componentRegistry) },
 		func() error { return plancoordinator.Register(componentRegistry) },
@@ -386,7 +384,7 @@ func loadConfigWithEnvSubstitution(configPath string) (*config.Config, error) {
 	}
 
 	// Initialize global graph registry for federated graph queries.
-	// Components use gatherers.GlobalRegistry() to access it.
+	// Components use graph.GlobalRegistry() to access it.
 	initGraphRegistry()
 
 	// Load using semstreams loader (preserves defaults, validation, env overrides)
@@ -409,13 +407,13 @@ func initGraphRegistry() {
 		graphGatewayURL = "http://localhost:8082"
 	}
 
-	cfg := gatherers.GraphRegistryConfig{
+	cfg := graph.GraphRegistryConfig{
 		LocalURL: graphGatewayURL,
 	}
 
 	// Parse GRAPH_SOURCES if set (preferred over SEMSOURCE_URL).
 	if raw := os.Getenv("GRAPH_SOURCES"); raw != "" {
-		var sources []gatherers.GraphSourceConfig
+		var sources []graph.GraphSourceConfig
 		if err := json.Unmarshal([]byte(raw), &sources); err != nil {
 			slog.Error("Failed to parse GRAPH_SOURCES", "error", err)
 		} else {
@@ -426,14 +424,14 @@ func initGraphRegistry() {
 	// Fallback: legacy SEMSOURCE_URL as a single source.
 	if len(cfg.Sources) == 0 {
 		if u := os.Getenv("SEMSOURCE_URL"); u != "" {
-			cfg.Sources = []gatherers.GraphSourceConfig{
+			cfg.Sources = []graph.GraphSourceConfig{
 				{Name: "semsource", URL: u, Type: "semsource"},
 			}
 		}
 	}
 
-	reg := gatherers.NewGraphRegistry(cfg)
-	gatherers.SetGlobalRegistry(reg)
+	reg := graph.NewGraphRegistry(cfg)
+	graph.SetGlobalRegistry(reg)
 
 	if len(cfg.Sources) > 0 {
 		slog.Info("Graph registry initialized",

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c360studio/semspec/processor/context-builder/gatherers"
+	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 )
@@ -175,7 +175,7 @@ func (s *PlanPhaseScenario) stageInitProject(ctx context.Context, result *Result
 }
 
 func (s *PlanPhaseScenario) stageVerifyGraphReady(ctx context.Context, result *Result) error {
-	g := gatherers.NewGraphGatherer(s.config.GraphURL)
+	g := graph.NewGraphGatherer(s.config.GraphURL)
 	if err := g.WaitForReady(ctx, 30*time.Second); err != nil {
 		return fmt.Errorf("graph not ready: %w", err)
 	}

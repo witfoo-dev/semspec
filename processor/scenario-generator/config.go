@@ -3,7 +3,6 @@ package scenariogenerator
 import (
 	"fmt"
 	"reflect"
-	"time"
 
 	"github.com/c360studio/semstreams/component"
 )
@@ -25,12 +24,6 @@ type Config struct {
 	// DefaultCapability is the model capability to use for scenario generation.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Model capability for generation,category:basic,default:planning"`
 
-	// ContextSubjectPrefix is the prefix for context build requests.
-	ContextSubjectPrefix string `json:"context_subject_prefix" schema:"type:string,description:Context build subject prefix,category:advanced,default:context.build"`
-
-	// ContextTimeout is the timeout for context building.
-	ContextTimeout string `json:"context_timeout" schema:"type:string,description:Context build timeout,category:advanced,default:30s"`
-
 	// Ports defines the component's port configuration.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
 }
@@ -38,12 +31,10 @@ type Config struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:           "WORKFLOW",
-		ConsumerName:         "scenario-generator",
-		TriggerSubject:       "workflow.async.scenario-generator",
-		DefaultCapability:    "planning",
-		ContextSubjectPrefix: "context.build",
-		ContextTimeout:       "30s",
+		StreamName:        "WORKFLOW",
+		ConsumerName:      "scenario-generator",
+		TriggerSubject:    "workflow.async.scenario-generator",
+		DefaultCapability: "planning",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
@@ -82,14 +73,3 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// GetContextTimeout returns the context build timeout as a duration.
-func (c *Config) GetContextTimeout() time.Duration {
-	if c.ContextTimeout == "" {
-		return 30 * time.Second
-	}
-	d, err := time.ParseDuration(c.ContextTimeout)
-	if err != nil || d == 0 {
-		return 30 * time.Second
-	}
-	return d
-}

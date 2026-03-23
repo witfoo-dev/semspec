@@ -16,8 +16,6 @@ import (
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
-	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
-	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
@@ -122,9 +120,6 @@ type Component struct {
 
 	llmClient llmCompleter
 
-	// Centralized context building via context-builder
-	contextHelper *contexthelper.Helper
-
 	// JetStream consumer
 	consumer jetstream.Consumer
 	stream   jetstream.Stream
@@ -164,12 +159,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
-	if config.ContextSubjectPrefix == "" {
-		config.ContextSubjectPrefix = defaults.ContextSubjectPrefix
-	}
-	if config.ContextTimeout == "" {
-		config.ContextTimeout = defaults.ContextTimeout
-	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -180,13 +169,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	logger := deps.GetLogger()
 
-	// Initialize context helper for centralized context building.
-	ctxHelper := contexthelper.New(deps.NATSClient, contexthelper.Config{
-		SubjectPrefix: config.ContextSubjectPrefix,
-		Timeout:       config.GetContextTimeout(),
-		SourceName:    "requirement-generator",
-	}, logger)
-
 	return &Component{
 		name:       "requirement-generator",
 		config:     config,
@@ -195,7 +177,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		llmClient: llm.NewClient(model.Global(),
 			llm.WithLogger(logger),
 		),
-		contextHelper: ctxHelper,
 	}, nil
 }
 
@@ -226,12 +207,6 @@ func (c *Component) Start(ctx context.Context) error {
 	subCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.mu.Unlock()
-
-	// Start context helper JetStream consumer.
-	if err := c.contextHelper.Start(subCtx); err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("start context helper: %w", err)
-	}
 
 	// Get JetStream context.
 	js, err := c.natsClient.JetStream()
@@ -408,8 +383,7 @@ func (c *Component) buildLLMContext(ctx context.Context, trigger *payloads.Requi
 	})
 }
 
-// generateRequirements requests planning context and calls the LLM to produce
-// a slice of Requirement structs for the given plan.
+// generateRequirements calls the LLM to produce a slice of Requirement structs for the given plan.
 func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.RequirementGeneratorRequest) ([]workflow.Requirement, error) {
 	// Load the plan to get Goal/Context/Scope for the prompt.
 	repoRoot := repoRootPath()
@@ -420,29 +394,8 @@ func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.
 		return nil, fmt.Errorf("load plan %q: %w", trigger.Slug, err)
 	}
 
-	// Request planning context from centralized context-builder (graph-first).
-	contextReq := &contextbuilder.ContextBuildRequest{
-		TaskType:   contextbuilder.TaskTypePlanning,
-		Topic:      plan.Title,
-		Capability: c.config.DefaultCapability,
-	}
-
-	var graphContext string
-	resp := c.contextHelper.BuildContextGraceful(ctx, contextReq)
-	if resp != nil {
-		graphContext = contexthelper.FormatContextResponse(resp)
-		c.logger.Info("Built planning context via context-builder",
-			"slug", trigger.Slug,
-			"entities", len(resp.Entities),
-			"documents", len(resp.Documents),
-			"tokens_used", resp.TokensUsed)
-	} else {
-		c.logger.Warn("Context build returned nil, proceeding without graph context",
-			"slug", trigger.Slug)
-	}
-
 	systemPrompt := requirementGeneratorSystemPrompt()
-	userPrompt := requirementGeneratorUserPrompt(plan, graphContext)
+	userPrompt := requirementGeneratorUserPrompt(plan, "")
 
 	items, err := c.generateFromMessages(ctx, systemPrompt, userPrompt)
 	if err != nil {
@@ -715,8 +668,6 @@ func (c *Component) Stop(_ time.Duration) error {
 	c.running = false
 	c.cancel = nil
 	c.mu.Unlock()
-
-	c.contextHelper.Stop()
 
 	// Cancel context after releasing lock to avoid potential deadlock.
 	if cancel != nil {

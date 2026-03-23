@@ -3,7 +3,6 @@ package planner
 import (
 	"fmt"
 	"reflect"
-	"time"
 
 	"github.com/c360studio/semstreams/component"
 )
@@ -25,12 +24,6 @@ type Config struct {
 	// DefaultCapability is the model capability to use for planning.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for planning,category:basic,default:planning"`
 
-	// ContextSubjectPrefix is the subject prefix for context build requests.
-	ContextSubjectPrefix string `json:"context_subject_prefix" schema:"type:string,description:Subject prefix for context build requests,category:advanced,default:context.build"`
-
-	// ContextTimeout is the timeout for context building.
-	ContextTimeout string `json:"context_timeout" schema:"type:string,description:Timeout for context building,category:advanced,default:30s"`
-
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -38,12 +31,10 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:           "WORKFLOW",
-		ConsumerName:         "planner",
-		TriggerSubject:       "workflow.async.planner",
-		DefaultCapability:    "planning",
-		ContextSubjectPrefix: "context.build",
-		ContextTimeout:       "30s",
+		StreamName:        "WORKFLOW",
+		ConsumerName:      "planner",
+		TriggerSubject:    "workflow.async.planner",
+		DefaultCapability: "planning",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
@@ -82,14 +73,3 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// GetContextTimeout parses the context timeout duration.
-func (c *Config) GetContextTimeout() time.Duration {
-	if c.ContextTimeout == "" {
-		return 30 * time.Second
-	}
-	d, err := time.ParseDuration(c.ContextTimeout)
-	if err != nil {
-		return 30 * time.Second
-	}
-	return d
-}

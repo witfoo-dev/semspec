@@ -3,7 +3,6 @@ package planreviewer
 import (
 	"fmt"
 	"reflect"
-	"time"
 
 	"github.com/c360studio/semstreams/component"
 )
@@ -31,12 +30,6 @@ type Config struct {
 	// DefaultCapability is the model capability to use for plan review.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for plan review,category:basic,default:reviewing"`
 
-	// ContextSubjectPrefix is the subject prefix for context build requests.
-	ContextSubjectPrefix string `json:"context_subject_prefix" schema:"type:string,description:Subject prefix for context build requests,category:advanced,default:context.build"`
-
-	// ContextTimeout is the timeout for context building.
-	ContextTimeout string `json:"context_timeout" schema:"type:string,description:Timeout for context building,category:advanced,default:30s"`
-
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -48,10 +41,8 @@ func DefaultConfig() Config {
 		ConsumerName:         "plan-reviewer",
 		TriggerSubject:       "workflow.async.plan-reviewer",
 		ResultSubjectPrefix:  "workflow.result.plan-reviewer",
-		LLMTimeout:           "120s",
-		DefaultCapability:    "reviewing",
-		ContextSubjectPrefix: "context.build",
-		ContextTimeout:       "30s",
+		LLMTimeout:        "120s",
+		DefaultCapability: "reviewing",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
@@ -74,18 +65,6 @@ func DefaultConfig() Config {
 			},
 		},
 	}
-}
-
-// GetContextTimeout parses the context timeout duration.
-func (c *Config) GetContextTimeout() time.Duration {
-	if c.ContextTimeout == "" {
-		return 30 * time.Second
-	}
-	d, err := time.ParseDuration(c.ContextTimeout)
-	if err != nil {
-		return 30 * time.Second
-	}
-	return d
 }
 
 // Validate validates the configuration.

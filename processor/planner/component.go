@@ -16,8 +16,6 @@ import (
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
-	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
-	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/workflow"
@@ -51,9 +49,6 @@ type Component struct {
 	llmClient     llmCompleter
 	modelRegistry *model.Registry
 	assembler     *prompt.Assembler
-
-	// Centralized context building via context-builder
-	contextHelper *contexthelper.Helper
 
 	// JetStream consumer
 	consumer jetstream.Consumer
@@ -94,12 +89,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
-	if config.ContextSubjectPrefix == "" {
-		config.ContextSubjectPrefix = defaults.ContextSubjectPrefix
-	}
-	if config.ContextTimeout == "" {
-		config.ContextTimeout = defaults.ContextTimeout
-	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -109,13 +98,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 
 	logger := deps.GetLogger()
-
-	// Initialize context helper for centralized context building
-	ctxHelper := contexthelper.New(deps.NATSClient, contexthelper.Config{
-		SubjectPrefix: config.ContextSubjectPrefix,
-		Timeout:       config.GetContextTimeout(),
-		SourceName:    "planner",
-	}, logger)
 
 	// Initialize prompt assembler with software domain
 	registry := prompt.NewRegistry()
@@ -133,7 +115,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		),
 		modelRegistry: model.Global(),
 		assembler:     assembler,
-		contextHelper: ctxHelper,
 	}, nil
 }
 
@@ -164,12 +145,6 @@ func (c *Component) Start(ctx context.Context) error {
 	subCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.mu.Unlock()
-
-	// Start context helper JetStream consumer
-	if err := c.contextHelper.Start(subCtx); err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("start context helper: %w", err)
-	}
 
 	// Get JetStream context
 	js, err := c.natsClient.JetStream()
@@ -391,24 +366,10 @@ type PlanContent struct {
 }
 
 // generatePlan calls the LLM to generate plan content.
-// It follows the graph-first pattern by requesting context from the
-// centralized context-builder before making the LLM call.
 func (c *Component) generatePlan(ctx context.Context, trigger *payloads.PlannerRequest) (*PlanContent, []string, error) {
 	isRevision := trigger.Revision
 
-	// Step 1: Request planning context from centralized context-builder (graph-first).
-	// Pass the capability so context-builder can calculate the correct token budget
-	// based on the model that will actually be used for LLM calls.
-	contextReq := &contextbuilder.ContextBuildRequest{
-		TaskType:   contextbuilder.TaskTypePlanning,
-		Topic:      trigger.Title,
-		Capability: c.config.DefaultCapability,
-	}
-
 	// On revision, load the current plan directly for the user prompt.
-	// Previously this went through context-builder where it was buried under
-	// a generic "Codebase Context" header — the LLM couldn't tell it was
-	// looking at its own previous output that needed fixing.
 	var currentPlanJSON string
 	if isRevision && trigger.Slug != "" {
 		if planJSON, err := c.loadCurrentPlanJSON(trigger.Slug); err != nil {
@@ -421,22 +382,7 @@ func (c *Component) generatePlan(ctx context.Context, trigger *payloads.PlannerR
 		}
 	}
 
-	var graphContext string
-	resp := c.contextHelper.BuildContextGraceful(ctx, contextReq)
-	if resp != nil {
-		// Build context string from response
-		graphContext = contexthelper.FormatContextResponse(resp)
-		c.logger.Info("Built planning context via context-builder",
-			"title", trigger.Title,
-			"entities", len(resp.Entities),
-			"documents", len(resp.Documents),
-			"tokens_used", resp.TokensUsed)
-	} else {
-		c.logger.Warn("Context build returned nil, proceeding without graph context",
-			"title", trigger.Title)
-	}
-
-	// Step 2: Build messages with proper system/user separation.
+	// Build messages with proper system/user separation.
 	// Use fragment-based assembler for system prompt with provider-aware formatting.
 	// The system prompt (with JSON format) is ALWAYS included — even on
 	// revision calls — because local LLMs need the format example every time.
@@ -477,11 +423,8 @@ func (c *Component) generatePlan(ctx context.Context, trigger *payloads.PlannerR
 		// Initial plan: build from title
 		userPrompt = prompts.PlannerPromptWithTitle(trigger.Title)
 	}
-	if graphContext != "" {
-		userPrompt = fmt.Sprintf("%s\n\n## Codebase Context\n\nThe following context from the knowledge graph provides information about the existing codebase structure:\n\n%s", userPrompt, graphContext)
-	}
 
-	// Step 3: Call LLM with format correction retry.
+	// Call LLM with format correction retry.
 	capability := c.config.DefaultCapability
 	if capability == "" {
 		capability = string(model.CapabilityPlanning)
@@ -804,8 +747,6 @@ func (c *Component) Stop(_ time.Duration) error {
 	c.running = false
 	c.cancel = nil
 	c.mu.Unlock()
-
-	c.contextHelper.Stop()
 
 	// Cancel context after releasing lock to avoid potential deadlock
 	if cancel != nil {

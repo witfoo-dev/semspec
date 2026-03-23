@@ -18,8 +18,6 @@ import (
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
-	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
-	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
@@ -47,9 +45,6 @@ type Component struct {
 	logger     *slog.Logger
 
 	llmClient llmCompleter
-
-	// Centralized context building via context-builder.
-	contextHelper *contexthelper.Helper
 
 	// JetStream consumer
 	consumer jetstream.Consumer
@@ -143,12 +138,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
-	if config.ContextSubjectPrefix == "" {
-		config.ContextSubjectPrefix = defaults.ContextSubjectPrefix
-	}
-	if config.ContextTimeout == "" {
-		config.ContextTimeout = defaults.ContextTimeout
-	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -159,12 +148,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	logger := deps.GetLogger()
 
-	ctxHelper := contexthelper.New(deps.NATSClient, contexthelper.Config{
-		SubjectPrefix: config.ContextSubjectPrefix,
-		Timeout:       config.GetContextTimeout(),
-		SourceName:    "scenario-generator",
-	}, logger)
-
 	return &Component{
 		name:       "scenario-generator",
 		config:     config,
@@ -173,7 +156,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		llmClient: llm.NewClient(model.Global(),
 			llm.WithLogger(logger),
 		),
-		contextHelper: ctxHelper,
 	}, nil
 }
 
@@ -208,12 +190,6 @@ func (c *Component) Start(ctx context.Context) error {
 	subCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.mu.Unlock()
-
-	// Start context helper JetStream consumer.
-	if err := c.contextHelper.Start(subCtx); err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("start context helper: %w", err)
-	}
 
 	js, err := c.natsClient.JetStream()
 	if err != nil {
@@ -274,8 +250,6 @@ func (c *Component) Stop(_ time.Duration) error {
 	c.running = false
 	c.cancel = nil
 	c.mu.Unlock()
-
-	c.contextHelper.Stop()
 
 	if cancel != nil {
 		cancel()
@@ -470,27 +444,8 @@ func (c *Component) generateScenarios(ctx context.Context, trigger *payloads.Sce
 		return nil, fmt.Errorf("requirement %q not found in plan %q", trigger.RequirementID, trigger.Slug)
 	}
 
-	// Request planning context from context-builder (graph-first).
-	var graphContext string
-	resp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
-		TaskType:   contextbuilder.TaskTypePlanning,
-		Topic:      req.Title,
-		Capability: c.config.DefaultCapability,
-	})
-	if resp != nil {
-		graphContext = contexthelper.FormatContextResponse(resp)
-		c.logger.Info("Built scenario generation context via context-builder",
-			"requirement_id", trigger.RequirementID,
-			"entities", len(resp.Entities),
-			"documents", len(resp.Documents),
-			"tokens_used", resp.TokensUsed)
-	} else {
-		c.logger.Warn("Context build returned nil, proceeding without graph context",
-			"requirement_id", trigger.RequirementID)
-	}
-
 	systemPrompt := c.buildSystemPrompt()
-	userPrompt := c.buildUserPrompt(plan, req, graphContext)
+	userPrompt := c.buildUserPrompt(plan, req, "")
 
 	return c.callLLMWithRetry(ctx, systemPrompt, userPrompt, trigger.Slug, req.ID)
 }

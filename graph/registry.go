@@ -1,5 +1,5 @@
-// Package gatherers provides context gathering implementations.
-package gatherers
+// Package graph provides graph querying implementations for the knowledge graph.
+package graph
 
 import (
 	"context"
@@ -40,13 +40,13 @@ type sourceManifestResponse struct {
 // GraphRegistry tracks available graph endpoints (local + semsource instances).
 // Semsource instances are discovered dynamically via manifest polling.
 type GraphRegistry struct {
-	sources      sync.Map // name → *GraphSource
-	localURL     string
+	sources       sync.Map // name → *GraphSource
+	localURL      string
 	semsourceURLs []semsourceEntry // all semsource sources to poll
-	pollInterval time.Duration
-	queryTimeout time.Duration
-	logger       *slog.Logger
-	httpClient   *http.Client
+	pollInterval  time.Duration
+	queryTimeout  time.Duration
+	logger        *slog.Logger
+	httpClient    *http.Client
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup

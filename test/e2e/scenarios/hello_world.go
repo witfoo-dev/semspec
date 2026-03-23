@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c360studio/semspec/processor/context-builder/gatherers"
+	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 	"github.com/c360studio/semspec/workflow"
@@ -525,7 +525,7 @@ func (s *HelloWorldScenario) stageVerifyStandardsPopulated(ctx context.Context, 
 // stageVerifyGraphReady polls the graph gateway until it responds, confirming the
 // graph pipeline is ready. This prevents plan creation before graph entities are queryable.
 func (s *HelloWorldScenario) stageVerifyGraphReady(ctx context.Context, result *Result) error {
-	gatherer := gatherers.NewGraphGatherer(s.config.GraphURL)
+	gatherer := graph.NewGraphGatherer(s.config.GraphURL)
 
 	if err := gatherer.WaitForReady(ctx, 30*time.Second); err != nil {
 		return fmt.Errorf("graph not ready: %w", err)

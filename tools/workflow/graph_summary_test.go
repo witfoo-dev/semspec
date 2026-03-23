@@ -8,63 +8,63 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c360studio/semspec/processor/context-builder/gatherers"
+	"github.com/c360studio/semspec/graph"
 )
 
-// mockGraphQuerier implements gatherers.GraphQuerier for testing graph summary.
+// mockGraphQuerier implements graph.GraphQuerier for testing graph summary.
 type mockGraphQuerier struct {
-	summaries []gatherers.SourceSummary
+	summaries []graph.SourceSummary
 	err       error
 }
 
-func (m *mockGraphQuerier) GraphSummary(_ context.Context) ([]gatherers.SourceSummary, error) {
+func (m *mockGraphQuerier) GraphSummary(_ context.Context) ([]graph.SourceSummary, error) {
 	return m.summaries, m.err
 }
 
 // Stub implementations to satisfy the GraphQuerier interface.
-func (m *mockGraphQuerier) QueryEntitiesByPredicate(_ context.Context, _ string) ([]gatherers.Entity, error) {
+func (m *mockGraphQuerier) QueryEntitiesByPredicate(_ context.Context, _ string) ([]graph.Entity, error) {
 	return nil, nil
 }
-func (m *mockGraphQuerier) QueryEntitiesByIDPrefix(_ context.Context, _ string) ([]gatherers.Entity, error) {
+func (m *mockGraphQuerier) QueryEntitiesByIDPrefix(_ context.Context, _ string) ([]graph.Entity, error) {
 	return nil, nil
 }
-func (m *mockGraphQuerier) GetEntity(_ context.Context, _ string) (*gatherers.Entity, error) {
+func (m *mockGraphQuerier) GetEntity(_ context.Context, _ string) (*graph.Entity, error) {
 	return nil, nil
 }
 func (m *mockGraphQuerier) HydrateEntity(_ context.Context, _ string, _ int) (string, error) {
 	return "", nil
 }
 func (m *mockGraphQuerier) GetCodebaseSummary(_ context.Context) (string, error) { return "", nil }
-func (m *mockGraphQuerier) TraverseRelationships(_ context.Context, _, _, _ string, _ int) ([]gatherers.Entity, error) {
+func (m *mockGraphQuerier) TraverseRelationships(_ context.Context, _, _, _ string, _ int) ([]graph.Entity, error) {
 	return nil, nil
 }
-func (m *mockGraphQuerier) Ping(_ context.Context) error                                         { return nil }
-func (m *mockGraphQuerier) WaitForReady(_ context.Context, _ time.Duration) error               { return nil }
-func (m *mockGraphQuerier) QueryProjectSources(_ context.Context, _ string) ([]gatherers.Entity, error) {
+func (m *mockGraphQuerier) Ping(_ context.Context) error                                       { return nil }
+func (m *mockGraphQuerier) WaitForReady(_ context.Context, _ time.Duration) error             { return nil }
+func (m *mockGraphQuerier) QueryProjectSources(_ context.Context, _ string) ([]graph.Entity, error) {
 	return nil, nil
 }
 
 // fixtureSummary builds a SourceSummary with domains and predicates for testing.
-func fixtureSummary() gatherers.SourceSummary {
-	return gatherers.SourceSummary{
+func fixtureSummary() graph.SourceSummary {
+	return graph.SourceSummary{
 		Source:         "test-repo",
 		Phase:          "ready",
 		TotalEntities:  42,
 		EntityIDFormat: "domain.category.name",
-		Domains: []gatherers.DomainSummary{
+		Domains: []graph.DomainSummary{
 			{
 				Domain:      "code",
 				EntityCount: 30,
-				Types: []gatherers.TypeCount{
+				Types: []graph.TypeCount{
 					{Type: "function", Count: 20},
 					{Type: "type", Count: 10},
 				},
 			},
 		},
-		Predicates: []gatherers.PredicateSchema{
+		Predicates: []graph.PredicateSchema{
 			{
 				SourceType: "go",
-				Predicates: []gatherers.PredicateDescriptor{
+				Predicates: []graph.PredicateDescriptor{
 					{Name: "code.function", Description: "Go function", DataType: "string", Role: "entity"},
 				},
 			},
@@ -75,7 +75,7 @@ func fixtureSummary() gatherers.SourceSummary {
 func TestGraphSummary_WithQuerier_ReturnsSummary(t *testing.T) {
 	expected := fixtureSummary()
 	executor := &GraphExecutor{
-		querier: &mockGraphQuerier{summaries: []gatherers.SourceSummary{expected}},
+		querier: &mockGraphQuerier{summaries: []graph.SourceSummary{expected}},
 	}
 
 	call := makeCall("c1", "graph_summary", map[string]any{})
@@ -87,7 +87,7 @@ func TestGraphSummary_WithQuerier_ReturnsSummary(t *testing.T) {
 		t.Fatalf("unexpected tool error: %s", result.Error)
 	}
 
-	var got []gatherers.SourceSummary
+	var got []graph.SourceSummary
 	if err := json.Unmarshal([]byte(result.Content), &got); err != nil {
 		t.Fatalf("unmarshal result: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestGraphSummary_WithQuerier_ReturnsSummary(t *testing.T) {
 
 func TestGraphSummary_IncludePredicatesFalse_StripsPredicates(t *testing.T) {
 	executor := &GraphExecutor{
-		querier: &mockGraphQuerier{summaries: []gatherers.SourceSummary{fixtureSummary()}},
+		querier: &mockGraphQuerier{summaries: []graph.SourceSummary{fixtureSummary()}},
 	}
 
 	call := makeCall("c2", "graph_summary", map[string]any{
@@ -125,7 +125,7 @@ func TestGraphSummary_IncludePredicatesFalse_StripsPredicates(t *testing.T) {
 		t.Fatalf("unexpected tool error: %s", result.Error)
 	}
 
-	var got []gatherers.SourceSummary
+	var got []graph.SourceSummary
 	if err := json.Unmarshal([]byte(result.Content), &got); err != nil {
 		t.Fatalf("unmarshal result: %v", err)
 	}

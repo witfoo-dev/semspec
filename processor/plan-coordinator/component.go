@@ -32,9 +32,7 @@ import (
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
-	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
-	"github.com/c360studio/semspec/processor/context-builder/gatherers"
-	"github.com/c360studio/semspec/processor/contexthelper"
+	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
@@ -121,7 +119,6 @@ type Component struct {
 	llmClient     llmCompleter
 	modelRegistry *model.Registry
 	assembler     *prompt.Assembler
-	contextHelper *contexthelper.Helper
 
 	inputPorts  []component.Port
 	outputPorts []component.Port
@@ -167,12 +164,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	logger = logger.With("component", componentName)
 
-	ctxHelper := contexthelper.New(deps.NATSClient, contexthelper.Config{
-		SubjectPrefix: cfg.ContextSubjectPrefix,
-		Timeout:       cfg.GetContextTimeout(),
-		SourceName:    componentName,
-	}, logger)
-
 	// Initialize prompt assembler with software domain
 	registry := prompt.NewRegistry()
 	registry.RegisterAll(promptdomain.Software()...)
@@ -187,7 +178,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger)),
 		modelRegistry: model.Global(),
 		assembler:     assembler,
-		contextHelper: ctxHelper,
 		tripleWriter: &graphutil.TripleWriter{
 			NATSClient:    deps.NATSClient,
 			Logger:        logger,
@@ -227,11 +217,6 @@ func (c *Component) Start(ctx context.Context) error {
 	c.mu.RUnlock()
 
 	c.logger.Info("Starting plan-coordinator")
-
-	// Start context helper for centralized context building.
-	if err := c.contextHelper.Start(ctx); err != nil {
-		return fmt.Errorf("start context helper: %w", err)
-	}
 
 	// Consumer 1: coordination triggers (WORKFLOW stream).
 	triggerCfg := natsclient.StreamConsumerConfig{
@@ -378,8 +363,6 @@ func (c *Component) Stop(timeout time.Duration) error {
 		return true
 	})
 
-	c.contextHelper.Stop()
-
 	c.mu.Lock()
 	c.running = false
 	c.mu.Unlock()
@@ -421,7 +404,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	// Best-effort semsource readiness check — short timeout so we don't
 	// block the trigger handler. If semsource isn't ready, proceed with
 	// local graph only (planners can still work without source entities).
-	if reg := gatherers.GlobalRegistry(); reg != nil && reg.SemsourceConfigured() {
+	if reg := graph.GlobalRegistry(); reg != nil && reg.SemsourceConfigured() {
 		gateCtx, gateCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		if err := reg.WaitForSemsource(gateCtx, 15*time.Second); err != nil {
 			c.logger.Warn("Semsource not ready, proceeding with local graph only",
@@ -1242,8 +1225,7 @@ func (c *Component) buildPlannerPrompt(exec *coordinationExecution, focus *Focus
 // ---------------------------------------------------------------------------
 
 // determineFocusAreas decides what focus areas to use for planning.
-// Uses explicit focuses if provided, otherwise calls the LLM with
-// graph context from the context-builder.
+// Uses explicit focuses if provided, otherwise calls the LLM.
 func (c *Component) determineFocusAreas(ctx context.Context, trigger *payloads.PlanCoordinatorRequest) ([]*FocusArea, error) {
 	// If explicit focuses provided, use them.
 	if len(trigger.FocusAreas) > 0 {
@@ -1257,21 +1239,6 @@ func (c *Component) determineFocusAreas(ctx context.Context, trigger *payloads.P
 		return focuses, nil
 	}
 
-	// Request coordination context from context-builder (graph-first).
-	var graphContext string
-	resp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
-		TaskType: contextbuilder.TaskTypePlanning,
-		Topic:    trigger.Title,
-	})
-	if resp != nil {
-		graphContext = contexthelper.FormatContextResponse(resp)
-		c.logger.Info("Built coordination context via context-builder",
-			"title", trigger.Title,
-			"entities", len(resp.Entities),
-			"documents", len(resp.Documents),
-			"tokens_used", resp.TokensUsed)
-	}
-
 	// Use LLM to determine focus areas.
 	provider := c.resolveProvider()
 	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
@@ -1281,7 +1248,7 @@ func (c *Component) determineFocusAreas(ctx context.Context, trigger *payloads.P
 	})
 	systemPrompt := assembled.SystemMessage
 
-	userPrompt := c.buildFocusUserPrompt(trigger, graphContext)
+	userPrompt := c.buildFocusUserPrompt(trigger, "")
 
 	content, _, err := c.callLLM(ctx, systemPrompt, userPrompt)
 	if err != nil {

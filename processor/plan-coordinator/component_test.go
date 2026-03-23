@@ -105,29 +105,6 @@ func TestConfig_Validate_BadTimeout(t *testing.T) {
 	}
 }
 
-func TestConfig_GetContextTimeout_Default(t *testing.T) {
-	cfg := Config{}
-	got := cfg.GetContextTimeout()
-	if got != 30*time.Second {
-		t.Errorf("empty ContextTimeout = %v, want 30s", got)
-	}
-}
-
-func TestConfig_GetContextTimeout_ParsesValid(t *testing.T) {
-	cfg := Config{ContextTimeout: "45s"}
-	got := cfg.GetContextTimeout()
-	if got != 45*time.Second {
-		t.Errorf("ContextTimeout=45s got %v, want 45s", got)
-	}
-}
-
-func TestConfig_GetContextTimeout_FallsBackOnBadValue(t *testing.T) {
-	cfg := Config{ContextTimeout: "not-a-duration"}
-	got := cfg.GetContextTimeout()
-	if got != 30*time.Second {
-		t.Errorf("bad ContextTimeout should fall back to 30s, got %v", got)
-	}
-}
 
 func TestConfig_GetTimeout(t *testing.T) {
 	cfg := Config{TimeoutSeconds: 60}
@@ -157,9 +134,6 @@ func TestDefaultConfig_HasExpectedDefaults(t *testing.T) {
 	}
 	if cfg.Model != "default" {
 		t.Errorf("Model = %q, want default", cfg.Model)
-	}
-	if cfg.ContextSubjectPrefix != "context.build" {
-		t.Errorf("ContextSubjectPrefix = %q, want context.build", cfg.ContextSubjectPrefix)
 	}
 }
 

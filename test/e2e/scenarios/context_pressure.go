@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c360studio/semspec/processor/context-builder/gatherers"
+	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/source"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
@@ -977,7 +977,7 @@ streamVerified:
 	// Phase 2: Verify entities are queryable via GraphQL (indexed by graph-index).
 	// The graph pipeline is async: stream → graph-ingest → KV → graph-index → predicate index.
 	// We must wait for the predicate index to be built before context-builder can discover docs.
-	graphGatherer := gatherers.NewGraphGatherer(s.config.GraphURL)
+	graphGatherer := graph.NewGraphGatherer(s.config.GraphURL)
 	for {
 		select {
 		case <-ctx.Done():
@@ -1030,7 +1030,7 @@ func (s *ContextPressureScenario) stageVerifyStandardsPopulated(ctx context.Cont
 // stageVerifyGraphReady polls the graph gateway until it responds, confirming the
 // graph pipeline is ready. This prevents plan creation before graph entities are queryable.
 func (s *ContextPressureScenario) stageVerifyGraphReady(ctx context.Context, result *Result) error {
-	gatherer := gatherers.NewGraphGatherer(s.config.GraphURL)
+	gatherer := graph.NewGraphGatherer(s.config.GraphURL)
 
 	if err := gatherer.WaitForReady(ctx, 30*time.Second); err != nil {
 		return fmt.Errorf("graph not ready: %w", err)
@@ -1551,12 +1551,12 @@ func (s *ContextPressureScenario) stageVerifyArtifactsStrict(ctx context.Context
 	// Poll because graph ingestion is async — entity may not be indexed yet.
 	requestID := allRequestIDs[0]
 	entityID := fmt.Sprintf("semspec.semspec.llm.call.semspec-e2e-mock.%s", requestID)
-	graphGatherer := gatherers.NewGraphGatherer(s.config.GraphURL)
+	graphGatherer := graph.NewGraphGatherer(s.config.GraphURL)
 
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 
-	var entity *gatherers.Entity
+	var entity *graph.Entity
 	for {
 		e, err := graphGatherer.GetEntity(ctx, entityID)
 		if err == nil && e != nil {

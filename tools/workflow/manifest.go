@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c360studio/semspec/processor/context-builder/gatherers"
+	"github.com/c360studio/semspec/graph"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -257,7 +257,7 @@ func isExcludedPredicate(predicate string) bool {
 // for injection into agent system prompts. Each source gets one line showing
 // domain breakdowns. This is the "tier 1" of the 3-tier knowledge access
 // pattern — agents see what's available without any tool calls.
-func FormatFederatedSummary(summaries []gatherers.SourceSummary) string {
+func FormatFederatedSummary(summaries []graph.SourceSummary) string {
 	if len(summaries) == 0 {
 		return ""
 	}
@@ -322,8 +322,8 @@ func FederatedManifestFetchFn() func() string {
 
 		v, _, _ := sfGroup.Do("federated-manifest", func() (any, error) {
 			// Try federated summary first.
-			if reg := gatherers.GlobalRegistry(); reg != nil {
-				fg := gatherers.NewFederatedGraphGatherer(reg, nil)
+			if reg := graph.GlobalRegistry(); reg != nil {
+				fg := graph.NewFederatedGraphGatherer(reg, nil)
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				summaries, err := fg.GraphSummary(ctx)

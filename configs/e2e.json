@@ -399,9 +399,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "task-generator",
         "trigger_subject": "workflow.async.task-generator",
-        "default_capability": "planning",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
+        "default_capability": "planning"
       }
     },
     "task-dispatcher": {
@@ -414,9 +412,7 @@
         "trigger_subject": "workflow.trigger.task-dispatcher",
         "output_subject": "workflow.result.task-dispatcher",
         "max_concurrent": 3,
-        "context_timeout": "30s",
         "execution_timeout": "300s",
-        "context_subject_prefix": "context.build",
         "workflow_trigger_subject": "workflow.trigger.task-execution-loop"
       }
     },
@@ -429,9 +425,7 @@
         "consumer_name": "plan-reviewer",
         "trigger_subject": "workflow.async.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
-        "default_capability": "reviewing",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
+        "default_capability": "reviewing"
       }
     },
     "task-reviewer": {
@@ -443,27 +437,7 @@
         "consumer_name": "task-reviewer",
         "trigger_subject": "workflow.async.task-reviewer",
         "result_subject_prefix": "workflow.result.task-reviewer",
-        "default_capability": "reviewing",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
-      }
-    },
-    "context-builder": {
-      "name": "context-builder",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "AGENT",
-        "consumer_name": "context-builder",
-        "input_subject_pattern": "context.build.>",
-        "output_subject_prefix": "context.built",
-        "default_token_budget": 32000,
-        "graph_gateway_url": "http://localhost:8082",
-        "repo_path": "/workspace",
-        "sop_entity_prefix": "c360.semspec.source.doc",
-        "response_bucket_name": "CONTEXT_RESPONSES",
-        "graph_readiness_budget": "2s",
-        "standards_path": ".semspec/standards.json"
+        "default_capability": "reviewing"
       }
     },
     "project-api": {

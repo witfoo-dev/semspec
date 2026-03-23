@@ -462,7 +462,6 @@
         "sessions_bucket": "PLAN_SESSIONS",
         "max_concurrent_planners": 3,
         "planner_timeout": "120s",
-        "context_timeout": "60s",
         "default_capability": "planning",
         "auto_approve": false,
         "max_review_iterations": 3
@@ -476,9 +475,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "requirement-generator",
         "trigger_subject": "workflow.async.requirement-generator",
-        "default_capability": "requirement_generation",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
+        "default_capability": "requirement_generation"
       }
     },
     "scenario-generator": {
@@ -489,9 +486,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "scenario-generator",
         "trigger_subject": "workflow.async.scenario-generator",
-        "default_capability": "scenario_generation",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
+        "default_capability": "scenario_generation"
       }
     },
     "trajectory-api": {
@@ -514,24 +509,6 @@
         "execution_bucket_name": "WORKFLOW_EXECUTIONS"
       }
     },
-    "context-builder": {
-      "name": "context-builder",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "AGENT",
-        "consumer_name": "context-builder",
-        "input_subject_pattern": "context.build.>",
-        "output_subject_prefix": "context.built",
-        "default_token_budget": 16000,
-        "graph_gateway_url": "http://localhost:8082",
-        "repo_path": "/workspace",
-        "sop_entity_prefix": "c360.semspec.source.doc",
-        "response_bucket_name": "CONTEXT_RESPONSES",
-        "graph_readiness_budget": "2s",
-        "standards_path": ".semspec/standards.json"
-      }
-    },
     "plan-reviewer": {
       "name": "plan-reviewer",
       "type": "processor",
@@ -541,9 +518,7 @@
         "consumer_name": "plan-reviewer",
         "trigger_subject": "workflow.async.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
-        "default_capability": "reviewing",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
+        "default_capability": "reviewing"
       }
     },
     "project-api": {

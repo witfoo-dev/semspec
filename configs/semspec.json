@@ -245,9 +245,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "requirement-generator",
         "trigger_subject": "workflow.async.requirement-generator",
-        "default_capability": "planning",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
+        "default_capability": "planning"
       }
     },
     "phase-generator": {
@@ -258,9 +256,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "phase-generator",
         "trigger_subject": "workflow.async.phase-generator",
-        "default_capability": "planning",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
+        "default_capability": "planning"
       }
     },
     "scenario-generator": {
@@ -271,9 +267,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "scenario-generator",
         "trigger_subject": "workflow.async.scenario-generator",
-        "default_capability": "planning",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
+        "default_capability": "planning"
       }
     },
     "task-generator": {
@@ -285,8 +279,6 @@
         "consumer_name": "task-generator",
         "trigger_subject": "workflow.async.task-generator",
         "default_capability": "planning",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s",
         "reactive_mode": true
       }
     },
@@ -300,9 +292,7 @@
         "trigger_subject": "workflow.trigger.task-dispatcher",
         "output_subject": "workflow.result.task-dispatcher",
         "max_concurrent": 3,
-        "context_timeout": "30s",
         "execution_timeout": "300s",
-        "context_subject_prefix": "context.build",
         "agent_task_subject": "dev.task.development"
       }
     },
@@ -325,9 +315,7 @@
         "max_concurrent_planners": 3,
         "timeout_seconds": 1800,
         "model": "default",
-        "default_capability": "planning",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "30s"
+        "default_capability": "planning"
       }
     },
     "plan-reviewer": {
@@ -340,9 +328,7 @@
         "trigger_subject": "workflow.async.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
         "llm_timeout": "120s",
-        "default_capability": "reviewing",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
+        "default_capability": "reviewing"
       }
     },
     "task-reviewer": {
@@ -355,26 +341,7 @@
         "trigger_subject": "workflow.async.task-reviewer",
         "result_subject_prefix": "workflow.result.task-reviewer",
         "llm_timeout": "120s",
-        "default_capability": "reviewing",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
-      }
-    },
-    "context-builder": {
-      "name": "context-builder",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "AGENT",
-        "consumer_name": "context-builder",
-        "input_subject_pattern": "context.build.>",
-        "output_subject_prefix": "context.built",
-        "default_token_budget": 32000,
-        "graph_gateway_url": "http://localhost:8082",
-        "default_capability": "reviewing",
-        "sop_entity_prefix": "c360.semspec.source.doc",
-        "response_bucket_name": "CONTEXT_RESPONSES",
-        "response_ttl_hours": 24
+        "default_capability": "reviewing"
       }
     },
     "project-api": {

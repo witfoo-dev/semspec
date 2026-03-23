@@ -13,8 +13,6 @@ import (
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
-	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
-	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/workflow/payloads"
@@ -47,9 +45,6 @@ type Component struct {
 	llmClient     llmCompleter
 	modelRegistry *model.Registry
 	assembler     *prompt.Assembler
-
-	// Centralized context building via context-builder
-	contextHelper *contexthelper.Helper
 
 	// JetStream consumer
 	consumer jetstream.Consumer
@@ -97,12 +92,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
-	if config.ContextSubjectPrefix == "" {
-		config.ContextSubjectPrefix = defaults.ContextSubjectPrefix
-	}
-	if config.ContextTimeout == "" {
-		config.ContextTimeout = defaults.ContextTimeout
-	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -112,13 +101,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 
 	logger := deps.GetLogger()
-
-	// Initialize context helper for centralized context building
-	ctxHelper := contexthelper.New(deps.NATSClient, contexthelper.Config{
-		SubjectPrefix: config.ContextSubjectPrefix,
-		Timeout:       config.GetContextTimeout(),
-		SourceName:    "plan-reviewer",
-	}, logger)
 
 	// Initialize prompt assembler with software domain
 	registry := prompt.NewRegistry()
@@ -136,7 +118,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		),
 		modelRegistry: model.Global(),
 		assembler:     assembler,
-		contextHelper: ctxHelper,
 	}, nil
 }
 
@@ -167,12 +148,6 @@ func (c *Component) Start(ctx context.Context) error {
 	subCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.mu.Unlock()
-
-	// Start context helper JetStream consumer
-	if err := c.contextHelper.Start(subCtx); err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("start context helper: %w", err)
-	}
 
 	// Get JetStream context
 	js, err := c.natsClient.JetStream()
@@ -359,50 +334,19 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 }
 
 // reviewPlan calls the LLM to review the plan against SOPs.
-// It uses the centralized context-builder to retrieve SOPs, file tree, and related context.
 func (c *Component) reviewPlan(ctx context.Context, trigger *payloads.PlanReviewRequest) (*prompts.PlanReviewResult, []string, error) {
 	// Check context cancellation before expensive operations
 	if err := ctx.Err(); err != nil {
 		return nil, nil, fmt.Errorf("context cancelled: %w", err)
 	}
 
-	// Step 1: Request plan-review context from context-builder (graph-first)
-	// This retrieves SOPs, project file tree, plan content, and architecture docs.
-	// Pass the capability so context-builder can calculate the correct token budget
-	// based on the model that will actually be used for LLM calls.
+	// Use the pre-built SOP context from the trigger payload.
 	var enrichedContext string
-	ctxResp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
-		TaskType:      contextbuilder.TaskTypePlanReview,
-		PlanSlug:      trigger.Slug,
-		PlanContent:   string(trigger.PlanContent),
-		ScopePatterns: trigger.ScopePatterns,
-		Capability:    c.config.DefaultCapability,
-	})
-	if ctxResp != nil {
-		enrichedContext = contexthelper.FormatContextResponse(ctxResp)
-		c.logger.Info("Built review context via context-builder",
-			"slug", trigger.Slug,
-			"entities", len(ctxResp.Entities),
-			"documents", len(ctxResp.Documents),
-			"sop_ids", ctxResp.SOPIDs,
-			"tokens_used", ctxResp.TokensUsed)
-	}
-
-	// Merge trigger's pre-built SOPContext when context-builder didn't return SOPs.
-	// This handles the case where graph is down but context-builder still returns
-	// partial context (file tree, plan docs) — we still need SOPs for review.
 	if trigger.SOPContext != "" {
-		if enrichedContext == "" {
-			enrichedContext = trigger.SOPContext
-			c.logger.Info("Using pre-built SOP context from trigger (no context-builder response)",
-				"slug", trigger.Slug,
-				"context_length", len(enrichedContext))
-		} else if ctxResp != nil && len(ctxResp.SOPIDs) == 0 {
-			enrichedContext = enrichedContext + "\n\n## SOP Standards\n\n" + trigger.SOPContext
-			c.logger.Info("Merged trigger SOP context (context-builder returned no SOPs)",
-				"slug", trigger.Slug,
-				"sop_context_length", len(trigger.SOPContext))
-		}
+		enrichedContext = trigger.SOPContext
+		c.logger.Info("Using pre-built SOP context from trigger",
+			"slug", trigger.Slug,
+			"context_length", len(enrichedContext))
 	}
 
 	// Build prompts with enriched context
@@ -423,8 +367,7 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *payloads.PlanReview
 	// If no context at all, auto-approve
 	if enrichedContext == "" {
 		c.logger.Warn("No SOP context available for plan review",
-			"slug", trigger.Slug,
-			"context_builder_responded", ctxResp != nil)
+			"slug", trigger.Slug)
 		return &prompts.PlanReviewResult{
 			Verdict:  "approved",
 			Summary:  "No plan-scope SOPs or relevant context found. Plan approved by default.",
@@ -680,8 +623,6 @@ func (c *Component) Stop(_ time.Duration) error {
 	c.running = false
 	c.cancel = nil
 	c.mu.Unlock()
-
-	c.contextHelper.Stop()
 
 	// Cancel context after releasing lock to avoid potential deadlock
 	if cancel != nil {

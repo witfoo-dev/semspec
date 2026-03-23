@@ -1,5 +1,5 @@
-// Package gatherers provides context gathering implementations.
-package gatherers
+// Package graph provides graph querying implementations for the knowledge graph.
+package graph
 
 import (
 	"bytes"

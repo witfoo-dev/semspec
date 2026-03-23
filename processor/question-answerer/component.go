@@ -14,8 +14,6 @@ import (
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
-	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
-	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/answerer"
 	"github.com/c360studio/semspec/workflow/payloads"
@@ -40,9 +38,6 @@ type Component struct {
 
 	llmClient     llmCompleter
 	questionStore *workflow.QuestionStore
-
-	// Centralized context building via context-builder
-	contextHelper *contexthelper.Helper
 
 	// JetStream consumer
 	consumer jetstream.Consumer
@@ -83,12 +78,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
-	if config.ContextSubjectPrefix == "" {
-		config.ContextSubjectPrefix = defaults.ContextSubjectPrefix
-	}
-	if config.ContextTimeout == "" {
-		config.ContextTimeout = defaults.ContextTimeout
-	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -105,13 +94,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	logger := deps.GetLogger()
 
-	// Initialize context helper for centralized context building
-	ctxHelper := contexthelper.New(deps.NATSClient, contexthelper.Config{
-		SubjectPrefix: config.ContextSubjectPrefix,
-		Timeout:       config.GetContextTimeout(),
-		SourceName:    "question-answerer",
-	}, logger)
-
 	return &Component{
 		name:          "question-answerer",
 		config:        config,
@@ -119,7 +101,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		logger:        logger,
 		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger)),
 		questionStore: store,
-		contextHelper: ctxHelper,
 	}, nil
 }
 
@@ -150,12 +131,6 @@ func (c *Component) Start(ctx context.Context) error {
 	subCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.mu.Unlock()
-
-	// Start context helper JetStream consumer
-	if err := c.contextHelper.Start(subCtx); err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("start context helper: %w", err)
-	}
 
 	// Get JetStream context
 	js, err := c.natsClient.JetStream()
@@ -322,45 +297,18 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 }
 
 // generateAnswer calls the LLM to generate an answer.
-// It follows the graph-first pattern by requesting context from the
-// centralized context-builder before making the LLM call.
 func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionAnswerTask) (string, error) {
-	// Step 1: Request question context from centralized context-builder (graph-first)
-	// Pass the capability so context-builder can calculate the correct token budget
-	// based on the model that will actually be used for LLM calls.
 	// Use task.Capability if provided, otherwise fall back to config default.
 	capability := task.Capability
 	if capability == "" {
 		capability = c.config.DefaultCapability
 	}
-	var graphContext string
-	if c.contextHelper != nil {
-		resp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
-			TaskType:   contextbuilder.TaskTypeQuestion,
-			Topic:      task.Topic + " " + task.Question, // Combine for better keyword matching
-			Capability: capability,
-		})
-		if resp != nil {
-			graphContext = contexthelper.FormatContextResponse(resp)
-			c.logger.Info("Built question context via context-builder",
-				"topic", task.Topic,
-				"entities", len(resp.Entities),
-				"documents", len(resp.Documents),
-				"tokens_used", resp.TokensUsed)
-		} else {
-			c.logger.Warn("Context build returned nil, proceeding without graph context",
-				"topic", task.Topic)
-		}
-	}
-
-	// Step 2: Build the prompt with graph context
-	prompt := c.buildPromptWithContext(task, graphContext)
-
-	// Step 3: Call LLM via client (handles retry, fallback, and error classification)
-	// capability is already set in Step 1 for context-builder
 	if capability == "" {
 		capability = string(model.CapabilityPlanning)
 	}
+
+	// Build the prompt from the task fields directly.
+	prompt := c.buildPromptWithContext(task, "")
 
 	temperature := 0.7
 	llmResp, err := c.llmClient.Complete(ctx, llm.Request{
@@ -378,8 +326,7 @@ func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionA
 
 	c.logger.Debug("LLM response received",
 		"model", llmResp.Model,
-		"tokens_used", llmResp.TokensUsed,
-		"has_graph_context", graphContext != "")
+		"tokens_used", llmResp.TokensUsed)
 
 	return llmResp.Content, nil
 }
@@ -470,8 +417,6 @@ func (c *Component) Stop(_ time.Duration) error {
 	c.running = false
 	c.cancel = nil
 	c.mu.Unlock()
-
-	c.contextHelper.Stop()
 
 	// Cancel context after releasing lock to avoid potential deadlock
 	if cancel != nil {
