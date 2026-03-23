@@ -39,6 +39,7 @@ import (
 	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
+	"github.com/c360studio/semspec/workflow/answerer"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/sandbox"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
@@ -152,8 +153,9 @@ type Component struct {
 	indexingGate *workflow.IndexingGate // nil when graph-gateway not configured
 	assembler    *prompt.Assembler      // composes system prompts for each pipeline stage
 
-	// Question store for ask_question flow. Nil when QUESTIONS bucket unavailable.
-	questionStore *workflow.QuestionStore
+	// Question store and router for ask_question flow.
+	questionStore  *workflow.QuestionStore
+	questionRouter *answerer.Router
 
 	// Agent roster (Phase B). Nil when ENTITY_STATES bucket is unavailable.
 	agentHelper     *agentgraph.Helper
@@ -652,7 +654,34 @@ func (c *Component) initQuestionStore() {
 		return
 	}
 	c.questionStore = store
-	c.logger.Info("Question store initialized for ask_question support")
+
+	// Load answerer registry for question routing.
+	// Try /app/configs (Docker) then SEMSPEC_REPO_PATH/configs (local).
+	var registry *answerer.Registry
+	for _, base := range []string{"/app", os.Getenv("SEMSPEC_REPO_PATH"), "."} {
+		if base == "" {
+			continue
+		}
+		path := filepath.Join(base, "configs", "answerers.yaml")
+		r, loadErr := answerer.LoadRegistry(path)
+		if loadErr == nil {
+			registry = r
+			break
+		}
+	}
+	err = nil // Clear for logging below.
+	if registry == nil {
+		err = fmt.Errorf("answerers.yaml not found in any search path")
+	}
+	if err != nil {
+		c.logger.Warn("Failed to load answerers.yaml, questions will not be auto-routed",
+			"error", err)
+	} else {
+		c.questionRouter = answerer.NewRouter(registry, c.natsClient, c.logger)
+	}
+
+	c.logger.Info("Question store initialized for ask_question support",
+		"router_available", c.questionRouter != nil)
 }
 
 // ---------------------------------------------------------------------------
@@ -724,6 +753,20 @@ func (c *Component) handleQuestionLocked(ctx context.Context, event *agentic.Loo
 			// Don't return — still record the pause state.
 		} else {
 			exec.WaitingForQuestionID = q.ID
+
+			// Route the question to an answerer (el jefe or human).
+			if c.questionRouter != nil {
+				result, routeErr := c.questionRouter.RouteQuestion(ctx, q)
+				if routeErr != nil {
+					c.logger.Warn("Failed to route question",
+						"question_id", q.ID, "error", routeErr)
+				} else {
+					c.logger.Info("Question routed",
+						"question_id", q.ID,
+						"answerer", result.Route.Answerer,
+						"message", result.Message)
+				}
+			}
 		}
 	}
 
