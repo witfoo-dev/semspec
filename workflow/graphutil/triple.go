@@ -68,7 +68,7 @@ func (tw *TripleWriter) WriteTriple(ctx context.Context, entityID, predicate str
 		return nil
 	}
 
-	respData, err := tw.NATSClient.Request(ctx, "graph.mutation.triple.add", data, 5*time.Second)
+	respData, err := tw.NATSClient.RequestWithRetry(ctx, "graph.mutation.triple.add", data, 5*time.Second, natsclient.DefaultRetryConfig())
 	if err != nil {
 		tw.Logger.Warn("Triple write request failed",
 			"predicate", predicate, "entity_id", entityID, "error", err)
@@ -103,7 +103,7 @@ func (tw *TripleWriter) ReadEntity(ctx context.Context, entityID string) (map[st
 		return nil, fmt.Errorf("marshal entity query: %w", err)
 	}
 
-	respData, err := tw.NATSClient.Request(ctx, "graph.ingest.query.entity", reqData, 5*time.Second)
+	respData, err := tw.NATSClient.RequestWithRetry(ctx, "graph.ingest.query.entity", reqData, 5*time.Second, natsclient.DefaultRetryConfig())
 	if err != nil {
 		return nil, fmt.Errorf("query entity %s: %w", entityID, err)
 	}
@@ -151,7 +151,7 @@ func (tw *TripleWriter) ReadEntitiesByPrefix(ctx context.Context, prefix string,
 		return nil, fmt.Errorf("marshal prefix query: %w", err)
 	}
 
-	respData, err := tw.NATSClient.Request(ctx, "graph.ingest.query.prefix", reqData, 10*time.Second)
+	respData, err := tw.NATSClient.RequestWithRetry(ctx, "graph.ingest.query.prefix", reqData, 10*time.Second, natsclient.DefaultRetryConfig())
 	if err != nil {
 		return nil, fmt.Errorf("query prefix %s: %w", prefix, err)
 	}
