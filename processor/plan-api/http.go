@@ -763,6 +763,11 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 		if pubErr := c.publishApprovalEntity(r.Context(), "plan", planEntityID, "approved", "user", ""); pubErr != nil {
 			c.logger.Warn("Failed to publish plan approval entity", "slug", slug, "error", pubErr)
 		}
+
+		// Trigger requirement/scenario generation cascade (ADR-026).
+		// This publishes to workflow.async.requirement-generator, which chains
+		// through scenario generation and transitions to ready_for_execution.
+		c.triggerRequirementGeneration(r.Context(), plan)
 	}
 
 	resp := &PlanWithStatus{
