@@ -401,14 +401,14 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	// Best-effort semsource readiness check — short timeout so we don't
-	// block the trigger handler. If semsource isn't ready, proceed with
-	// local graph only (planners can still work without source entities).
+	// Best-effort semsource readiness check. If semsource isn't ready
+	// within the budget, proceed with local graph only.
 	if reg := graph.GlobalRegistry(); reg != nil && reg.SemsourceConfigured() {
-		gateCtx, gateCancel := context.WithTimeout(context.Background(), 15*time.Second)
-		if err := reg.WaitForSemsource(gateCtx, 15*time.Second); err != nil {
+		budget := c.config.GetSemsourceReadinessBudget()
+		gateCtx, gateCancel := context.WithTimeout(context.Background(), budget)
+		if err := reg.WaitForSemsource(gateCtx, budget); err != nil {
 			c.logger.Warn("Semsource not ready, proceeding with local graph only",
-				"error", err, "slug", trigger.Slug)
+				"error", err, "slug", trigger.Slug, "budget", budget)
 		} else {
 			c.logger.Info("Semsource ready", "slug", trigger.Slug)
 		}

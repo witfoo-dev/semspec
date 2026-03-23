@@ -40,6 +40,10 @@ type Config struct {
 	// RepoPath is the workspace/repository root path. Defaults to SEMSPEC_REPO_PATH env var or ".".
 	RepoPath string `json:"repo_path,omitempty" schema:"type:string,description:Repository root path,category:advanced"`
 
+	// SemsourceReadinessBudget is the max time to wait for semsource readiness
+	// before proceeding with local graph only. Default: 2s. Set lower for mock/CI.
+	SemsourceReadinessBudget string `json:"semsource_readiness_budget" schema:"type:string,description:Max time to wait for semsource readiness,category:advanced,default:2s"`
+
 	// Prompts contains optional custom prompt file paths.
 	Prompts *PromptsConfig `json:"prompts,omitempty" schema:"type:object,description:Custom prompt file paths,category:advanced"`
 
@@ -170,5 +174,17 @@ func (c *Config) GetTimeout() time.Duration {
 		return 30 * time.Minute
 	}
 	return time.Duration(c.TimeoutSeconds) * time.Second
+}
+
+// GetSemsourceReadinessBudget returns the parsed semsource readiness budget.
+func (c *Config) GetSemsourceReadinessBudget() time.Duration {
+	if c.SemsourceReadinessBudget == "" {
+		return 2 * time.Second
+	}
+	d, err := time.ParseDuration(c.SemsourceReadinessBudget)
+	if err != nil || d <= 0 {
+		return 2 * time.Second
+	}
+	return d
 }
 
