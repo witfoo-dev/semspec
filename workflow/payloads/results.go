@@ -3,6 +3,7 @@ package payloads
 import (
 	"encoding/json"
 
+	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 )
 
@@ -170,19 +171,31 @@ func (r *TaskReviewResult) UnmarshalJSON(data []byte) error {
 // Validation result
 // ---------------------------------------------------------------------------
 
-// ValidationResult is the output from the structural-validator component callback.
-// Fields match processor/structural-validator.ValidationResult JSON tags.
+// CheckResult holds the outcome of a single checklist check execution.
+type CheckResult struct {
+	Name     string `json:"name"`
+	Passed   bool   `json:"passed"`
+	Required bool   `json:"required"`
+	Command  string `json:"command"`
+	ExitCode int    `json:"exit_code"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	Duration string `json:"duration"`
+}
+
+// ValidationResult is the canonical payload for structural validation results.
+// Published by the structural-validator component, consumed by the execution-orchestrator.
 type ValidationResult struct {
-	Slug         string          `json:"slug"`
-	Passed       bool            `json:"passed"`
-	ChecksRun    int             `json:"checks_run"`
-	CheckResults json.RawMessage `json:"check_results"`
-	Warning      string          `json:"warning,omitempty"`
+	Slug         string        `json:"slug"`
+	Passed       bool          `json:"passed"`
+	ChecksRun    int           `json:"checks_run"`
+	CheckResults []CheckResult `json:"check_results"`
+	Warning      string        `json:"warning,omitempty"`
 }
 
 // Schema implements message.Payload.
 func (r *ValidationResult) Schema() message.Type {
-	return message.Type{Domain: "workflow", Category: "validation-result", Version: "v1"}
+	return message.Type{Domain: "workflow", Category: "structural-validation-result", Version: "v1"}
 }
 
 // Validate implements message.Payload.
@@ -198,6 +211,18 @@ func (r *ValidationResult) MarshalJSON() ([]byte, error) {
 func (r *ValidationResult) UnmarshalJSON(data []byte) error {
 	type Alias ValidationResult
 	return json.Unmarshal(data, (*Alias)(r))
+}
+
+func init() {
+	if err := component.RegisterPayload(&component.PayloadRegistration{
+		Domain:      "workflow",
+		Category:    "structural-validation-result",
+		Version:     "v1",
+		Description: "Structural validation result — checklist execution summary",
+		Factory:     func() any { return &ValidationResult{} },
+	}); err != nil {
+		panic("failed to register ValidationResult: " + err.Error())
+	}
 }
 
 // ---------------------------------------------------------------------------

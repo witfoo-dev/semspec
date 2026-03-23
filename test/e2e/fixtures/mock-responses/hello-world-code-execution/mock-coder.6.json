@@ -1,14 +1,4 @@
 {
-  "content": "Validation passed. Submitting work.",
-  "tool_calls": [
-    {
-      "id": "call_submit_validate",
-      "type": "function",
-      "function": {
-        "name": "submit_work",
-        "arguments": "{\"summary\":\"Validation complete: tests pass, implementation verified\"}"
-      }
-    }
-  ],
-  "finish_reason": "tool_calls"
+  "content": "{\"verdict\":\"approved\",\"feedback\":\"Code review passed.\",\"slug\":\"add-a-goodbye-endpoint-that-returns-a-goodbye-mess\"}",
+  "finish_reason": "stop"
 }

@@ -1,14 +1,4 @@
 {
-  "content": "Running the tests to validate the implementation.",
-  "tool_calls": [
-    {
-      "id": "call_run_tests",
-      "type": "function",
-      "function": {
-        "name": "bash",
-        "arguments": "{\"command\":\"cd api && python -m pytest test_goodbye.py -v 2>&1 || true\"}"
-      }
-    }
-  ],
-  "finish_reason": "tool_calls"
+  "content": "{\"verdict\":\"approved\",\"feedback\":\"Implementation correctly adds /goodbye endpoint with JSON response. Tests cover status code, JSON structure, and message content.\",\"slug\":\"add-a-goodbye-endpoint-that-returns-a-goodbye-mess\"}",
+  "finish_reason": "stop"
 }

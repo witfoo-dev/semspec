@@ -23,7 +23,7 @@ func TestValidationRequest_Validate(t *testing.T) {
 
 // TestValidationResult_Schema verifies the result schema matches registration.
 func TestValidationResult_Schema(t *testing.T) {
-	result := &ValidationResult{
+	result := &payloads.ValidationResult{
 		Slug:      "test",
 		Passed:    true,
 		ChecksRun: 2,

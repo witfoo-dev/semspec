@@ -37,11 +37,15 @@ func NewExecutor(repoPath, checklistPath string, defaultTimeout time.Duration) *
 // If the checklist file is missing, it returns a passing result with a warning
 // rather than an error, to allow graceful degradation in pipelines that have
 // not yet been initialised.
-func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequest) (*ValidationResult, error) {
+//
+// When trigger.WorktreePath is set, checks execute against that directory
+// instead of the configured repoPath. The checklist is always loaded from
+// repoPath (project-level config), but commands run in the worktree.
+func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequest) (*payloads.ValidationResult, error) {
 	checklist, err := e.loadChecklist()
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &ValidationResult{
+			return &payloads.ValidationResult{
 				Slug:      trigger.Slug,
 				Passed:    true,
 				ChecksRun: 0,
@@ -51,18 +55,25 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 		return nil, fmt.Errorf("load checklist: %w", err)
 	}
 
+	// Determine the working directory for checks. Worktree path overrides
+	// the default repoPath so validation runs against agent-modified files.
+	workDir := e.repoPath
+	if trigger.WorktreePath != "" {
+		workDir = trigger.WorktreePath
+	}
+
 	// When FilesModified is empty, run all checks (full scan mode).
 	// This is the default for workflow-triggered validation where the
 	// developer agent doesn't report specific files modified.
 	runAll := len(trigger.FilesModified) == 0
 
-	var results []CheckResult
+	var results []payloads.CheckResult
 	for _, check := range checklist.Checks {
 		if !runAll && !matchesAny(check.Trigger, trigger.FilesModified) {
 			continue
 		}
 
-		result := e.runCheck(ctx, check)
+		result := e.runCheckIn(ctx, check, workDir)
 		results = append(results, result)
 	}
 
@@ -73,21 +84,21 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 	// Only fires in Go projects (go.mod exists) to avoid spurious failures.
 	if !hasCheckNamed(results, "go-test") && !hasCheckNamed(results, "go-test-modified") &&
 		!checklistHasName(checklist, "go-test") && !checklistHasName(checklist, "go-test-modified") {
-		if hasGoFiles(trigger.FilesModified) && e.isGoProject() {
-			goTestResult := e.runGoTestOnModified(ctx, trigger.FilesModified)
+		if hasGoFiles(trigger.FilesModified) && e.isGoProjectIn(workDir) {
+			goTestResult := e.runGoTestOnModifiedIn(ctx, trigger.FilesModified, workDir)
 			results = append(results, goTestResult)
 		}
 	}
 
 	// Advisory anti-mock governance check — only when test files are present.
 	if hasTestFiles(trigger.FilesModified) {
-		antiMockResult := CheckAntiMock(e.repoPath, trigger.FilesModified)
+		antiMockResult := CheckAntiMock(workDir, trigger.FilesModified)
 		results = append(results, antiMockResult)
 	}
 
 	passed := allRequiredPassed(results)
 
-	return &ValidationResult{
+	return &payloads.ValidationResult{
 		Slug:         trigger.Slug,
 		Passed:       passed,
 		ChecksRun:    len(results),
@@ -96,7 +107,7 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 }
 
 // hasCheckNamed returns true if any result in the slice has the given name.
-func hasCheckNamed(results []CheckResult, name string) bool {
+func hasCheckNamed(results []payloads.CheckResult, name string) bool {
 	for _, r := range results {
 		if r.Name == name {
 			return true
@@ -135,9 +146,9 @@ func checklistHasName(cl *workflow.Checklist, name string) bool {
 	return false
 }
 
-// isGoProject returns true if a go.mod file exists in repoPath.
-func (e *Executor) isGoProject() bool {
-	_, err := os.Stat(filepath.Join(e.repoPath, "go.mod"))
+// isGoProjectIn returns true if a go.mod file exists in dir.
+func (e *Executor) isGoProjectIn(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "go.mod"))
 	return err == nil
 }
 
@@ -156,8 +167,8 @@ func (e *Executor) loadChecklist() (*workflow.Checklist, error) {
 	return &cl, nil
 }
 
-// runCheck executes a single check command and captures its output.
-func (e *Executor) runCheck(ctx context.Context, check workflow.Check) CheckResult {
+// runCheckIn executes a single check command against the given base directory.
+func (e *Executor) runCheckIn(ctx context.Context, check workflow.Check, baseDir string) payloads.CheckResult {
 	timeout := e.defaultTimeout
 	if check.Timeout != "" {
 		if d, err := time.ParseDuration(check.Timeout); err == nil {
@@ -165,9 +176,9 @@ func (e *Executor) runCheck(ctx context.Context, check workflow.Check) CheckResu
 		}
 	}
 
-	workDir := e.repoPath
+	workDir := baseDir
 	if check.WorkingDir != "" {
-		workDir = filepath.Join(e.repoPath, check.WorkingDir)
+		workDir = filepath.Join(baseDir, check.WorkingDir)
 	}
 
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -179,7 +190,7 @@ func (e *Executor) runCheck(ctx context.Context, check workflow.Check) CheckResu
 	// invoking a shell, which avoids shell-injection while handling quoted args.
 	args := splitCommand(check.Command)
 	if len(args) == 0 {
-		return CheckResult{
+		return payloads.CheckResult{
 			Name:     check.Name,
 			Passed:   false,
 			Required: check.Required,
@@ -212,7 +223,7 @@ func (e *Executor) runCheck(ctx context.Context, check workflow.Check) CheckResu
 
 	passed := exitCode == 0
 
-	return CheckResult{
+	return payloads.CheckResult{
 		Name:     check.Name,
 		Passed:   passed,
 		Required: check.Required,
@@ -245,7 +256,7 @@ func matchesAny(patterns []string, files []string) bool {
 
 // allRequiredPassed returns true when every check marked required has passed.
 // Optional failing checks do not affect the aggregate result.
-func allRequiredPassed(results []CheckResult) bool {
+func allRequiredPassed(results []payloads.CheckResult) bool {
 	for _, r := range results {
 		if r.Required && !r.Passed {
 			return false
@@ -285,14 +296,12 @@ func DeriveGoTestPackages(filesModified []string) []string {
 	return pkgs
 }
 
-// runGoTestOnModified runs `go test` on the packages derived from the modified
-// Go files. If there are no Go files in filesModified, it returns a passing
-// result with a note. The check is advisory when the checklist already
-// provides a go-test check.
-func (e *Executor) runGoTestOnModified(ctx context.Context, filesModified []string) CheckResult {
+// runGoTestOnModifiedIn runs `go test` on the packages derived from the modified
+// Go files against the given base directory.
+func (e *Executor) runGoTestOnModifiedIn(ctx context.Context, filesModified []string, baseDir string) payloads.CheckResult {
 	pkgs := DeriveGoTestPackages(filesModified)
 	if len(pkgs) == 0 {
-		return CheckResult{
+		return payloads.CheckResult{
 			Name:     "go-test-modified",
 			Passed:   true,
 			Required: true,
@@ -311,7 +320,7 @@ func (e *Executor) runGoTestOnModified(ctx context.Context, filesModified []stri
 	start := time.Now()
 
 	goCmd := exec.CommandContext(cmdCtx, "go", args...)
-	goCmd.Dir = e.repoPath
+	goCmd.Dir = baseDir
 
 	var stdout, stderr strings.Builder
 	goCmd.Stdout = &stdout
@@ -329,7 +338,7 @@ func (e *Executor) runGoTestOnModified(ctx context.Context, filesModified []stri
 		}
 	}
 
-	return CheckResult{
+	return payloads.CheckResult{
 		Name:     "go-test-modified",
 		Passed:   exitCode == 0,
 		Required: true,

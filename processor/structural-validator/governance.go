@@ -5,12 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/c360studio/semspec/workflow/payloads"
 )
 
 // CheckAntiMock scans modified test files for mock-heavy patterns.
 // It returns a CheckResult that fails if test files define more mock types
 // than they test real implementations. The check is advisory (Required: false).
-func CheckAntiMock(repoPath string, filesModified []string) CheckResult {
+func CheckAntiMock(repoPath string, filesModified []string) payloads.CheckResult {
 	type violation struct {
 		file      string
 		mockCount int
@@ -46,7 +48,7 @@ func CheckAntiMock(repoPath string, filesModified []string) CheckResult {
 	}
 
 	if len(violations) == 0 {
-		return CheckResult{
+		return payloads.CheckResult{
 			Name:     "anti-mock-governance",
 			Passed:   true,
 			Required: false,
@@ -61,7 +63,7 @@ func CheckAntiMock(repoPath string, filesModified []string) CheckResult {
 		sb.WriteString(fmt.Sprintf("  %s: %d mock types, %d test functions\n", v.file, v.mockCount, v.testCount))
 	}
 
-	return CheckResult{
+	return payloads.CheckResult{
 		Name:     "anti-mock-governance",
 		Passed:   false,
 		Required: false,

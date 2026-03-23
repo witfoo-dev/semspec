@@ -1,14 +1,4 @@
 {
-  "content": "Work complete.",
-  "tool_calls": [
-    {
-      "id": "call_submit_fallback",
-      "type": "function",
-      "function": {
-        "name": "submit_work",
-        "arguments": "{\"summary\":\"Task completed successfully\"}"
-      }
-    }
-  ],
-  "finish_reason": "tool_calls"
+  "content": "{\"verdict\":\"approved\",\"feedback\":\"Task completed successfully.\",\"slug\":\"add-a-goodbye-endpoint-that-returns-a-goodbye-mess\"}",
+  "finish_reason": "stop"
 }

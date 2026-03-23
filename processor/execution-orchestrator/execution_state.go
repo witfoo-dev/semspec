@@ -72,7 +72,7 @@ type taskExecution struct {
 	// --- Validator output (populated after validator completes) ---
 
 	ValidationPassed  bool
-	ValidationResults json.RawMessage
+	ValidationResults []payloads.CheckResult
 
 	// --- Reviewer output (populated after reviewer completes) ---
 

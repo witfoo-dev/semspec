@@ -1644,10 +1644,19 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 
 	// Release lock while waiting for the deterministic validator.
 	exec.mu.Unlock()
-	result := c.runStructuralValidation(ctx, exec)
+	result, err := c.runStructuralValidation(ctx, exec)
 	exec.mu.Lock()
 
 	if exec.terminated {
+		return
+	}
+
+	if err != nil {
+		c.logger.Error("Structural validation failed",
+			"slug", exec.Slug,
+			"error", err,
+		)
+		c.markEscalatedLocked(ctx, exec, fmt.Sprintf("structural validation error: %v", err))
 		return
 	}
 
@@ -1662,7 +1671,8 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 		}
 
 		if exec.Iteration+1 < exec.MaxIterations {
-			c.startBuilderRetryLocked(ctx, exec, "Structural validation failed. Fix the following issues:\n"+string(exec.ValidationResults))
+			feedback, _ := json.Marshal(exec.ValidationResults)
+			c.startBuilderRetryLocked(ctx, exec, "Structural validation failed. Fix the following issues:\n"+string(feedback))
 		} else {
 			c.markEscalatedLocked(ctx, exec, "validation failures exceeded iteration budget")
 		}
@@ -1683,36 +1693,32 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 
 // runStructuralValidation publishes a ValidationRequest to the structural-validator
 // component and waits for the result. Same pattern as ask_question — fire and wait.
-func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecution) payloads.ValidationResult {
+func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecution) (payloads.ValidationResult, error) {
 	timeout := 30 * time.Second
 
 	req := &payloads.ValidationRequest{
-		ExecutionID: exec.EntityID,
-		Slug:        exec.Slug,
-		TraceID:     exec.TraceID,
+		ExecutionID:   uuid.New().String(),
+		Slug:          exec.Slug,
+		FilesModified: exec.FilesModified,
+		WorktreePath:  exec.WorktreePath,
+		TraceID:       exec.TraceID,
 	}
 
 	baseMsg := message.NewBaseMessage(req.Schema(), req, componentName)
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		c.logger.Error("Failed to marshal validation request", "error", err)
-		return payloads.ValidationResult{Passed: true} // Default pass on marshal error
+		return payloads.ValidationResult{}, fmt.Errorf("marshal validation request: %w", err)
 	}
 
-	// Use a unique result subject so we don't pick up results from other runs.
-	requestID := uuid.New().String()
-	req.ExecutionID = requestID
 	resultSubject := fmt.Sprintf("workflow.result.structural-validator.%s", exec.Slug)
 	js, err := c.natsClient.JetStream()
 	if err != nil {
-		c.logger.Error("Failed to get JetStream for validation", "error", err)
-		return payloads.ValidationResult{Passed: true}
+		return payloads.ValidationResult{}, fmt.Errorf("get jetstream: %w", err)
 	}
 
 	stream, err := js.Stream(ctx, "WORKFLOW")
 	if err != nil {
-		c.logger.Error("Failed to get WORKFLOW stream for validation", "error", err)
-		return payloads.ValidationResult{Passed: true}
+		return payloads.ValidationResult{}, fmt.Errorf("get WORKFLOW stream: %w", err)
 	}
 
 	consumerName := fmt.Sprintf("val-%d", time.Now().UnixNano())
@@ -1723,8 +1729,7 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 		DeliverPolicy: jetstream.DeliverNewPolicy,
 	})
 	if err != nil {
-		c.logger.Error("Failed to create validation result consumer", "error", err)
-		return payloads.ValidationResult{Passed: true}
+		return payloads.ValidationResult{}, fmt.Errorf("create validation consumer: %w", err)
 	}
 	defer func() {
 		_ = stream.DeleteConsumer(context.Background(), consumerName)
@@ -1737,9 +1742,14 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 
 	// Publish validation request.
 	if err := c.natsClient.PublishToStream(ctx, "workflow.async.structural-validator", data); err != nil {
-		c.logger.Error("Failed to publish validation request", "error", err)
-		return payloads.ValidationResult{Passed: true}
+		return payloads.ValidationResult{}, fmt.Errorf("publish validation request: %w", err)
 	}
+
+	c.logger.Debug("Published validation request, waiting for result",
+		"slug", exec.Slug,
+		"subject", resultSubject,
+		"timeout", timeout,
+	)
 
 	// Wait for result with timeout.
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -1749,8 +1759,7 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 		msgs, fetchErr := consumer.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
 		if fetchErr != nil {
 			if waitCtx.Err() != nil {
-				c.logger.Warn("Validation timed out", "slug", exec.Slug, "timeout", timeout)
-				return payloads.ValidationResult{Passed: true} // Default pass on timeout
+				return payloads.ValidationResult{}, fmt.Errorf("validation timed out after %s", timeout)
 			}
 			continue
 		}
@@ -1763,23 +1772,20 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 				"data_len", len(msg.Data()),
 			)
 
-			var result payloads.ValidationResult
-			// Try BaseMessage envelope first.
+			// Deserialize via registered BaseMessage payload.
 			var base message.BaseMessage
-			if err := json.Unmarshal(msg.Data(), &base); err == nil {
-				if vr, ok := base.Payload().(*payloads.ValidationResult); ok {
-					return *vr
-				}
+			if err := json.Unmarshal(msg.Data(), &base); err != nil {
+				return payloads.ValidationResult{}, fmt.Errorf("unmarshal validation result BaseMessage: %w", err)
 			}
-			// Fallback: direct parse.
-			if err := json.Unmarshal(msg.Data(), &result); err == nil && result.ChecksRun > 0 {
-				return result
+			vr, ok := base.Payload().(*payloads.ValidationResult)
+			if !ok {
+				return payloads.ValidationResult{}, fmt.Errorf("unexpected payload type %T, want *payloads.ValidationResult", base.Payload())
 			}
+			return *vr, nil
 		}
 
 		if waitCtx.Err() != nil {
-			c.logger.Warn("Validation timed out", "slug", exec.Slug)
-			return payloads.ValidationResult{Passed: true}
+			return payloads.ValidationResult{}, fmt.Errorf("validation timed out after %s", timeout)
 		}
 	}
 }

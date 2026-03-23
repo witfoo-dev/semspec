@@ -205,7 +205,8 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.logger.Info("Processing structural validation trigger",
 		"slug", trigger.Slug,
 		"files_modified", len(trigger.FilesModified),
-		"execution_id", trigger.ExecutionID)
+		"execution_id", trigger.ExecutionID,
+		"worktree_path", trigger.WorktreePath)
 
 	// Signal in-progress to prevent redelivery during long validation operations.
 	if err := msg.InProgress(); err != nil {
@@ -289,7 +290,7 @@ func (c *Component) transitionToFailure(_ context.Context, executionID string, c
 
 // updateWorkflowState logs validation completion for observability.
 // TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
-func (c *Component) updateWorkflowState(_ context.Context, trigger *payloads.ValidationRequest, result *ValidationResult) error {
+func (c *Component) updateWorkflowState(_ context.Context, trigger *payloads.ValidationRequest, result *payloads.ValidationResult) error {
 	if trigger.ExecutionID == "" {
 		c.logger.Debug("No ExecutionID - skipping workflow state update",
 			"slug", trigger.Slug)
@@ -306,7 +307,7 @@ func (c *Component) updateWorkflowState(_ context.Context, trigger *payloads.Val
 
 // publishResult publishes a ValidationResult to JetStream.
 // Subject: workflow.result.structural-validator.<slug>
-func (c *Component) publishResult(ctx context.Context, result *ValidationResult) error {
+func (c *Component) publishResult(ctx context.Context, result *payloads.ValidationResult) error {
 	baseMsg := message.NewBaseMessage(result.Schema(), result, "structural-validator")
 
 	data, err := json.Marshal(baseMsg)

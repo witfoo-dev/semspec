@@ -397,6 +397,12 @@ type ValidationRequest struct {
 	Slug          string   `json:"slug"`
 	FilesModified []string `json:"files_modified"`
 
+	// WorktreePath overrides the default repo path for this validation run.
+	// When set, checks execute against this directory instead of the
+	// component's configured repo_path. Used by the execution-orchestrator
+	// to validate sandbox worktrees.
+	WorktreePath string `json:"worktree_path,omitempty"`
+
 	// Trace context
 	TraceID string `json:"trace_id,omitempty"`
 }
