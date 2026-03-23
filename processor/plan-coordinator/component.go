@@ -1155,12 +1155,26 @@ func (c *Component) handleReviewApprovalLocked(ctx context.Context, exec *coordi
 			c.cleanupExecutionLocked(exec)
 		}
 	} else {
-		// Round 2: requirements + scenarios approved — plan is complete.
+		// Round 2: requirements + scenarios approved — plan ready for execution.
 		c.advancePhase(ctx, exec, phaseApproved)
 		c.publishPlanApprovedEvent(ctx, exec, verdict, summary)
 
-		c.logger.Info("Round 2 approved, plan ready for execution",
-			"slug", exec.Slug)
+		// Transition plan status to ready_for_execution so the execute
+		// endpoint and scenario-orchestrator can proceed.
+		repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+		if repoRoot == "" {
+			repoRoot, _ = os.Getwd()
+		}
+		manager := workflow.NewManager(repoRoot)
+		if plan, err := manager.LoadPlan(ctx, exec.Slug); err == nil {
+			if err := manager.SetPlanStatus(ctx, plan, workflow.StatusReadyForExecution); err != nil {
+				c.logger.Warn("Failed to set plan to ready_for_execution",
+					"slug", exec.Slug, "error", err)
+			} else {
+				c.logger.Info("Round 2 approved, plan ready for execution",
+					"slug", exec.Slug)
+			}
+		}
 
 		exec.terminated = true
 		c.coordinationsCompleted.Add(1)
