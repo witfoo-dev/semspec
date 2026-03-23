@@ -893,19 +893,29 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 // determinePlanStage determines the current stage of a plan.
 func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 	switch plan.EffectiveStatus() {
-	case workflow.StatusApproved:
-		return "approved"
-	case workflow.StatusImplementing:
-		return "implementing"
-	case workflow.StatusComplete:
-		return "complete"
+	case workflow.StatusCreated:
+		return "drafting"
+	case workflow.StatusDrafted:
+		return "ready_for_approval"
 	case workflow.StatusReviewed:
 		if plan.ReviewVerdict == "needs_changes" {
 			return "needs_changes"
 		}
 		return "reviewed"
-	case workflow.StatusDrafted:
-		return "ready_for_approval"
+	case workflow.StatusApproved:
+		return "approved"
+	case workflow.StatusRequirementsGenerated:
+		return "requirements_generated"
+	case workflow.StatusScenariosGenerated:
+		return "scenarios_generated"
+	case workflow.StatusReadyForExecution:
+		return "ready_for_execution"
+	case workflow.StatusImplementing:
+		return "implementing"
+	case workflow.StatusReviewingRollup:
+		return "reviewing_rollup"
+	case workflow.StatusComplete:
+		return "complete"
 	case workflow.StatusRejected:
 		return "rejected"
 	case workflow.StatusArchived:
