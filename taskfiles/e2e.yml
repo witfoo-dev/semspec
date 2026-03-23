@@ -123,13 +123,6 @@ tasks:
       - docker compose -p semspec-e2e -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
       - echo "[OK] Cleanup complete"
 
-  cleanup-llm:
-    internal: true
-    desc: Post-test cleanup for LLM E2E tests (called by defer)
-    cmds:
-      - echo "[E2E CLEANUP] Stopping LLM infrastructure..."
-      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml down -v --timeout 15 2>/dev/null || true
-      - echo "[OK] Cleanup complete"
 
   build-mock-image:
     internal: true
@@ -155,14 +148,6 @@ tasks:
       - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml -f docker/compose/e2e-mock-pressure.yml down -v --timeout 15 2>/dev/null || true
       - echo "[OK] Cleanup complete"
 
-  cleanup-all-llm:
-    internal: true
-    desc: Post-test cleanup for any LLM E2E tests (handles both llm and mock overlays)
-    cmds:
-      - echo "[E2E CLEANUP] Stopping infrastructure..."
-      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml down -v --timeout 15 2>/dev/null || true
-      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 15 2>/dev/null || true
-      - echo "[OK] Cleanup complete"
 
   # ============================================================================
   # Infrastructure Tasks
@@ -373,100 +358,6 @@ tasks:
         done
       - echo "[OK] Nuclear cleanup complete (backend + UI)"
 
-  # ============================================================================
-  # LLM E2E Tests (requires LLM provider)
-  # ============================================================================
-
-  llm:
-    desc: "Run LLM scenario - usage: task e2e:llm -- <scenario> [provider]"
-    deps: [clean, clean-workspace, check-ports, build, build-image]
-    vars:
-      SCENARIO:
-        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
-      PROVIDER:
-        sh: echo '{{.CLI_ARGS}}' | awk '{print $2}' | grep . || echo 'local'
-    cmds:
-      - |
-        echo "[E2E:LLM] Scenario: {{.SCENARIO}}, Provider: {{.PROVIDER}}"
-        CONFIG_FILE="e2e-{{.PROVIDER}}.json"
-        if [ ! -f "configs/${CONFIG_FILE}" ]; then
-          echo "[ERROR] Config not found: configs/${CONFIG_FILE}"
-          echo "Available providers: local, claude, openrouter, gemini, mock"
-          echo "Available scenarios: hello-world, todo-app"
-          exit 1
-        fi
-      - |
-        # Mock provider uses its own compose overlay and Docker image
-        if [ "{{.PROVIDER}}" = "mock" ]; then
-          echo "[E2E:LLM] Building mock-llm image..."
-          docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml build mock-llm
-          echo "[E2E:LLM] Starting mock infrastructure..."
-          docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
-        else
-          if [ "{{.PROVIDER}}" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
-            export OPENAI_API_KEY="$GEMINI_API_KEY"
-          fi
-          echo "[E2E:LLM] Starting infrastructure..."
-          E2E_CONFIG=e2e-{{.PROVIDER}}.json docker compose -p semspec-e2e --env-file .env -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
-        fi
-      - |
-        if [ "{{.PROVIDER}}" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
-          export OPENAI_API_KEY="$GEMINI_API_KEY"
-        fi
-        echo "[E2E:LLM] Running {{.SCENARIO}} with {{.PROVIDER}}..."
-        MOCK_LLM_FLAG=""
-        if [ "{{.PROVIDER}}" = "mock" ]; then
-          MOCK_LLM_FLAG="--mock-llm http://localhost:11535 --fast-timeouts"
-        fi
-        E2E_PROVIDER_NAME={{.PROVIDER}} ./bin/e2e --json $MOCK_LLM_FLAG --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
-      - defer: { task: cleanup-all-llm }
-      - echo "[E2E:LLM] Complete"
-
-  epic:
-    desc: "Run epic scenario with federated knowledge graph - usage: task e2e:epic -- <provider>"
-    deps: [clean, clean-workspace, check-ports, build, build-image]
-    vars:
-      PROVIDER:
-        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'claude'
-    cmds:
-      - |
-        echo "[E2E:EPIC] Provider: {{.PROVIDER}}"
-        CONFIG_FILE="e2e-{{.PROVIDER}}.json"
-        if [ ! -f "configs/${CONFIG_FILE}" ]; then
-          echo "[ERROR] Config not found: configs/${CONFIG_FILE}"
-          echo "Available providers: claude, openrouter"
-          exit 1
-        fi
-      - |
-        echo "[E2E:EPIC] Starting infrastructure with federated semsource..."
-        E2E_CONFIG=e2e-{{.PROVIDER}}.json docker compose -p semspec-e2e --env-file .env \
-          -f docker/compose/e2e.yml \
-          -f docker/compose/e2e-llm.yml \
-          -f docker/compose/e2e-epic.yml \
-          up -d --wait
-      - |
-        echo "[E2E:EPIC] Waiting for semsource indexing (this may take a few minutes)..."
-        for i in $(seq 1 60); do
-          OSH=$(curl -sf http://localhost:8180/graph-registry/sources 2>/dev/null | jq -r '.[] | select(.name=="osh") | .phase' 2>/dev/null)
-          MESH=$(curl -sf http://localhost:8180/graph-registry/sources 2>/dev/null | jq -r '.[] | select(.name=="meshtastic") | .phase' 2>/dev/null)
-          OGC=$(curl -sf http://localhost:8180/graph-registry/sources 2>/dev/null | jq -r '.[] | select(.name=="ogc") | .phase' 2>/dev/null)
-          echo "  [${i}/60] osh=${OSH:-pending} meshtastic=${MESH:-pending} ogc=${OGC:-pending}"
-          if [ "$OSH" = "ready" ] && [ "$MESH" = "ready" ] && [ "$OGC" = "ready" ]; then
-            echo "[E2E:EPIC] All knowledge sources ready!"
-            break
-          fi
-          sleep 10
-        done
-        if [ "$OSH" != "ready" ] || [ "$MESH" != "ready" ] || [ "$OGC" != "ready" ]; then
-          echo "[E2E:EPIC] FATAL: Not all sources ready after 10 minutes"
-          exit 1
-        fi
-      - |
-        echo "[E2E:EPIC] Running epic-meshtastic scenario..."
-        E2E_PROVIDER_NAME={{.PROVIDER}} ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace epic-meshtastic
-      - defer: { task: cleanup-all-llm }
-      - echo "[E2E:EPIC] Complete"
-
   mock:
     desc: "Run mock LLM scenario - usage: task e2e:mock -- <scenario>"
     deps: [clean, clean-workspace, check-ports, build, build-image, build-mock-image]
@@ -515,41 +406,6 @@ tasks:
         E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11535 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
       - defer: { task: cleanup-mock-pressure }
       - echo "[E2E:MOCK-PRESSURE] Complete"
-
-  llm-watch:
-    desc: "Run LLM scenario with error streaming - usage: task e2e:llm-watch -- <scenario> [provider]"
-    deps: [clean, clean-workspace, check-ports, build, build-image]
-    vars:
-      SCENARIO:
-        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
-      PROVIDER:
-        sh: echo '{{.CLI_ARGS}}' | awk '{print $2}' | grep . || echo 'local'
-    cmds:
-      - |
-        echo "[E2E:LLM-WATCH] Scenario: {{.SCENARIO}}, Provider: {{.PROVIDER}}"
-        CONFIG_FILE="e2e-{{.PROVIDER}}.json"
-        if [ ! -f "configs/${CONFIG_FILE}" ]; then
-          echo "[ERROR] Config not found: configs/${CONFIG_FILE}"
-          exit 1
-        fi
-      - |
-        if [ "{{.PROVIDER}}" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
-          export OPENAI_API_KEY="$GEMINI_API_KEY"
-        fi
-        echo "[E2E:LLM-WATCH] Starting infrastructure..."
-        E2E_CONFIG=e2e-{{.PROVIDER}}.json docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
-      - |
-        echo "[E2E:LLM-WATCH] Starting log stream + test..."
-        docker logs -f semspec-e2e-semspec-1 2>&1 | grep -E "(ERROR|WARN|error|warn|panic|fatal)" --line-buffered &
-        LOG_PID=$!
-        trap "kill $LOG_PID 2>/dev/null" EXIT
-
-        if [ "{{.PROVIDER}}" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
-          export OPENAI_API_KEY="$GEMINI_API_KEY"
-        fi
-        E2E_PROVIDER_NAME={{.PROVIDER}} ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
-      - defer: { task: cleanup-llm }
-      - echo "[E2E:LLM-WATCH] Complete"
 
   # ============================================================================
   # UI E2E Testing Tasks

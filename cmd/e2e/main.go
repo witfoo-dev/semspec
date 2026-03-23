@@ -43,39 +43,42 @@ func rootCmd() *cobra.Command {
 		Short: "Run semspec e2e tests",
 		Long: `Run end-to-end tests for semspec workflow system.
 
-Available scenarios:
+Tier 1 — Component Tests (no LLM):
   plan-workflow       - Tests CreatePlan, PromotePlan, ExecutePlan via REST API (ADR-003)
   task-dispatcher     - Tests parallel context building and dependency-aware task dispatch
   rdf-export          - Tests /export command with RDF formats and profiles
   debug-command       - Tests trajectory-api endpoints for trace correlation
   trajectory          - Tests trajectory tracking via trajectory-api endpoints
   questions-api       - Tests Q&A HTTP API endpoints (list, get, answer)
-  doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
-  openspec-ingest     - Tests OpenSpec specification ingestion with requirements and scenarios
   scenario-execution  - Tests Requirement/Scenario CRUD and scenario-execution+DAG reactive workflow trigger
   reactive-execution  - Tests full reactive execution lifecycle: decomposition → node dispatch → completion
   change-proposal     - Tests ChangeProposal CRUD, status transitions, cascade response, and error handling
   sandbox-lifecycle   - Tests sandbox server lifecycle: worktree CRUD, file ops, git, exec, merge, cleanup
   agent-roster        - Tests persistent agent roster: agent selection, error tracking, dispatch verification
   team-roster         - Tests team-based agent infrastructure: team entities, member linkage, bidirectional refs
-  team-execution      - Tests team pipeline end-to-end: plan → requirements → scenarios → execute → verify dispatch
+  doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
+  openspec-ingest     - Tests OpenSpec specification ingestion with requirements and scenarios
+
+Tier 2 — Pipeline Tests (mock LLM):
   hello-world                  - Greenfield Python+JS: add /goodbye endpoint with semantic validation
   hello-world-plan-rejection   - Hello-world with plan rejection → revision → approval
   hello-world-task-rejection   - Hello-world with task rejection → revision → approval
   hello-world-double-rejection - Hello-world with both plan and task rejections
   hello-world-plan-exhaustion          - Hello-world with plan review exhaustion → escalation
   hello-world-task-review-exhaustion   - Hello-world with task review exhaustion → escalation
-  todo-app                             - Brownfield Go+Svelte: add due dates with semantic validation
-  todo-app-crud                        - Brownfield Go+Svelte with phase/task CRUD mutations
-  context-pressure                     - Claims verification: context truncation, model routing, revision quality
-  health-check                         - Tier 2: Go HTTP service — add /health endpoint through full plan+execute pipeline
-  rest-api                             - Tier 3: Go HTTP service — add /users CRUD + logging middleware through full plan+execute pipeline
-  epic-meshtastic                      - Full alpha pipeline: federated graph → Meshtastic OSH driver → execution
+  plan-phase                   - Full plan pipeline: plan → requirements → scenarios → review → approved
+  execution-phase              - Full execution pipeline: plan → approve → decompose → TDD → complete
+  team-execution               - Team pipeline: plan → requirements → scenarios → execute → dispatch
+  context-pressure             - Claims verification: context truncation, model routing, revision quality
+
+Real-LLM scenarios (health-check, rest-api, todo-app, epic-meshtastic) have moved
+to Playwright E2E — see docs/e2e-scenario-archive.md for details.
+
   all                 - Run all scenarios (default)
 
 Examples:
   e2e                          # Run all scenarios
-  e2e workflow-basic           # Run specific scenario
+  e2e plan-workflow            # Run specific scenario
   e2e --json                   # Output results as JSON
   e2e --nats nats://host:4222  # Custom NATS URL
 `,
@@ -133,7 +136,7 @@ func listCmd() *cobra.Command {
 		Run: func(_ *cobra.Command, _ []string) {
 			fmt.Println("Available scenarios:")
 			fmt.Println()
-			fmt.Println("  REST API Tests:")
+			fmt.Println("  Tier 1 — Component Tests (no LLM):")
 			fmt.Println("  plan-workflow       Tests CreatePlan, PromotePlan, ExecutePlan (ADR-003)")
 			fmt.Println("  task-dispatcher     Tests parallel context building and dependency-aware dispatch")
 			fmt.Println("  rdf-export          Tests /export command with RDF formats and profiles")
@@ -146,35 +149,23 @@ func listCmd() *cobra.Command {
 			fmt.Println("  sandbox-lifecycle   Tests sandbox worktree CRUD, file ops, git, exec, merge, cleanup")
 			fmt.Println("  agent-roster        Tests persistent agent roster: selection, error tracking, dispatch")
 			fmt.Println("  team-roster         Tests team-based agent infrastructure: team entities, member linkage, bidirectional refs")
-			fmt.Println("  team-execution      Tests team pipeline: plan → requirements → scenarios → execute → dispatch verification")
-			fmt.Println()
-			fmt.Println("  Document Processing Tests (require source-ingester enabled):")
 			fmt.Println("  doc-ingest          Tests document ingestion: markdown, RST parsing and chunking")
 			fmt.Println("  openspec-ingest     Tests OpenSpec specification ingestion")
 			fmt.Println()
-			fmt.Println("  Plan + Execution Phase Pipelines:")
-			fmt.Println("  plan-phase                   Full plan pipeline: plan → requirements → scenarios → review")
-			fmt.Println("  execution-phase              Full execution pipeline: plan → approve → decompose → TDD → complete")
-			fmt.Println()
-			fmt.Println("  Tier 2-3 Real-LLM Scenarios (low-to-medium token cost):")
-			fmt.Println("  health-check                 Go HTTP service: add /health endpoint (task e2e:llm -- health-check claude)")
-			fmt.Println("  rest-api                     Go HTTP service: add /users CRUD + logging middleware (task e2e:llm -- rest-api claude)")
-			fmt.Println()
-			fmt.Println("  Legacy Scenarios (OLD FLOW — may be stale):")
+			fmt.Println("  Tier 2 — Pipeline Tests (mock LLM):")
 			fmt.Println("  hello-world                  Greenfield Python+JS: /goodbye endpoint")
 			fmt.Println("  hello-world-plan-rejection   Plan rejection → revision → approval variant")
 			fmt.Println("  hello-world-task-rejection   Task rejection → revision → approval variant")
 			fmt.Println("  hello-world-double-rejection Both plan and task rejection variant")
 			fmt.Println("  hello-world-plan-exhaustion          Plan review exhaustion → escalation variant")
 			fmt.Println("  hello-world-task-review-exhaustion   Task review exhaustion → escalation variant")
-			fmt.Println("  todo-app                     Brownfield Go+Svelte: due dates")
-			fmt.Println("  todo-app-crud                Brownfield Go+Svelte: due dates + CRUD mutations")
-			fmt.Println()
-			fmt.Println("  Claims Verification Scenarios (require mock LLM + pressure config):")
+			fmt.Println("  plan-phase                   Full plan pipeline: plan → requirements → scenarios → review")
+			fmt.Println("  execution-phase              Full execution pipeline: plan → approve → decompose → TDD → complete")
+			fmt.Println("  team-execution               Team pipeline: plan → requirements → scenarios → execute → dispatch")
 			fmt.Println("  context-pressure             Context truncation, model routing, revision quality")
 			fmt.Println()
-			fmt.Println("  Epic Scenarios (require federated semsource infrastructure):")
-			fmt.Println("  epic-meshtastic              Full alpha pipeline: federated graph → Meshtastic OSH driver → execution")
+			fmt.Println("  Real-LLM scenarios (health-check, rest-api, todo-app, epic-meshtastic)")
+			fmt.Println("  have moved to Playwright E2E — see docs/e2e-scenario-archive.md")
 			fmt.Println()
 			fmt.Println("Use 'e2e all' to run all scenarios.")
 		},
@@ -209,23 +200,13 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		// Document processing scenarios (require source-ingester enabled)
 		scenarios.NewDocIngestScenario(cfg),
 		scenarios.NewOpenSpecIngestScenario(cfg),
-		// Plan phase pipeline (new architecture)
+		// Tier 2: Pipeline tests (mock LLM)
 		scenarios.NewPlanPhaseScenario(cfg),
-		// Execution phase pipeline (plan → approve → decompose → TDD → complete)
 		scenarios.NewExecutionPhaseScenario(cfg),
-		// Tier 2: small real-LLM scenario (Go HTTP service → /health endpoint)
-		scenarios.NewHealthCheckScenario(cfg),
-		// Tier 3: medium real-LLM scenario (Go HTTP service → /users CRUD + middleware)
-		scenarios.NewRestAPIScenario(cfg),
-		// Epic scenario excluded from "all" — requires federated semsource
-		// infrastructure (task e2e:epic). Registered below for name lookup.
-		// Legacy semantic validation scenarios (require LLM, OLD FLOW)
 		scenarios.NewHelloWorldScenario(cfg),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithCodeExecution()),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanExhaustion()),
-		scenarios.NewTodoAppScenario(cfg),
-		// Context pressure scenario (reduced token budget + larger project)
 		scenarios.NewContextPressureScenario(cfg),
 	}
 
@@ -233,9 +214,6 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 	for _, s := range scenarioList {
 		scenarioMap[s.Name()] = s
 	}
-	// Epic scenario: excluded from "all" run — requires federated semsource.
-	// Registered here for explicit name lookup only (task e2e:epic -- claude).
-	scenarioMap["epic-meshtastic"] = scenarios.NewEpicMeshtasticScenario(cfg)
 
 	// Determine which scenarios to run
 	var toRun []scenarios.Scenario

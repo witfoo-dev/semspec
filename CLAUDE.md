@@ -25,6 +25,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) | Execution pipeline: NATS subjects, consumers, payload types |
 | [docs/12-plan-api.md](docs/12-plan-api.md) | Plan API: requirements, scenarios, change proposals |
 | [docs/13-sandbox-security.md](docs/13-sandbox-security.md) | Sandbox security model: boundaries, isolation, threat model |
+| [docs/e2e-scenario-archive.md](docs/e2e-scenario-archive.md) | Playwright migration reference for real-LLM E2E scenarios |
 
 ## What Semspec IS
 
@@ -422,26 +423,26 @@ E2E tests verify the complete semspec workflow with real NATS infrastructure.
 **IMPORTANT**: Use the task commands - they handle infrastructure lifecycle automatically (clean, build, start, run, cleanup). Do NOT manually run `task e2e:up` before scenario tasks.
 
 ```bash
-# Mock LLM scenarios (deterministic, offline)
+# Tier 1: Component tests (no LLM — seconds)
+task e2e:run -- plan-workflow         # REST API CRUD
+task e2e:run -- scenario-execution    # Requirement/Scenario CRUD + workflow trigger
+
+# Tier 2: Pipeline tests (mock LLM — ~1 min)
 task e2e:mock -- hello-world          # Run hello-world with mock LLM
 task e2e:mock -- hello-world-plan-rejection  # Plan rejection scenario
-
-# Real LLM scenarios (handles full lifecycle automatically)
-task e2e:llm -- hello-world           # Run hello-world with local Ollama
-task e2e:llm -- hello-world claude    # Run with Claude provider
-task e2e:llm -- todo-app openrouter   # Run todo-app with OpenRouter
+task e2e:mock -- plan-phase           # Full plan pipeline
+task e2e:mock -- execution-phase      # Full execution pipeline
 
 # Run all scenarios
 task e2e:default
 
-# Epic scenario — 3 external semsource instances (OSH, Meshtastic, OGC)
-task e2e:epic -- claude             # Run with Claude provider
-task e2e:epic -- openrouter         # Run with OpenRouter
-
-# UI E2E tests (Playwright)
+# UI E2E tests (Playwright) — real-LLM scenarios run here
 task e2e:ui                        # Run all UI tests
 task e2e:ui -- --ui                # Interactive UI mode
 ```
+
+Real-LLM scenarios (health-check, rest-api, todo-app, epic-meshtastic) run via
+Playwright E2E. See `docs/e2e-scenario-archive.md` for details.
 
 **Output**: Task commands include `--json` flag for structured output with metrics.
 
@@ -464,7 +465,7 @@ task e2e:nuke            # Nuclear cleanup of all Docker resources
 **E2E tests are long-running. You MUST monitor them actively — never block in foreground waiting for completion.**
 
 #### Launch Pattern
-1. Run `task e2e:mock -- <scenario>` (or `task e2e:llm -- <scenario> <provider>`) via `run_in_background: true`
+1. Run `task e2e:mock -- <scenario>` via `run_in_background: true`
 2. For debugging, use `task e2e:debug` to keep infra alive after tests finish
 
 #### Monitor Three Data Sources In Parallel While Tests Run
@@ -493,7 +494,7 @@ curl -s http://localhost:8180/message-logger/kv/AGENT_LOOPS > /tmp/e2e-loops.jso
 ```
 
 #### Rules
-- **Always use task commands** (`task e2e:mock`, `task e2e:llm`, etc.) — never raw docker compose
+- **Always use task commands** (`task e2e:mock`, `task e2e:run`, etc.) — never raw docker compose
 - **Abort early** if logs show a workflow is stuck in a loop, hitting errors, or burning tokens on repeated retries
 - **Report findings with evidence** — quote specific log lines, message-logger data, model responses. Never guess at root cause when data is available.
 - **Workflow lifecycle trace**: trigger → planning → review → (task generation) → dispatch → execution → complete/failed. Cross-reference timestamps across all three data sources.
