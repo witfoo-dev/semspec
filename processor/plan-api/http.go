@@ -844,6 +844,15 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 		return
 	}
 
+	// Transition plan status to implementing before triggering execution.
+	// This must happen before the publish so that subsequent GET requests
+	// see the correct stage (determinePlanStage derives from Status).
+	if err := manager.SetPlanStatus(ctx, plan, workflow.StatusImplementing); err != nil {
+		c.logger.Error("Failed to set plan status to implementing", "slug", slug, "error", err)
+		http.Error(w, "Failed to update plan status", http.StatusInternalServerError)
+		return
+	}
+
 	// Trigger scenario orchestration for execution.
 	requestID := uuid.New().String()
 	subject := fmt.Sprintf("scenario.orchestrate.%s", plan.Slug)
@@ -875,7 +884,7 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 
 	resp := &PlanWithStatus{
 		Plan:  plan,
-		Stage: "executing",
+		Stage: c.determinePlanStage(plan),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
