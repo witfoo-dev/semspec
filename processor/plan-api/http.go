@@ -746,7 +746,7 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 		return
 	}
 
-	// Approve the plan if not already approved
+	// Approve the plan if not already approved.
 	if !plan.Approved {
 		if err := manager.ApprovePlan(r.Context(), plan); err != nil {
 			c.logger.Error("Failed to approve plan", "slug", slug, "error", err)
@@ -763,23 +763,36 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 		if pubErr := c.publishApprovalEntity(r.Context(), "plan", planEntityID, "approved", "user", ""); pubErr != nil {
 			c.logger.Warn("Failed to publish plan approval entity", "slug", slug, "error", pubErr)
 		}
+	}
 
-		// Determine which round this approval is for based on plan state.
-		// Round 1: plan has no requirements yet → trigger requirement generation.
-		// Round 2: requirements/scenarios exist → plan is ready for execution.
-		requirements, _ := manager.LoadRequirements(r.Context(), slug)
-		if len(requirements) == 0 {
-			// Round 1 — human approved the plan, start requirement/scenario generation.
-			c.logger.Info("Round 1 human approval: triggering requirement generation", "slug", slug)
-			c.triggerRequirementGeneration(r.Context(), plan)
-		} else {
-			// Round 2 — human approved requirements/scenarios, mark ready for execution.
-			c.logger.Info("Round 2 human approval: plan ready for execution", "slug", slug)
-			if err := manager.SetPlanStatus(r.Context(), plan, workflow.StatusReadyForExecution); err != nil {
-				c.logger.Error("Failed to set plan ready for execution", "slug", slug, "error", err)
-				http.Error(w, "Failed to update plan status", http.StatusInternalServerError)
-				return
-			}
+	// Determine which round this promote advances.
+	// Round 1: no requirements yet → trigger requirement/scenario generation.
+	// Round 2: requirements+scenarios exist → plan is ready for execution.
+	// This runs regardless of Approved flag since promote serves both rounds.
+	requirements, _ := manager.LoadRequirements(r.Context(), slug)
+	scenarios, _ := manager.LoadScenarios(r.Context(), slug)
+
+	switch {
+	case len(requirements) == 0:
+		// Round 1 — plan approved, start requirement/scenario generation.
+		c.logger.Info("Round 1 human approval: triggering requirement generation", "slug", slug)
+		c.triggerRequirementGeneration(r.Context(), plan)
+
+	case len(scenarios) == 0:
+		// Requirements exist but no scenarios — cascade in progress, nothing to do.
+		c.logger.Info("Requirements exist but scenarios pending — cascade in progress", "slug", slug)
+
+	case plan.Status == workflow.StatusReadyForExecution || plan.Status == workflow.StatusImplementing:
+		// Already advanced — idempotent.
+		c.logger.Debug("Plan already at or past ready_for_execution", "slug", slug)
+
+	default:
+		// Round 2 — requirements+scenarios exist, mark ready for execution.
+		c.logger.Info("Round 2 human approval: plan ready for execution", "slug", slug)
+		if err := manager.SetPlanStatus(r.Context(), plan, workflow.StatusReadyForExecution); err != nil {
+			c.logger.Error("Failed to set plan ready for execution", "slug", slug, "error", err)
+			http.Error(w, "Failed to update plan status", http.StatusInternalServerError)
+			return
 		}
 	}
 

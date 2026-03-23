@@ -29,6 +29,11 @@ func (c *Component) triggerRequirementGeneration(ctx context.Context, plan *work
 		return
 	}
 
+	if c.natsClient == nil {
+		c.logger.Warn("Cannot trigger requirement generation: NATS client not configured",
+			"slug", plan.Slug)
+		return
+	}
 	if err := c.natsClient.PublishToStream(ctx, "workflow.async.requirement-generator", data); err != nil {
 		c.logger.Error("Failed to trigger requirement generation",
 			"slug", plan.Slug, "error", err)
@@ -124,6 +129,9 @@ func (c *Component) triggerScenarioGeneration(ctx context.Context, slug, require
 		return
 	}
 
+	if c.natsClient == nil {
+		return
+	}
 	if err := c.natsClient.PublishToStream(ctx, "workflow.async.scenario-generator", data); err != nil {
 		c.logger.Error("Failed to trigger scenario generation",
 			"slug", slug, "requirement_id", requirementID, "error", err)

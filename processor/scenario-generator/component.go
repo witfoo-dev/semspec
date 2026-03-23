@@ -815,6 +815,9 @@ func (c *Component) publishScenariosGeneratedEvent(ctx context.Context, slug str
 	}
 
 	subject := workflow.ScenariosGenerated.Pattern
+	if c.natsClient == nil {
+		return fmt.Errorf("publish to stream %s: nats client not configured", subject)
+	}
 	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
 		return fmt.Errorf("publish to stream %s: %w", subject, err)
 	}
