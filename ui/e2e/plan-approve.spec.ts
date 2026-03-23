@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
 import { createPlan, deletePlan, getPlan } from './helpers/api';
+import { MockLLMClient } from './helpers/mock-llm';
 import { startExecutionButton } from './helpers/selectors';
 
 /**
@@ -16,6 +17,8 @@ test.describe('@mock @happy-path plan-approve', () => {
 	test.describe.configure({ mode: 'serial' });
 
 	test.beforeAll(async () => {
+		const mockLLM = new MockLLMClient();
+		await mockLLM.resetScenario('hello-world');
 		const plan = await createPlan(`Approve flow test ${Date.now()}`);
 		slug = plan.slug;
 	});

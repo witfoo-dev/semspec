@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
 import { createPlan, deletePlan, getPlan } from './helpers/api';
+import { MockLLMClient } from './helpers/mock-llm';
 import { startExecutionButton, planListItem } from './helpers/selectors';
 
 /**
@@ -16,6 +17,9 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 	test.describe.configure({ mode: 'serial' });
 
 	test.beforeAll(async () => {
+		// Reset mock LLM to hello-world with fresh fixture counters
+		const mockLLM = new MockLLMClient();
+		await mockLLM.resetScenario('hello-world');
 		const plan = await createPlan(`Lifecycle test ${Date.now()}`);
 		slug = plan.slug;
 	});
