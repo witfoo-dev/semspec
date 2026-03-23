@@ -39,8 +39,10 @@ func (c *Component) triggerRequirementGeneration(ctx context.Context, plan *work
 		"slug", plan.Slug, "trace_id", req.TraceID)
 }
 
-// handleRequirementsGeneratedEvent updates plan status when requirements are generated.
-// Orchestration (dispatching scenario generators) is handled by plan-coordinator.
+// handleRequirementsGeneratedEvent updates plan status and dispatches scenario
+// generation for each requirement. This handles both the auto-approve path
+// (where plan-coordinator also dispatches — idempotent) and the manual approval
+// path (where plan-coordinator has terminated and plan-api must dispatch).
 func (c *Component) handleRequirementsGeneratedEvent(ctx context.Context, event *workflow.RequirementsGeneratedEvent) {
 	if event.Slug == "" {
 		c.logger.Warn("Requirements generated event missing slug")
@@ -59,6 +61,28 @@ func (c *Component) handleRequirementsGeneratedEvent(ctx context.Context, event 
 				"slug", event.Slug, "error", err)
 		}
 	}
+
+	// Load requirements and dispatch scenario generation for each.
+	requirements, err := manager.LoadRequirements(ctx, event.Slug)
+	if err != nil {
+		c.logger.Error("Failed to load requirements for scenario generation",
+			"slug", event.Slug, "error", err)
+		return
+	}
+
+	if len(requirements) == 0 {
+		c.logger.Warn("No requirements found after generation event",
+			"slug", event.Slug)
+		return
+	}
+
+	for _, req := range requirements {
+		c.triggerScenarioGeneration(ctx, event.Slug, req.ID, event.TraceID)
+	}
+
+	c.logger.Info("Dispatched scenario generation for all requirements",
+		"slug", event.Slug,
+		"requirement_count", len(requirements))
 }
 
 // handleScenariosGeneratedEvent updates plan status when scenarios are generated.
@@ -81,6 +105,33 @@ func (c *Component) handleScenariosGeneratedEvent(ctx context.Context, event *wo
 				"slug", event.Slug, "error", err)
 		}
 	}
+}
+
+// triggerScenarioGeneration publishes a ScenarioGeneratorRequest for a single requirement.
+func (c *Component) triggerScenarioGeneration(ctx context.Context, slug, requirementID, traceID string) {
+	req := &payloads.ScenarioGeneratorRequest{
+		ExecutionID:   uuid.New().String(),
+		Slug:          slug,
+		RequirementID: requirementID,
+		TraceID:       traceID,
+	}
+
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.logger.Error("Failed to marshal scenario generator request",
+			"slug", slug, "requirement_id", requirementID, "error", err)
+		return
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, "workflow.async.scenario-generator", data); err != nil {
+		c.logger.Error("Failed to trigger scenario generation",
+			"slug", slug, "requirement_id", requirementID, "error", err)
+		return
+	}
+
+	c.logger.Debug("Triggered scenario generation",
+		"slug", slug, "requirement_id", requirementID)
 }
 
 // latestTraceID extracts the most recent trace ID from a plan's execution history.
