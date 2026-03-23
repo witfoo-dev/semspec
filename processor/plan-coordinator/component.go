@@ -679,14 +679,16 @@ func (c *Component) finishSynthesisLocked(ctx context.Context, exec *coordinatio
 
 	c.advancePhase(ctx, exec, phasePlanned)
 
-	c.logger.Info("Plan synthesized, advancing to requirement generation",
+	c.logger.Info("Plan synthesized, dispatching reviewer",
 		"entity_id", entityID,
 		"slug", exec.Slug,
 		"planner_count", exec.ExpectedPlanners,
 	)
 
 	c.publishEntity(context.Background(), NewCoordinationEntity(exec).WithPhase(phasePlanned))
-	c.dispatchRequirementGeneratorLocked(ctx, exec)
+	// Requirement generation is triggered AFTER approval (auto or human),
+	// not immediately after synthesis. See handleReviewResult for auto_approve
+	// and handlePromotePlan in plan-api for human approval.
 }
 
 // ---------------------------------------------------------------------------
@@ -1055,21 +1057,21 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 	switch verdict {
 	case "approved":
 		if c.config.AutoApprove {
-			// Auto-approve: go directly to approved phase + trigger execution.
+			// Auto-approve: approve + trigger requirement/scenario generation.
 			c.advancePhase(ctx, exec, phaseApproved)
 			c.publishPlanApprovedEvent(ctx, exec, verdict, summary)
-			c.triggerExecution(ctx, exec)
-			exec.terminated = true
-			c.coordinationsCompleted.Add(1)
-			c.cleanupExecutionLocked(exec)
+			c.dispatchRequirementGeneratorLocked(ctx, exec)
 		} else {
 			// Human gate: pause at awaiting_human. A human must call
 			// POST /plans/{slug}/approve to advance to phaseApproved.
+			// Requirement generation is triggered from handlePromotePlan
+			// in plan-api after human approval.
 			c.advancePhase(ctx, exec, phaseAwaitingHuman)
 			c.logger.Info("Plan awaiting human approval",
 				"slug", exec.Slug, "iteration", exec.Iteration)
-			// NOTE: execution stays active — cleanup happens when human
-			// approves (via an external event or future HTTP handler).
+			exec.terminated = true
+			c.coordinationsCompleted.Add(1)
+			c.cleanupExecutionLocked(exec)
 		}
 
 	case "needs_changes":
