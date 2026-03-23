@@ -527,6 +527,16 @@
         "default_capability": "planning"
       }
     },
+    "question-router": {
+      "name": "question-router",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name": "question-router",
+        "subject": "question.ask.>"
+      }
+    },
     "structural-validator": {
       "name": "structural-validator",
       "type": "processor",

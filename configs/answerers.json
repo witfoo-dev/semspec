@@ -1,0 +1,70 @@
+{
+  "version": "1",
+  "routes": [
+    {
+      "pattern": "architecture.**",
+      "answerer": "agent/architect",
+      "capability": "planning",
+      "sla": "1h",
+      "escalate_to": "human/requester"
+    },
+    {
+      "pattern": "api.**",
+      "answerer": "agent/api-expert",
+      "capability": "coding",
+      "sla": "30m",
+      "escalate_to": "human/requester"
+    },
+    {
+      "pattern": "review.**",
+      "answerer": "agent/reviewer",
+      "capability": "reviewing",
+      "sla": "1h",
+      "escalate_to": "human/requester"
+    },
+    {
+      "pattern": "requirements.**",
+      "answerer": "human/requester",
+      "sla": "24h"
+    },
+    {
+      "pattern": "security.**",
+      "answerer": "agent/security-reviewer",
+      "capability": "reviewing",
+      "sla": "30m",
+      "escalate_to": "human/requester"
+    },
+    {
+      "pattern": "knowledge.**",
+      "answerer": "agent/knowledge",
+      "capability": "fast",
+      "sla": "5m"
+    },
+    {
+      "pattern": "environment.**",
+      "answerer": "human/requester",
+      "sla": "1h"
+    },
+    {
+      "pattern": "sandbox.**",
+      "answerer": "human/requester",
+      "sla": "1h"
+    },
+    {
+      "pattern": "approval.**",
+      "answerer": "human/requester",
+      "sla": "4h"
+    },
+    {
+      "pattern": "**",
+      "answerer": "agent/general",
+      "capability": "planning",
+      "sla": "5m",
+      "escalate_to": "human/requester"
+    }
+  ],
+  "default": {
+    "answerer": "human/requester",
+    "sla": "24h"
+  }
+}

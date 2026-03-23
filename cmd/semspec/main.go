@@ -37,6 +37,7 @@ import (
 	"github.com/c360studio/semspec/processor/planner"
 	projectapi "github.com/c360studio/semspec/processor/project-api"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
+	questionrouter "github.com/c360studio/semspec/processor/question-router"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	requirementgenerator "github.com/c360studio/semspec/processor/requirement-generator"
@@ -231,6 +232,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return workflowvalidator.Register(componentRegistry) },
 		func() error { return workflowdocuments.Register(componentRegistry) },
 		func() error { return questionanswerer.Register(componentRegistry) },
+		func() error { return questionrouter.Register(componentRegistry) },
 		func() error { return questiontimeout.Register(componentRegistry) },
 		func() error { return requirementgenerator.Register(componentRegistry) },
 		func() error { return scenariogenerator.Register(componentRegistry) },

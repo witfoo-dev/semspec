@@ -5,6 +5,7 @@
 package answerer
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -82,6 +83,25 @@ func (d Duration) MarshalYAML() (interface{}, error) {
 	return time.Duration(d).String(), nil
 }
 
+// UnmarshalJSON implements json.Unmarshaler for Duration.
+func (d *Duration) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	parsed, err := time.ParseDuration(s)
+	if err != nil {
+		return fmt.Errorf("invalid duration %q: %w", s, err)
+	}
+	*d = Duration(parsed)
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler for Duration.
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Duration(d).String())
+}
+
 // Duration returns the underlying time.Duration.
 func (d Duration) Duration() time.Duration {
 	return time.Duration(d)
@@ -121,8 +141,14 @@ func LoadRegistry(path string) (*Registry, error) {
 	}
 
 	var config RegistryConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("parse registry file: %w", err)
+	if strings.HasSuffix(path, ".json") {
+		if err := json.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("parse JSON registry file: %w", err)
+		}
+	} else {
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("parse YAML registry file: %w", err)
+		}
 	}
 
 	r := NewRegistry()
@@ -142,12 +168,17 @@ func LoadRegistry(path string) (*Registry, error) {
 	return r, nil
 }
 
-// LoadRegistryFromDir searches for answerers.yaml in common locations.
+// LoadRegistryFromDir searches for answerers config in common locations.
+// Prefers JSON over YAML.
 func LoadRegistryFromDir(baseDir string) (*Registry, error) {
 	paths := []string{
+		filepath.Join(baseDir, "configs", "answerers.json"),
 		filepath.Join(baseDir, "configs", "answerers.yaml"),
+		filepath.Join(baseDir, "answerers.json"),
 		filepath.Join(baseDir, "answerers.yaml"),
+		"configs/answerers.json",
 		"configs/answerers.yaml",
+		"answerers.json",
 		"answerers.yaml",
 	}
 
