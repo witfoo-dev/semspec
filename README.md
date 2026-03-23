@@ -45,6 +45,80 @@ go build -o semspec ./cmd/semspec
 
 Requires Go 1.25+. See [docs/02-getting-started.md](docs/02-getting-started.md) for full setup guide.
 
+## Project Initialization
+
+Semspec stores project configuration in a `.semspec/` directory at your repository root. Three files define how agents behave for your project:
+
+| File | Purpose |
+|------|---------|
+| `project.json` | Detected stack: languages, frameworks, tooling, repository metadata |
+| `standards.json` | Rules injected into every agent context — coding standards, conventions, review criteria |
+| `checklist.json` | Deterministic quality gates (shell commands) run after each agent task — build, lint, test |
+
+**With the UI**: The project-api provides `GET /api/project/status` and `POST /api/project/detect` endpoints. A setup wizard is planned; until then, use the API or seed the files manually.
+
+**Manual setup** (current recommended path):
+
+```bash
+mkdir -p .semspec/sources/docs
+
+# Minimal project.json
+cat > .semspec/project.json << 'EOF'
+{"name":"my-project","description":"Brief description","version":"1"}
+EOF
+
+# Empty standards (add rules as you go)
+echo '{"rules":[]}' > .semspec/standards.json
+
+# Empty checklist (add quality gates as you go)
+echo '{"checks":[]}' > .semspec/checklist.json
+```
+
+**Adding quality gates** to `checklist.json`:
+
+```json
+{
+  "checks": [
+    {
+      "name": "go-build",
+      "command": "go build ./...",
+      "trigger": ["*.go"],
+      "category": "compile",
+      "required": true,
+      "timeout": "120s",
+      "description": "Verify Go code compiles"
+    },
+    {
+      "name": "go-test",
+      "command": "go test ./...",
+      "trigger": ["*.go", "*_test.go"],
+      "category": "test",
+      "required": true,
+      "timeout": "120s",
+      "description": "Run Go tests"
+    }
+  ]
+}
+```
+
+**Adding standards** to `standards.json`:
+
+```json
+{
+  "rules": [
+    {
+      "id": "error-handling",
+      "text": "All errors must be handled or explicitly propagated. No silently swallowed errors.",
+      "severity": "error",
+      "category": "code-quality",
+      "origin": "manual"
+    }
+  ]
+}
+```
+
+SOPs (detailed enforcement rules with frontmatter) go in `.semspec/sources/docs/`. See [SOP System](docs/09-sop-system.md).
+
 ## How It Works
 
 ```
@@ -116,7 +190,7 @@ Commands are entered in the chat interface:
 
 ## What's Working
 
-**AST Indexing** — Parses Go and TypeScript. Extracts functions, types, interfaces, and packages into the graph.
+**AST Indexing** — Parses Go, TypeScript, JavaScript, Python, and Java. Extracts functions, types, interfaces, and packages into the graph via semsource.
 
 **Plan Coordination** — Parallel planner orchestration with LLM-driven synthesis. Focus areas enable concurrent planning.
 
@@ -175,19 +249,21 @@ files, git, builds, and tests), `submit_work`, `ask_question`, `decompose_task`,
 
 ## More Info
 
-- [docs/01-how-it-works.md](docs/01-how-it-works.md) — System overview
-- [docs/02-getting-started.md](docs/02-getting-started.md) — Setup and first plan
-- [docs/03-architecture.md](docs/03-architecture.md) — Technical architecture
-- [docs/04-components.md](docs/04-components.md) — Component reference
-- [docs/05-workflow-system.md](docs/05-workflow-system.md) — Workflow system and validation
-- [docs/06-question-routing.md](docs/06-question-routing.md) — Knowledge gap resolution
-- [docs/07-model-configuration.md](docs/07-model-configuration.md) — LLM model configuration
-- [docs/08-observability.md](docs/08-observability.md) — Observability and trajectory tracking
-- [docs/09-sop-system.md](docs/09-sop-system.md) — SOP authoring and enforcement
-- [docs/10-behavioral-controls.md](docs/10-behavioral-controls.md) — Behavioral controls for autonomous agents
-- [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) — Execution pipeline: NATS subjects, consumers, payload types
-- [docs/12-plan-api.md](docs/12-plan-api.md) — Plan API: requirements, scenarios, change proposals
-- [docs/13-sandbox-security.md](docs/13-sandbox-security.md) — Sandbox security model: isolation boundaries, env filtering, threat model
+| Document | Purpose |
+|----------|---------|
+| [How It Works](docs/01-how-it-works.md) | System overview, message flow, component groups |
+| [Getting Started](docs/02-getting-started.md) | Setup, project init, and first plan |
+| [Architecture](docs/03-architecture.md) | Technical architecture, component registration |
+| [Components](docs/04-components.md) | Component reference (18 semspec components) |
+| [Workflow System](docs/05-workflow-system.md) | Workflow system and validation |
+| [Question Routing](docs/06-question-routing.md) | Knowledge gap resolution, SLA, escalation |
+| [Model Configuration](docs/07-model-configuration.md) | LLM model and capability configuration |
+| [Observability](docs/08-observability.md) | Trajectory tracking, token metrics |
+| [SOP System](docs/09-sop-system.md) | SOP authoring and enforcement |
+| [Behavioral Controls](docs/10-behavioral-controls.md) | Behavioral controls for autonomous agents |
+| [Execution Pipeline](docs/11-execution-pipeline.md) | NATS subjects, consumers, payload types |
+| [Plan API](docs/12-plan-api.md) | REST API for plans, requirements, scenarios, change proposals |
+| [Sandbox Security](docs/13-sandbox-security.md) | Sandbox security model: isolation, env filtering, threat model |
 
 ## License
 

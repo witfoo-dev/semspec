@@ -33,50 +33,51 @@ via the component lifecycle.
 │  ├── Global init imports (tools, LLM providers, vocabularies)               │
 │  ├── Connect to NATS, ensure streams                                        │
 │  ├── Register semstreams components (graph-*, agentic-*, workflow-*)        │
-│  ├── Register 15 semspec components                                         │
+│  ├── Register 18 semspec components                                         │
 │  └── Start service manager (HTTP :8080)                                     │
 │                                                                              │
 │  ┌──────────── Planning ────────────────────────────────────────────────┐   │
-│  │  plan-coordinator   Parallel planner orchestration (PLAN_SESSIONS)   │   │
-│  │  planner            Single-planner path; fallback or standalone       │   │
-│  │  plan-reviewer      SOP-aware plan validation with LLM review         │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-│  ┌──────────── Context ─────────────────────────────────────────────────┐   │
-│  │  context-builder    Strategy-based LLM context assembly               │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-│  ┌──────────── Sources ─────────────────────────────────────────────────┐   │
-│  │  source-ingester    Document/SOP ingestion with frontmatter parsing   │   │
+│  │  plan-coordinator       Parallel planner orchestration               │   │
+│  │  planner                Single-planner path; fallback or standalone   │   │
+│  │  plan-reviewer          SOP-aware plan validation with LLM review     │   │
+│  │  requirement-generator  LLM → Requirements from plan goal            │   │
+│  │  scenario-generator     LLM → BDD Scenarios from Requirements        │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌──────────── Execution ───────────────────────────────────────────────┐   │
-│  │  task-generator     BDD task generation (static) OR advance to       │   │
-│  │                     ready_for_execution (reactive_mode=true)         │   │
-│  │  task-dispatcher    Dependency-aware task execution via agent loops   │   │
-│  │  scenario-orchestrator  Dispatches scenario-execution-loop per       │   │
-│  │                         pending Scenario (reactive mode only)        │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-│  ┌──────────── Indexing ────────────────────────────────────────────────┐   │
-│  │  ast-indexer        Code entity extraction (Go, TS, JS, Python, Java)│   │
+│  │  scenario-orchestrator   Dispatches scenario-execution-loop per      │   │
+│  │                          pending Scenario                            │   │
+│  │  scenario-executor       Decomposes Scenarios into DAGs; serial      │   │
+│  │                          node dispatch + scenario-level review       │   │
+│  │  execution-orchestrator  TDD pipeline per node: tester → builder     │   │
+│  │                          → validator → reviewer                      │   │
+│  │  change-proposal-handler ChangeProposal OODA loop + dirty cascade    │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌──────────── Support ─────────────────────────────────────────────────┐   │
-│  │  workflow-api       Workflow execution queries (HTTP)                 │   │
-│  │  trajectory-api     LLM call history queries (HTTP)                   │   │
-│  │  rdf-export         RDF serialization of graph entities               │   │
-│  │  workflow-validator  Document structure validation (request/reply)    │   │
-│  │  workflow-documents  File output to .semspec/plans/                   │   │
-│  │  question-answerer  LLM question answering for knowledge gaps         │   │
-│  │  question-timeout   SLA monitoring and escalation (disabled default)  │   │
+│  │  plan-api           REST API for Requirements/Scenarios/Proposals    │   │
+│  │  project-api        Project management REST endpoints                │   │
+│  │  trajectory-api     LLM call history queries (HTTP)                  │   │
+│  │  rdf-export         RDF serialization of graph entities              │   │
+│  │  workflow-validator  Document structure validation (request/reply)   │   │
+│  │  workflow-documents  File output to .semspec/plans/                  │   │
+│  │  structural-validator  Schema and payload validation                 │   │
+│  │  question-answerer  LLM question answering for knowledge gaps        │   │
+│  │  question-timeout   SLA monitoring and escalation (disabled default) │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  ┌──────────── Semstreams (library — not registered here) ──────────────┐   │
+│  │  context-builder    Strategy-based LLM context assembly              │   │
+│  │  task-generator     Plan → task decomposition                        │   │
+│  │  task-dispatcher    Dependency-aware task execution via agent loops  │   │
+│  │  graph-*, agentic-*, workflow-processor, message-logger, …          │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Component Registration Pattern
 
-All 15 semspec components are registered in `cmd/semspec/main.go` alongside the full semstreams component suite.
+All 18 semspec components are registered in `cmd/semspec/main.go` alongside the full semstreams component suite.
 Tools, LLM providers, and vocabularies register themselves via package-level `init()` functions triggered by blank
 imports.
 
@@ -85,33 +86,43 @@ imports.
 
 // Global init imports — register before any component starts
 import (
-    _ "github.com/c360studio/semspec/tools"           // file, git, github, doc, workflow tools
-    _ "github.com/c360studio/semspec/llm/providers"   // anthropic, ollama LLM providers
+    _ "github.com/c360studio/semspec/tools"            // bash, spawn, decompose, submit, question, review
+    _ "github.com/c360studio/semspec/llm/providers"    // anthropic, ollama LLM providers
     _ "github.com/c360studio/semspec/vocabulary/source" // source.* predicate vocabulary
 )
 
-func run() {
-    registry := component.NewRegistry()
-
+func registerSemspecComponents(componentRegistry *component.Registry) error {
     // All semstreams components: graph-*, agentic-*, workflow-processor, etc.
-    componentregistry.Register(registry)
+    componentregistry.Register(componentRegistry)
 
-    // Semspec components (15 total)
-    astindexer.Register(registry)
-    rdfexport.Register(registry)
-    workflowvalidator.Register(registry)
-    workflowdocuments.Register(registry)
-    questionanswerer.Register(registry)
-    questiontimeout.Register(registry)
-    sourceingester.Register(registry)
-    taskgenerator.Register(registry)
-    taskdispatcher.Register(registry)
-    planner.Register(registry)
-    contextbuilder.Register(registry)
-    workflowapi.Register(registry)
-    trajectoryapi.Register(registry)
-    plancoordinator.Register(registry)
-    planreviewer.Register(registry)
+    // Semspec components (18 total) — each returns an error on registration failure
+    type registerFn func() error
+    steps := []registerFn{
+        func() error { return rdfexport.Register(componentRegistry) },
+        func() error { return workflowvalidator.Register(componentRegistry) },
+        func() error { return workflowdocuments.Register(componentRegistry) },
+        func() error { return questionanswerer.Register(componentRegistry) },
+        func() error { return questiontimeout.Register(componentRegistry) },
+        func() error { return requirementgenerator.Register(componentRegistry) },
+        func() error { return scenariogenerator.Register(componentRegistry) },
+        func() error { return planner.Register(componentRegistry) },
+        func() error { return planapi.Register(componentRegistry) },
+        func() error { return trajectoryapi.Register(componentRegistry) },
+        func() error { return plancoordinator.Register(componentRegistry) },
+        func() error { return planreviewer.Register(componentRegistry) },
+        func() error { return projectapi.Register(componentRegistry) },
+        func() error { return structuralvalidator.Register(componentRegistry) },
+        func() error { return executionorchestrator.Register(componentRegistry) },
+        func() error { return scenarioexecutor.Register(componentRegistry) },
+        func() error { return scenarioorchestrator.Register(componentRegistry) },
+        func() error { return changeproposalhandler.Register(componentRegistry) },
+    }
+    for _, step := range steps {
+        if err := step(); err != nil {
+            return err
+        }
+    }
+    return nil
 }
 ```
 
@@ -486,7 +497,7 @@ enabling trajectory tracking via `trajectory-api`.
 
 | Model | Components Running | Use Case |
 |-------|-------------------|----------|
-| **Minimal** | `ast-indexer` + semstreams `agentic-*` | Code indexing only |
+| **Minimal** | semsource + semstreams `agentic-*` | Code indexing only |
 | **With Semstreams** | All above + `graph-*` + `workflow-processor` + semspec processors | Full agentic planning |
 | **Full Stack** | All above + `service-manager` + HTTP gateway + UI | Production deployment |
 

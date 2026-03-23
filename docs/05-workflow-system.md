@@ -54,9 +54,9 @@ parse structured JSON responses.
 | `plan-coordinator` | `/plan <title>` | Multi-planner orchestration → Goal/Context/Scope | `plan.json` |
 | `planner` | (fallback path) | Single LLM → Goal/Context/Scope | `plan.json` |
 | `plan-reviewer` | `/approve <slug>` | SOP validation → Verdict | Review result |
-| `task-generator` | After approval | LLM pipeline: Requirements → Scenarios → Tasks | `tasks.json` |
-| `task-dispatcher` | `/execute <slug>` | Dependency-aware dispatch | Agent tasks |
-| `context-builder` | (shared service) | Graph + filesystem → Context | Token-budgeted context |
+| `task-generator` | After approval | LLM pipeline: Requirements → Scenarios → Tasks | `tasks.json` (semstreams component) |
+| `task-dispatcher` | `/execute <slug>` | Dependency-aware dispatch | Agent tasks (semstreams component) |
+| `context-builder` | (shared service) | Graph + filesystem → Context | Token-budgeted context (semstreams component) |
 
 Each component:
 
@@ -187,8 +187,8 @@ higher-quality output than a single combined call would yield.
 
 ### Planning Pipeline (ADR-024)
 
-After a plan is approved, the `task-generator` component runs a multi-step pipeline before
-producing tasks:
+After a plan is approved, the `task-generator` semstreams component runs a multi-step pipeline
+before producing tasks:
 
 ```
 Plan approved
@@ -314,7 +314,7 @@ workflow.trigger.plan-coordinator
     |
     v
 [plan-coordinator]
-    |-- Requests context from context-builder
+    |-- Requests context from context-builder (semstreams component)
     |-- LLM: determine focus areas (1-3)
     |-- Runs planners in parallel (goroutines, NOT planner component)
     |-- LLM: synthesize if multiple results
@@ -342,8 +342,8 @@ workflow.trigger.plan-reviewer
 workflow.trigger.task-generator
     |
     v
-[task-generator]  -- ADR-024 pipeline --
-    |-- Requests context from context-builder
+[task-generator]  -- ADR-024 pipeline (semstreams component) --
+    |-- Requests context from context-builder (semstreams component)
     |-- LLM: generates Requirements from plan Goal/Context/Scope
     |       Publishes requirement.created events; plan status → requirements_generated
     |-- LLM: generates Scenarios (Given/When/Then) per Requirement
@@ -376,22 +376,27 @@ Task completion or escalation to user
 
 ### Key Components
 
+**Semspec components (in `processor/`):**
+
 | Component | Purpose |
 |-----------|---------|
 | `processor/plan-coordinator/` | Multi-planner orchestration |
 | `processor/planner/` | Single-planner fallback path |
 | `processor/plan-reviewer/` | SOP-aware plan validation |
-| `processor/context-builder/` | Token-budgeted context assembly |
-| `processor/source-ingester/` | Document/SOP ingestion |
-| `processor/task-generator/` | BDD task generation |
-| `processor/task-dispatcher/` | Dependency-aware task execution |
 | `workflow/` | Workflow types, prompts, validation |
 | `model/` | Capability-based model selection |
 
 **Semstreams components used:**
 
+- `context-builder` — Token-budgeted context assembly (semstreams library component)
+- `task-generator` — BDD task generation (semstreams library component)
+- `task-dispatcher` — Dependency-aware task execution (semstreams library component)
 - `workflow-processor` — Multi-step workflow execution (plan-and-execute)
 - `agentic-loop` — Generic LLM execution with tool use
+
+**External services:**
+
+- `semsource` — Document and SOP ingestion; watches `.semspec/sources/docs/` and publishes to `graph.ingest.entity`
 
 ### NATS Subjects
 
@@ -435,8 +440,8 @@ are built with the semstreams reactive engine and follow the OODA-loop pattern.
 
 ### Plan Status with Reactive Mode
 
-When `task-generator` runs with `reactive_mode=true`, the plan status flow takes a shortcut after
-Scenario generation:
+When the `task-generator` semstreams component runs with `reactive_mode=true`, the plan status flow
+takes a shortcut after Scenario generation:
 
 ```
 created → drafted → reviewed → approved
@@ -651,13 +656,13 @@ These files are created or modified as part of the ChangeProposal lifecycle impl
 |------|--------|---------|
 | `workflow/reactive/change_proposal.go` | New | Reactive workflow rules |
 | `workflow/reactive/change_proposal_actions.go` | New | Cascade logic |
-| `processor/workflow-api/http_change_proposal.go` | New | HTTP handlers |
+| `processor/plan-api/http_change_proposal.go` | New | HTTP handlers |
 | `configs/semspec.json` | Modified | `change-proposal-loop` configuration |
 
 ## Context Building
 
-The context-builder is a shared service that assembles token-budgeted LLM context. Every component
-that needs LLM context uses it.
+The `context-builder` is a semstreams library component (not a semspec processor) that assembles
+token-budgeted LLM context. Every semspec component that needs LLM context uses it via NATS.
 
 ### How Context is Requested
 
@@ -692,8 +697,8 @@ and review.
 ### How SOPs Enter the System
 
 1. Author SOPs as Markdown with YAML frontmatter in `.semspec/sources/docs/`
-2. Source-ingester parses frontmatter and publishes to the knowledge graph
-3. Context-builder retrieves matching SOPs when assembling context
+2. Semsource (external service) watches the directory, parses frontmatter, and publishes to the knowledge graph
+3. Context-builder (semstreams component) retrieves matching SOPs when assembling context
 
 ### Enforcement Points
 

@@ -13,6 +13,56 @@
 
 ---
 
+## Project Initialization
+
+### project-api
+
+**Purpose**: Project initialization API — stack detection, marker file scaffolding, standards
+generation, and per-file approval tracking. Used by the setup wizard UI before a project is ready
+for planning.
+
+**Location**: `processor/project-api/`
+
+#### Configuration
+
+```json
+{
+  "repo_path": "",
+  "ports": null
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `repo_path` | string | `SEMSPEC_REPO_PATH` or cwd | Repository root path to inspect and write into |
+| `ports` | PortConfig | — | Optional HTTP port overrides |
+
+#### HTTP Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/project/status` | Initialization state: which files exist, approval timestamps |
+| `GET` | `/api/project/wizard` | Supported languages and frameworks for the setup wizard |
+| `POST` | `/api/project/scaffold` | Create language/framework marker files in the repo |
+| `POST` | `/api/project/detect` | Filesystem-based stack detection (no LLM) |
+| `POST` | `/api/project/generate-standards` | Generate project standards rules (stub — LLM Phase 3) |
+| `POST` | `/api/project/init` | Write `project.json`, `checklist.json`, `standards.json` to `.semspec/` |
+| `POST` | `/api/project/approve` | Set `approved_at` on one of the three config files |
+
+#### Behavior
+
+1. **Detect**: Scans the filesystem for language markers (`go.mod`, `tsconfig.json`, etc.) and
+   returns a `DetectionResult` without making LLM calls.
+2. **Scaffold**: Creates minimal marker files so that detection works on empty projects.
+3. **Init**: Writes all three config files atomically from a single wizard submission. Also creates
+   `.semspec/sources/docs/` for future SOP documents.
+4. **Approve**: Stamps `approved_at` on individual config files. Returns `all_approved: true` once
+   all three files carry a timestamp — this gates the planning workflow.
+
+No NATS subjects consumed or published. All state is filesystem-based.
+
+---
+
 ## Planning
 
 ### plan-coordinator
@@ -211,83 +261,199 @@ Each finding has the shape:
 
 ---
 
-## Context
+### requirement-generator
 
-### context-builder
+**Purpose**: Generates structured Requirements from approved plans. Runs after plan approval and
+publishes `workflow.events.requirements.generated` when complete. Part of the reactive planning
+pipeline that replaces the monolithic task-generator.
 
-**Purpose**: Assembles curated LLM context from the knowledge graph, filesystem, and SOPs. Shared
-service used by `plan-coordinator`, `planner`, `task-generator`, and `task-dispatcher`.
-
-**Location**: `processor/context-builder/`
+**Location**: `processor/requirement-generator/`
 
 #### Configuration
 
 ```json
 {
-  "stream_name": "AGENT",
-  "consumer_name": "context-builder",
-  "input_subject_pattern": "context.build.>",
-  "output_subject_prefix": "context.built",
-  "default_token_budget": 32000,
-  "headroom_tokens": 6400,
-  "graph_gateway_url": "http://localhost:8082",
-  "default_capability": "reviewing",
-  "sop_entity_prefix": "source.doc",
-  "response_bucket_name": "CONTEXT_RESPONSES",
-  "graph_readiness_budget": "15s"
+  "stream_name": "WORKFLOW",
+  "consumer_name": "requirement-generator",
+  "trigger_subject": "workflow.async.requirement-generator",
+  "default_capability": "planning"
 }
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `stream_name` | string | `AGENT` | JetStream stream for context requests |
-| `consumer_name` | string | `context-builder` | Durable consumer name |
-| `input_subject_pattern` | string | `context.build.>` | Subject pattern for context build requests |
-| `output_subject_prefix` | string | `context.built` | Subject prefix for context responses |
-| `default_token_budget` | int | `32000` | Default token budget when no model specified |
-| `headroom_tokens` | int | `6400` | Safety buffer tokens reserved for model response |
-| `graph_gateway_url` | string | `http://localhost:8082` | Graph gateway URL for entity queries |
-| `default_capability` | string | `reviewing` | Default model capability |
-| `sop_entity_prefix` | string | `source.doc` | Predicate prefix for finding SOP entities |
-| `response_bucket_name` | string | `CONTEXT_RESPONSES` | KV bucket for context responses |
-| `graph_readiness_budget` | string | `15s` | Max time to wait for graph readiness on first request |
-| `allow_blocking` | bool | `true` | Enable blocking to wait for Q&A answers |
-| `blocking_timeout_seconds` | int | `300` | Max seconds to wait for Q&A answers |
+| `stream_name` | string | `WORKFLOW` | JetStream stream for workflow triggers |
+| `consumer_name` | string | `requirement-generator` | Durable consumer name |
+| `trigger_subject` | string | `workflow.async.requirement-generator` | Subject for generation triggers |
+| `default_capability` | string | `planning` | Model capability for requirement generation |
+| `ports` | PortConfig | (see defaults) | Input/output port definitions |
 
 #### Behavior
 
-1. **Graph readiness probe**: On the first request, probes the full NATS request-reply path to the
-   graph pipeline. Result is cached via `atomic.Bool` + `sync.Once` to avoid repeated probes.
-2. **Strategy selection**: Chooses one of six assembly strategies based on the task type field of
-   the incoming request.
-3. **Prioritized assembly**: Executes ordered steps (file tree, summaries, docs, SOPs, code
-   patterns) until the token budget is consumed.
-4. **Stores response**: Writes the assembled context to the `CONTEXT_RESPONSES` KV bucket so
-   callers can watch reactively.
-
-#### Strategies
-
-Each strategy prioritizes a different content mix:
-
-| Strategy | Priority Order |
-|----------|----------------|
-| `planning` | file tree → codebase summary → arch docs → specs → code patterns → requested files → SOPs |
-| `plan-review` | SOPs (all-or-nothing) → plan content → file tree → arch docs |
-| `implementation` | spec entity → target files → related patterns → conventions |
-| `review` | SOPs (all-or-nothing) → changed file contents → test files → conventions |
-| `exploration` | codebase summary → matching entities → related docs → requested files |
-| `question` | matching entities → source docs → codebase summary → relevant docs |
-
-> **Graph readiness**: Uses `WaitForReady()` with exponential backoff (250ms → 2s, capped by
-> `graph_readiness_budget`). When the graph is not ready, strategies skip graph steps cleanly.
+1. **Consumes trigger**: Receives a plan slug and goal/context/scope from the trigger payload.
+2. **Calls LLM**: Generates a structured list of Requirements using the planning model capability.
+3. **Persists**: Writes Requirements to the plan's filesystem state.
+4. **Publishes event**: Sends `workflow.events.requirements.generated` to advance the pipeline.
 
 #### NATS Subjects
 
 | Subject | Transport | Direction | Description |
 |---------|-----------|-----------|-------------|
-| `context.build.>` | JetStream (AGENT) | Input | Context build requests |
-| `context.built.<request_id>` | Core NATS | Output | Context responses |
-| CONTEXT_RESPONSES KV | JetStream KV | Output | Stored responses for reactive watchers |
+| `workflow.async.requirement-generator` | JetStream (WORKFLOW) | Input | Generation triggers |
+| `workflow.events.requirements.generated` | Core NATS | Output | Requirements-generated completion |
+
+---
+
+### scenario-generator
+
+**Purpose**: Generates Given/When/Then scenarios from Requirements. Runs after requirements are
+generated and publishes `workflow.events.scenarios.generated` when complete.
+
+**Location**: `processor/scenario-generator/`
+
+#### Configuration
+
+```json
+{
+  "stream_name": "WORKFLOW",
+  "consumer_name": "scenario-generator",
+  "trigger_subject": "workflow.async.scenario-generator",
+  "default_capability": "planning"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `stream_name` | string | `WORKFLOW` | JetStream stream name |
+| `consumer_name` | string | `scenario-generator` | Durable consumer name |
+| `trigger_subject` | string | `workflow.async.scenario-generator` | Subject for generation triggers |
+| `default_capability` | string | `planning` | Model capability for scenario generation |
+| `ports` | PortConfig | (see defaults) | Input/output port definitions |
+
+#### Behavior
+
+1. **Consumes trigger**: Receives the plan slug and its generated Requirements.
+2. **Calls LLM**: Produces one or more Given/When/Then scenarios per Requirement.
+3. **Persists**: Writes Scenarios to the plan's filesystem state with parent `RequirementID` links.
+4. **Publishes event**: Sends `workflow.events.scenarios.generated` to advance the pipeline.
+
+#### NATS Subjects
+
+| Subject | Transport | Direction | Description |
+|---------|-----------|-----------|-------------|
+| `workflow.async.scenario-generator` | JetStream (WORKFLOW) | Input | Generation triggers |
+| `workflow.events.scenarios.generated` | Core NATS | Output | Scenarios-generated completion |
+
+---
+
+## Plan API
+
+### plan-api
+
+**Purpose**: REST API for plans, requirements, scenarios, change proposals, Q&A, and execution
+triggers. The primary HTTP interface used by the UI and CLI for all plan lifecycle operations.
+
+**Location**: `processor/plan-api/`
+
+#### Configuration
+
+```json
+{
+  "execution_bucket_name": "WORKFLOW_EXECUTIONS",
+  "event_stream_name": "WORKFLOW",
+  "user_stream_name": "USER",
+  "sandbox_url": ""
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `execution_bucket_name` | string | `WORKFLOW_EXECUTIONS` | KV bucket for workflow execution state |
+| `event_stream_name` | string | `WORKFLOW` | JetStream stream for workflow events |
+| `user_stream_name` | string | `USER` | JetStream stream for user signals (escalation, errors) |
+| `sandbox_url` | string | `` | Sandbox server URL for workspace browser (empty = disabled) |
+
+#### HTTP Endpoints
+
+**Plans**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/plan-api/plans` | List all plans |
+| `POST` | `/plan-api/plans` | Create a new plan |
+| `GET` | `/plan-api/plans/{slug}` | Get plan by slug |
+| `PUT` | `/plan-api/plans/{slug}` | Update plan |
+| `DELETE` | `/plan-api/plans/{slug}` | Delete plan |
+| `POST` | `/plan-api/plans/{slug}/promote` | Approve plan and trigger planning pipeline |
+| `POST` | `/plan-api/plans/{slug}/execute` | Trigger execution for an approved plan |
+| `GET` | `/plan-api/plans/{slug}/reviews` | Get plan review synthesis result |
+| `GET` | `/plan-api/plans/{slug}/tasks` | List tasks for a plan |
+| `GET` | `/plan-api/plans/{slug}/phases/retrospective` | Get execution retrospective |
+
+**Requirements**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/plan-api/plans/{slug}/requirements` | List requirements |
+| `POST` | `/plan-api/plans/{slug}/requirements` | Create requirement |
+| `GET` | `/plan-api/plans/{slug}/requirements/{id}` | Get requirement |
+| `PUT` | `/plan-api/plans/{slug}/requirements/{id}` | Update requirement |
+| `DELETE` | `/plan-api/plans/{slug}/requirements/{id}` | Delete requirement |
+| `POST` | `/plan-api/plans/{slug}/requirements/{id}/deprecate` | Deprecate requirement |
+
+**Scenarios**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/plan-api/plans/{slug}/scenarios` | List scenarios (optionally filtered by requirement) |
+| `POST` | `/plan-api/plans/{slug}/scenarios` | Create scenario |
+| `GET` | `/plan-api/plans/{slug}/scenarios/{id}` | Get scenario |
+| `PUT` | `/plan-api/plans/{slug}/scenarios/{id}` | Update scenario |
+| `DELETE` | `/plan-api/plans/{slug}/scenarios/{id}` | Delete scenario |
+
+**Change Proposals**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/plan-api/plans/{slug}/change-proposals` | List change proposals |
+| `POST` | `/plan-api/plans/{slug}/change-proposals` | Create change proposal |
+| `GET` | `/plan-api/plans/{slug}/change-proposals/{id}` | Get change proposal |
+| `PUT` | `/plan-api/plans/{slug}/change-proposals/{id}` | Update change proposal |
+| `DELETE` | `/plan-api/plans/{slug}/change-proposals/{id}` | Delete change proposal |
+| `POST` | `/plan-api/plans/{slug}/change-proposals/{id}/submit` | Submit for review |
+| `POST` | `/plan-api/plans/{slug}/change-proposals/{id}/accept` | Accept and trigger cascade |
+| `POST` | `/plan-api/plans/{slug}/change-proposals/{id}/reject` | Reject proposal |
+
+**Q&A and Workspace**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `*` | `/plan-api/questions/*` | Q&A endpoints (delegated to question handler) |
+| `GET` | `/plan-api/workspace/tasks` | Active agent task list (sandbox proxy) |
+| `GET` | `/plan-api/workspace/tree` | Workspace file tree (sandbox proxy) |
+| `GET` | `/plan-api/workspace/file` | Read a workspace file (sandbox proxy) |
+| `GET` | `/plan-api/workspace/download` | Download workspace archive (sandbox proxy) |
+
+#### Behavior
+
+The component subscribes to workflow and user signal streams to keep plan state up to date
+in real time:
+
+- **Workflow events**: `plan.approved`, `requirements.generated`, `scenarios.generated`,
+  `scenario.execution.complete`, `task.execution.complete`, `plan.rollup.complete` — advance
+  plan status and update scenario/task state in the filesystem.
+- **User signals**: escalation and error events published on the USER stream update plan and
+  task status without requiring a polling round-trip.
+- **Workspace endpoints**: proxied to the sandbox server. Returns `503` when `sandbox_url` is
+  not configured.
+
+#### NATS Subjects
+
+| Subject | Transport | Direction | Description |
+|---------|-----------|-----------|-------------|
+| `workflow.events.>` | JetStream (WORKFLOW) | Input | Plan lifecycle events |
+| `user.signal.>` | JetStream (USER) | Input | Escalation and error signals |
+| `workflow.trigger.change-proposal-cascade` | JetStream (WORKFLOW) | Output | Cascade trigger on accept |
 
 ---
 
@@ -300,152 +466,6 @@ Each strategy prioritizes a different content mix:
 ---
 
 ## Execution
-
-### task-generator
-
-**Purpose**: Runs the multi-step planning pipeline (Requirements → Scenarios → Phases → Tasks)
-from an approved plan when `reactive_mode=false`. When `reactive_mode=true` (default), it skips
-task generation entirely and advances the plan status to `ready_for_execution` so the
-scenario-orchestrator can decompose work at runtime.
-
-See [Workflow System: Planning Pipeline](05-workflow-system.md#planning-pipeline-adr-024) for the
-full pipeline description.
-
-**Location**: `processor/task-generator/`
-
-#### Configuration
-
-```json
-{
-  "stream_name": "WORKFLOWS",
-  "consumer_name": "task-generator",
-  "trigger_subject": "workflow.trigger.task-generator",
-  "default_capability": "planning",
-  "pipeline_mode": "pipeline",
-  "reactive_mode": true
-}
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `stream_name` | string | `WORKFLOWS` | JetStream stream name |
-| `consumer_name` | string | `task-generator` | Durable consumer name |
-| `trigger_subject` | string | `workflow.trigger.task-generator` | Subject to consume triggers from |
-| `default_capability` | string | `planning` | Default model capability |
-| `pipeline_mode` | string | `pipeline` | `pipeline` (default) or `single_shot` |
-| `reactive_mode` | bool | `true` | Skip task generation; advance plan to `ready_for_execution` |
-
-#### Behavior
-
-**Reactive mode** (default, `reactive_mode=true`) — defers task decomposition to execution time:
-
-1. After `scenarios_generated`, advances plan status directly to `ready_for_execution`
-1. Does **not** generate Phases or Tasks upfront; does **not** write `tasks.json`
-1. Publishes result to `workflow.result.tasks.{slug}` to signal completion
-1. The `scenario-orchestrator` then decomposes each Scenario into a TaskDAG via LLM
-   at execution time, when the agent can inspect the live codebase
-
-**Pipeline mode** (`reactive_mode=false`) — four focused LLM calls:
-
-1. **Subscribes**: Consumes from `workflow.trigger.task-generator` on the WORKFLOWS stream
-1. **Loads Plan**: Reads plan from `.semspec/plans/{slug}/plan.json`
-1. **Generates Requirements**: LLM call with requirement-focused prompt; publishes
-   `requirement.created` events; advances plan status to `requirements_generated`
-1. **Generates Scenarios**: LLM call per Requirement producing Given/When/Then triples; publishes
-   `scenario.created` events; advances plan status to `scenarios_generated`
-1. **Generates Phases**: LLM call for scheduling containers (unchanged from pre-ADR-024)
-1. **Generates Tasks**: LLM call using Scenarios as input; tasks carry `ScenarioIDs` (many-to-many)
-   instead of embedded `AcceptanceCriteria`
-1. **Saves Tasks**: Writes to `.semspec/plans/{slug}/tasks.json`
-1. **Publishes Result**: Sends completion to `workflow.result.tasks.{slug}`
-
-**Single-shot mode** (`pipeline_mode=single_shot`) — one LLM call producing all tasks directly.
-Use when pipeline latency is unacceptable (e.g., local development with small models).
-
-#### Task JSON Format
-
-Tasks produced by the pipeline reference Scenarios by ID rather than embedding acceptance criteria:
-
-```json
-{
-  "tasks": [
-    {
-      "id": "1",
-      "title": "Task title",
-      "description": "What needs to be done",
-      "scenarioIDs": ["scenario.add-auth.1.1", "scenario.add-auth.1.2"],
-      "dependencies": []
-    }
-  ]
-}
-```
-
-#### NATS Subjects
-
-| Subject | Transport | Direction | Description |
-|---------|-----------|-----------|-------------|
-| `workflow.trigger.task-generator` | JetStream (WORKFLOWS) | Input | Task generation triggers |
-| `requirement.created` | JetStream (WORKFLOWS) | Output | New requirement published |
-| `scenario.created` | JetStream (WORKFLOWS) | Output | New scenario published |
-| `workflow.result.tasks.<slug>` | Core NATS | Output | Completion notifications |
-
----
-
-### task-dispatcher
-
-**Purpose**: Dependency-aware task dispatch with parallel context building. Reads `tasks.json` and
-dispatches each task to an agentic development loop.
-
-**Location**: `processor/task-dispatcher/`
-
-#### Configuration
-
-```json
-{
-  "stream_name": "WORKFLOWS",
-  "consumer_name": "task-dispatcher",
-  "trigger_subject": "workflow.trigger.task-dispatcher",
-  "max_concurrent": 3,
-  "context_timeout": "30s",
-  "execution_timeout": "300s",
-  "context_subject_prefix": "context.build",
-  "context_response_bucket": "CONTEXT_RESPONSES",
-  "agent_task_subject": "agent.task.development"
-}
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `stream_name` | string | `WORKFLOWS` | JetStream stream for workflow triggers |
-| `consumer_name` | string | `task-dispatcher` | Durable consumer name |
-| `trigger_subject` | string | `workflow.trigger.task-dispatcher` | Subject for batch task triggers |
-| `max_concurrent` | int | `3` | Maximum parallel task executions (1–10) |
-| `context_timeout` | string | `30s` | Timeout for context building per task |
-| `execution_timeout` | string | `300s` | Timeout for task execution |
-| `context_subject_prefix` | string | `context.build` | Subject prefix for context build requests |
-| `context_response_bucket` | string | `CONTEXT_RESPONSES` | KV bucket for context responses |
-| `agent_task_subject` | string | `agent.task.development` | Subject for publishing agent tasks |
-
-#### Behavior (3 Phases)
-
-1. **Parallel context building**: Fires ALL context build requests simultaneously for every task
-   in the batch — no concurrency limit at this phase.
-2. **Dependency-aware dispatch**: Builds an in-memory dependency graph; dispatches tasks as their
-   dependencies complete. A semaphore enforces `max_concurrent` during execution.
-3. **Individual dispatch**: Wraps each task as an `agentic.TaskMessage` and publishes to
-   `agent.task.development` via JetStream (ordering guarantee ensures dependent tasks see their
-   predecessors' dispatch messages before they are dispatched themselves).
-
-#### NATS Subjects
-
-| Subject | Transport | Direction | Description |
-|---------|-----------|-----------|-------------|
-| `workflow.trigger.task-dispatcher` | JetStream (WORKFLOWS) | Input | Batch dispatch triggers |
-| `context.build.implementation` | Core NATS | Output | Context build requests |
-| `agent.task.development` | JetStream | Output | Agent task messages |
-| `workflow.result.task-dispatcher.<slug>` | Core NATS | Output | Batch completion notifications |
-
----
 
 ### scenario-orchestrator
 
@@ -502,7 +522,7 @@ active when `reactive_mode=true` on `task-generator`.
 1. **ACKs on success**: NAKs on any dispatch failure (message will be redelivered, max 3 attempts)
 
 The orchestrator does not track execution results. Once triggers are dispatched it is done.
-The `scenario-execution-loop` and `dag-execution-loop` reactive workflows handle the rest.
+The `scenario-executor` and `execution-orchestrator` components handle the rest.
 
 #### NATS Subjects
 
@@ -510,6 +530,249 @@ The `scenario-execution-loop` and `dag-execution-loop` reactive workflows handle
 |---------|-----------|-----------|-------------|
 | `scenario.orchestrate.*` | JetStream (WORKFLOW) | Input | Per-plan orchestration triggers |
 | `workflow.trigger.scenario-execution-loop` | JetStream (WORKFLOW) | Output | Per-scenario execution triggers |
+
+---
+
+### scenario-executor
+
+**Purpose**: Receives a per-scenario execution trigger, runs a decomposer agent to build a TaskDAG,
+then dispatches each DAG node serially to the `execution-orchestrator`. Runs a scenario-level review
+after all nodes complete.
+
+**Location**: `processor/scenario-executor/`
+
+#### Configuration
+
+```json
+{
+  "timeout_seconds": 3600,
+  "model": "default",
+  "decomposer_model": "",
+  "sandbox_url": ""
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `timeout_seconds` | int | `3600` | Per-scenario timeout covering the full decompose → execute pipeline |
+| `model` | string | `default` | Model endpoint name for agent tasks |
+| `decomposer_model` | string | `model` fallback | Separate model for the decomposer agent |
+| `sandbox_url` | string | `` | Sandbox server URL for per-scenario branch management |
+| `teams` | TeamsConfig | disabled | Team-based execution configuration (red team at scenario level) |
+| `ports` | PortConfig | (see defaults) | Input/output port definitions |
+
+#### Behavior
+
+1. **Receives trigger**: Consumes `ScenarioExecutionTriggerPayload` from
+   `workflow.trigger.scenario-execution-loop`.
+2. **Creates branch**: If `sandbox_url` is configured, creates a per-scenario git worktree branch
+   for isolation.
+3. **Runs decomposer**: Dispatches a decomposer agent task (`agent.task.development`) that calls
+   `decompose_task` to produce a validated `TaskDAG` JSON payload.
+4. **Executes nodes serially**: Dispatches each DAG node in topological order to
+   `workflow.trigger.task-execution-loop`. Waits for each node's `agent.complete.*` event before
+   dispatching the next.
+5. **Scenario review**: Runs the scenario reviewer agent (`review_scenario` tool) against the full
+   changeset once all nodes complete.
+6. **Publishes completion**: Sends `workflow.events.scenario.execution_complete` with the
+   final verdict.
+
+#### NATS Subjects
+
+| Subject | Transport | Direction | Description |
+|---------|-----------|-----------|-------------|
+| `workflow.trigger.scenario-execution-loop` | JetStream (WORKFLOW) | Input | Per-scenario execution triggers |
+| `agent.complete.>` | JetStream (AGENT) | Input | Agentic loop completion events |
+| `agent.task.development` | JetStream (AGENT) | Output | Decomposer agent tasks |
+| `workflow.trigger.task-execution-loop` | JetStream (WORKFLOW) | Output | DAG node dispatch to execution-orchestrator |
+| `graph.mutation.triple.add` | Core NATS | Output | Entity state triples |
+| `workflow.events.scenario.execution_complete` | JetStream | Output | Scenario execution complete |
+
+---
+
+### execution-orchestrator
+
+**Purpose**: Runs the 4-stage TDD pipeline for a single DAG node: **Tester** → **Builder** →
+**Structural Validator** → **Code Reviewer**. Manages retry budget and routes rejections back to
+the appropriate stage based on error category.
+
+**Location**: `processor/execution-orchestrator/`
+
+#### Configuration
+
+```json
+{
+  "max_iterations": 3,
+  "timeout_seconds": 1800,
+  "model": "default",
+  "sandbox_url": "",
+  "graph_gateway_url": "",
+  "indexing_budget": "60s",
+  "benching_threshold": 3
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_iterations` | int | `3` | Max develop→validate→review cycles before escalation |
+| `timeout_seconds` | int | `1800` | Per-task timeout covering the full pipeline (30 min) |
+| `model` | string | `default` | Model endpoint name passed to dispatched agents |
+| `sandbox_url` | string | `` | Sandbox server URL for worktree isolation (empty = disabled) |
+| `graph_gateway_url` | string | `` | Graph gateway URL for indexing gate (empty = disabled) |
+| `indexing_budget` | string | `60s` | Max wait for semsource to index a merge commit |
+| `benching_threshold` | int | `3` | Per-category error count that triggers agent benching |
+| `teams` | TeamsConfig | disabled | Team-based execution (red team inserted before review) |
+| `ports` | PortConfig | (see defaults) | Input/output port definitions |
+
+#### Pipeline Stages
+
+| Stage | Agent Task Subject | Phase Triple | Description |
+|-------|-------------------|--------------|-------------|
+| Tester | `agent.task.testing` | `testing` | Writes failing unit tests (TDD red phase) |
+| Builder | `agent.task.building` | `building` | Implements code to make tests pass (TDD green phase) |
+| Structural Validator | `workflow.async.structural-validator` | `validating` | Runs checklist shell commands |
+| Code Reviewer | `agent.task.reviewer` | `reviewing` | LLM code review with verdict + feedback |
+
+#### Behavior
+
+1. **Receives trigger**: Consumes `TaskExecutionTrigger` from `workflow.trigger.task-execution-loop`.
+2. **Tester stage**: Dispatches tester agent. Fails fast on tester rejection.
+3. **Builder stage**: Dispatches builder agent with tester output and task context.
+4. **Structural validation**: Publishes to `workflow.async.structural-validator`. On failure, routes
+   back to builder if budget remains; escalates on budget exhaustion.
+5. **Code review**: Dispatches reviewer agent. On rejection, routes to builder (implementation
+   issues) or tester (test issues) based on `error_category` signal. Non-fixable categories
+   (`misscoped`, `architectural`, `too_big`) always escalate.
+6. **Completion**: Publishes entity triple `workflow.phase = approved` on success. Terminal
+   transitions (`completed`, `escalated`, `failed`) are driven by JSON rule processor reacting to
+   phase triples.
+
+#### NATS Subjects
+
+| Subject | Transport | Direction | Description |
+|---------|-----------|-----------|-------------|
+| `workflow.trigger.task-execution-loop` | JetStream (WORKFLOW) | Input | Task execution triggers |
+| `agent.complete.>` | JetStream (AGENT) | Input | Agentic loop completion events |
+| `agent.task.testing` | JetStream | Output | Tester agent dispatch |
+| `agent.task.building` | JetStream | Output | Builder agent dispatch |
+| `agent.task.reviewer` | JetStream | Output | Reviewer agent dispatch |
+| `workflow.async.structural-validator` | JetStream (WORKFLOW) | Output | Structural validation requests |
+| `graph.mutation.triple.add` | Core NATS | Output | Entity state triples |
+
+---
+
+### structural-validator
+
+**Purpose**: Deterministic checklist validation using shell commands from `.semspec/checklist.json`.
+Runs as part of the TDD pipeline between the builder and code reviewer stages.
+
+**Location**: `processor/structural-validator/`
+
+#### Configuration
+
+```json
+{
+  "stream_name": "WORKFLOW",
+  "consumer_name": "structural-validator",
+  "checklist_path": ".semspec/checklist.json",
+  "default_timeout": "120s"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `stream_name` | string | `WORKFLOW` | JetStream stream for consuming validation triggers |
+| `consumer_name` | string | `structural-validator` | Durable consumer name |
+| `repo_path` | string | `SEMSPEC_REPO_PATH` or cwd | Repository root for running checks |
+| `checklist_path` | string | `.semspec/checklist.json` | Path to checklist relative to repo root |
+| `default_timeout` | string | `120s` | Fallback command timeout when a check has no timeout set |
+| `ports` | PortConfig | (see defaults) | Input/output port definitions |
+
+#### Behavior
+
+1. **Consumes trigger**: Receives a validation request from `workflow.async.structural-validator`.
+2. **Loads checklist**: Reads `.semspec/checklist.json` from the repo root.
+3. **Filters checks**: Selects checks whose `trigger` list matches the current pipeline stage.
+4. **Runs commands**: Executes each check's shell command in the repo root, respecting per-check
+   and default timeouts.
+5. **Publishes result**: Sends pass/fail verdict with per-check output to
+   `workflow.result.structural-validator.<id>`.
+
+#### Checklist Format
+
+```json
+{
+  "version": "1.0.0",
+  "checks": [
+    {
+      "id": "go-build",
+      "name": "Build passes",
+      "command": "go build ./...",
+      "working_dir": ".",
+      "timeout": "60s",
+      "trigger": ["build", "validate"]
+    }
+  ]
+}
+```
+
+#### NATS Subjects
+
+| Subject | Transport | Direction | Description |
+|---------|-----------|-----------|-------------|
+| `workflow.async.structural-validator` | JetStream (WORKFLOW) | Input | Validation triggers |
+| `workflow.result.structural-validator.>` | Core NATS | Output | Validation results |
+
+---
+
+### change-proposal-handler
+
+**Purpose**: Processes the ChangeProposal cascade lifecycle. When a proposal is accepted, runs the
+dirty cascade (graph traversal to mark affected requirements/scenarios as dirty), publishes
+cancellation signals to running scenario loops, and emits the accepted event.
+
+**Location**: `processor/change-proposal-handler/`
+
+#### Configuration
+
+```json
+{
+  "stream_name": "WORKFLOW",
+  "consumer_name": "change-proposal-handler",
+  "trigger_subject": "workflow.trigger.change-proposal-cascade",
+  "accepted_subject": "workflow.events.change-proposal.accepted",
+  "timeout_seconds": 120
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `stream_name` | string | `WORKFLOW` | JetStream stream for cascade trigger messages |
+| `consumer_name` | string | `change-proposal-handler` | Durable consumer name |
+| `trigger_subject` | string | `workflow.trigger.change-proposal-cascade` | Subject for cascade requests |
+| `accepted_subject` | string | `workflow.events.change-proposal.accepted` | Subject for accepted events after cascade |
+| `timeout_seconds` | int | `120` | Cascade timeout in seconds (10–600) |
+| `ports` | PortConfig | (see defaults) | Input/output port definitions |
+
+#### Behavior
+
+1. **Receives cascade request**: Consumes `ChangeProposalCascadeRequest` from
+   `workflow.trigger.change-proposal-cascade` after a proposal is accepted via the API.
+2. **Graph traversal**: Queries the graph to find all Requirements and Scenarios affected by the
+   proposal's `affected_requirement_ids`.
+3. **Dirty marking**: Marks affected entities with `workflow.dirty = true` triples.
+4. **Cancellation signals**: Publishes `agent.signal.cancel.<loopID>` for any scenario execution
+   loops that are currently running and cover affected scenarios.
+5. **Accepted event**: Publishes `workflow.events.change-proposal.accepted` with a cascade summary
+   (affected count, cancelled loops).
+
+#### NATS Subjects
+
+| Subject | Transport | Direction | Description |
+|---------|-----------|-----------|-------------|
+| `workflow.trigger.change-proposal-cascade` | JetStream (WORKFLOW) | Input | Cascade requests on proposal acceptance |
+| `workflow.events.change-proposal.accepted` | Core NATS | Output | Accepted event with cascade summary |
+| `agent.signal.cancel.*` | Core NATS | Output | Cancellation signals to running scenario loops |
 
 ---
 
@@ -542,34 +805,6 @@ The `scenario-execution-loop` and `dag-execution-loop` reactive workflows handle
 Exposes HTTP endpoints for querying LLM call history and agent loop trajectories. Buckets are
 accessed lazily — if a bucket does not exist at startup, the component retries on the first query.
 Used by E2E tests to capture trajectory data for correctness verification.
-
-No NATS subjects are consumed or published directly; all access is via JetStream KV.
-
----
-
-### workflow-api
-
-**Purpose**: Provides workflow execution query endpoints.
-
-**Location**: `processor/workflow-api/`
-
-#### Configuration
-
-```json
-{
-  "execution_bucket_name": "WORKFLOW_EXECUTIONS"
-}
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `execution_bucket_name` | string | `WORKFLOW_EXECUTIONS` | KV bucket for workflow executions |
-
-#### Behavior
-
-Exposes HTTP endpoints for querying workflow execution state. Also registers Q&A HTTP endpoints via
-`workflow.QuestionHTTPHandler` when the question store is available. The execution bucket is
-accessed lazily on the first query if it does not exist at startup.
 
 No NATS subjects are consumed or published directly; all access is via JetStream KV.
 
@@ -866,32 +1101,39 @@ When a question's SLA is exceeded:
 
 ---
 
-## ChangeProposal Reactive Workflow (ADR-024)
+## ChangeProposal Lifecycle
 
-The ChangeProposal lifecycle is implemented as a reactive workflow, not as a standalone processor
-component. It follows the same OODA-loop pattern as other reactive workflows (see ADR-005).
+The ChangeProposal lifecycle uses a combination of the `plan-api` component (HTTP CRUD and
+submit/accept/reject actions), the `change-proposal-handler` component (cascade execution), and
+JSON rule processing (status transitions).
 
 ### Implementation Files
 
 | File | Purpose |
 |------|---------|
-| `workflow/reactive/change_proposal.go` | Reactive rules: accept-trigger, dispatch-review, handle-accepted, handle-rejected |
-| `workflow/reactive/change_proposal_actions.go` | Cascade logic: graph traversal, dirty marking, event publishing |
-| `processor/workflow-api/http_change_proposal.go` | HTTP handlers for proposal CRUD and accept/reject actions |
+| `processor/plan-api/http_change_proposal.go` | HTTP CRUD, submit, accept, reject handlers |
+| `processor/change-proposal-handler/` | Cascade execution after acceptance |
+| `workflow/reactive/change_proposal_actions.go` | Cascade logic: graph traversal, dirty marking |
 
-### Future Components
+### Lifecycle Flow
 
-Two components are planned to support automated ChangeProposal creation. Their reactive workflow
-rules are already defined in `workflow/reactive/change_proposal.go` but the components themselves
-are future work:
+```
+POST .../change-proposals/{id}/submit
+  → status: submitted
 
-| Component | Purpose | Status |
-|-----------|---------|--------|
-| `change-proposal-cascade` | Executes dirty cascade after proposal acceptance | Planned (Phase 5) |
-| `change-proposal-reviewer` | LLM-based review gate for incoming proposals | Planned (Phase 5) |
+POST .../change-proposals/{id}/accept
+  → publishes workflow.trigger.change-proposal-cascade
+  → change-proposal-handler runs dirty cascade
+  → publishes workflow.events.change-proposal.accepted
+
+POST .../change-proposals/{id}/reject
+  → status: rejected
+```
 
 See [Workflow System: ChangeProposal Lifecycle](05-workflow-system.md#changeproposal-lifecycle-adr-024)
-for the full lifecycle description including the OODA loop and cascade logic.
+for the full lifecycle description including cascade logic.
+
+---
 
 ## Creating New Components
 
@@ -946,3 +1188,6 @@ func Register(registry RegistryInterface) error {
 1. Import in `cmd/semspec/main.go`
 2. Call `mycomponent.Register(registry)`
 3. Add instance config to `configs/semspec.json`
+
+As of this writing semspec registers **18 components** in `cmd/semspec/main.go`. When you add a
+new component, increment this count in the binary's startup log and update CLAUDE.md accordingly.

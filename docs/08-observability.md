@@ -54,7 +54,7 @@ All LLM-calling components inject trace context before making LLM calls:
 | `plan-coordinator` | TraceID, LoopID |
 | `planner` | TraceID, LoopID |
 | `plan-reviewer` | TraceID, LoopID |
-| `task-generator` | TraceID, LoopID |
+| `task-generator` (semstreams) | TraceID, LoopID |
 | `question-answerer` | TraceID, LoopID |
 
 ### Code Pattern

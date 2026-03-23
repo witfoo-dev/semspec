@@ -15,7 +15,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | [docs/01-how-it-works.md](docs/01-how-it-works.md) | How semspec works (start here) |
 | [docs/02-getting-started.md](docs/02-getting-started.md) | Setup and first plan |
 | [docs/03-architecture.md](docs/03-architecture.md) | System architecture, component registration, semstreams relationship |
-| [docs/04-components.md](docs/04-components.md) | Component reference (15 components) |
+| [docs/04-components.md](docs/04-components.md) | Component reference (18 components) |
 | [docs/05-workflow-system.md](docs/05-workflow-system.md) | Workflow system, plan coordination, validation |
 | [docs/06-question-routing.md](docs/06-question-routing.md) | Knowledge gap resolution, SLA, escalation |
 | [docs/07-model-configuration.md](docs/07-model-configuration.md) | LLM model and capability configuration |
@@ -31,16 +31,20 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 
 | Directory | Purpose |
 |-----------|---------|
-| `cmd/semspec/` | Semstreams-based binary entry point |
+| `cmd/semspec/` | Semstreams-based binary entry point (18 component registrations) |
 | `processor/plan-coordinator/` | Parallel planner orchestration |
 | `processor/planner/` | Single-planner path |
 | `processor/plan-reviewer/` | SOP-aware plan validation |
-| `graph/` | Graph querying (GraphQL client, federated fan-out, registry) |
-| `processor/task-generator/` | Plan → task decomposition (or status advance in reactive mode) |
-| `processor/task-dispatcher/` | Dependency-aware task dispatch |
+| `processor/requirement-generator/` | Generates structured requirements from approved plans |
+| `processor/scenario-generator/` | Generates Given/When/Then scenarios from requirements |
+| `processor/plan-api/` | REST API for plans, requirements, scenarios, change proposals |
+| `processor/project-api/` | Project initialization API (stack detection, standards, checklist) |
+| `processor/structural-validator/` | Deterministic checklist validation (.semspec/checklist.json) |
 | `processor/scenario-orchestrator/` | Dispatches pending scenarios for execution |
 | `processor/scenario-executor/` | Decomposes scenarios into DAGs, dispatches nodes serially, runs scenario-level review |
 | `processor/execution-orchestrator/` | TDD pipeline per node: tester → builder → validator → reviewer (no red team at task level) |
+| `processor/change-proposal-handler/` | ChangeProposal lifecycle: review, accept/reject, dirty cascade |
+| `graph/` | Graph querying (GraphQL client, federated fan-out, registry) |
 | `processor/ast/` | AST parsing library |
 | `tools/` | Tool executor implementations |
 | `tools/decompose/` | `decompose_task` — validates LLM-provided TaskDAG (terminal: StopLoop) |
@@ -156,20 +160,23 @@ See [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) for the compl
 
 ```
 semspec/
-├── cmd/semspec/main.go       # Binary entry point (15 component registrations)
+├── cmd/semspec/main.go       # Binary entry point (18 component registrations)
 ├── cmd/semspec/migrate.go    # Migration CLI (`semspec migrate extract-scenarios`)
 ├── processor/
 │   ├── plan-coordinator/     # Parallel planner orchestration
 │   ├── planner/              # Single-planner path
 │   ├── plan-reviewer/        # SOP-aware plan validation
-│   ├── task-generator/       # Plan → task decomposition (static) or status advance (reactive)
-│   ├── task-dispatcher/      # Dependency-aware task dispatch
+│   ├── requirement-generator/ # Generates structured requirements from plans
+│   ├── scenario-generator/   # Generates Given/When/Then scenarios from requirements
 │   ├── scenario-orchestrator/ # Dispatches pending scenarios for execution
 │   ├── scenario-executor/    # Decomposes scenarios into DAGs, serial node dispatch + scenario review
 │   ├── execution-orchestrator/ # TDD pipeline per node: tester → builder → validator → reviewer
+│   ├── change-proposal-handler/ # ChangeProposal lifecycle: review, accept/reject, cascade
 │   ├── question-answerer/    # LLM question answering
 │   ├── question-timeout/     # SLA monitoring and escalation
-│   ├── plan-api/         # Workflow + Requirement/Scenario/ChangeProposal HTTP API
+│   ├── plan-api/             # REST API: plans, requirements, scenarios, change proposals
+│   ├── project-api/          # Project init API: stack detection, standards, checklist
+│   ├── structural-validator/ # Deterministic checklist validation (.semspec/checklist.json)
 │   ├── trajectory-api/       # Trajectory/LLM call queries
 │   └── ast/                  # AST parsing library
 ├── workflow/
@@ -199,7 +206,7 @@ semspec/
 ├── configs/
 │   ├── semspec.json          # Default configuration
 │   └── answerers.yaml        # Question routing config
-└── docs/                     # Documentation (01-09)
+└── docs/                     # Documentation (01-13)
 ```
 
 ## Adding Components

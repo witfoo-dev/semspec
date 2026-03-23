@@ -23,7 +23,7 @@ SOPs differ from the project constitution (`.semspec/constitution.yaml`) in two 
 
 ### File Location
 
-Store SOPs in `.semspec/sources/docs/`. The source-ingester watches this directory and
+Store SOPs in `.semspec/sources/docs/`. Semsource (external service) watches this directory and
 ingests new or modified files automatically.
 
 ```
@@ -111,25 +111,24 @@ requirements:
 
 ## Ingestion Pipeline
 
-SOPs enter the knowledge graph through the source-ingester component
-(`processor/source-ingester/`). See [Components](04-components.md) for full
-source-ingester configuration details.
+SOPs enter the knowledge graph through **semsource** — an external service that watches the
+repository and publishes document entities to `graph.ingest.entity`. Semsource is not a semspec
+processor; it runs as a separate container configured via `SEMSOURCE_URL` or `GRAPH_SOURCES`.
+See [Architecture](03-architecture.md) for the semsource integration details.
 
 ### Entry Points
 
 There are two ways an SOP is ingested:
 
 1. **NATS message** on `source.ingest.>` — Any component or external tool can publish
-   an `IngestRequest` to this subject. The source-ingester consumes the message and
-   processes the referenced file.
-2. **File watcher** — The source-ingester watches `.semspec/sources/docs/` using
-   `fsnotify`. New files and modifications trigger ingestion automatically within seconds
-   of being written.
+   an `IngestRequest` to this subject. Semsource consumes the message and processes the
+   referenced file.
+2. **File watcher** — Semsource watches `.semspec/sources/docs/` for changes. New files
+   and modifications trigger ingestion automatically within seconds of being written.
 
 ### Frontmatter Path vs LLM Path
 
-The ingestion handler (`processor/source-ingester/handler.go`) uses the YAML frontmatter
-when available to avoid an LLM call:
+Semsource uses the YAML frontmatter when available to avoid an LLM call:
 
 ```
 Document read from disk
@@ -156,8 +155,8 @@ classification errors.
 
 ### Entity Construction
 
-After metadata extraction, the handler builds graph entities using vocabulary constants
-from `vocabulary/source/predicates.go`. Chunk entities are published first to prevent
+After metadata extraction, semsource builds graph entities using vocabulary constants
+from the source vocabulary. Chunk entities are published first to prevent
 orphan references, followed by the parent document entity.
 
 The resulting entity triples include:
@@ -177,7 +176,7 @@ All entities are published to `graph.ingest.entity` via JetStream for durable de
 
 ## How SOPs Are Used
 
-The `SOPGatherer` (`processor/context-builder/gatherers/sop.go`) retrieves SOPs from the
+The `SOPGatherer` in the `context-builder` semstreams component retrieves SOPs from the
 knowledge graph for context assembly. It provides four retrieval methods that context
 strategies compose to build SOP context.
 
@@ -356,8 +355,8 @@ Save this to `.semspec/sources/docs/api-doc-standards.md`.
 
 ### Step 2: SOP is Ingested
 
-The file watcher detects the new file within seconds. The source-ingester reads the YAML
-frontmatter, skips the LLM analysis step, and publishes the entity to `graph.ingest.entity`.
+The file watcher detects the new file within seconds. Semsource reads the YAML frontmatter,
+skips the LLM analysis step, and publishes the entity to `graph.ingest.entity`.
 
 You can confirm ingestion by checking the message logger:
 
@@ -428,6 +427,6 @@ pattern queries.
 
 | Document | Description |
 |----------|-------------|
-| [Components](04-components.md) | Source-ingester and plan-reviewer component configuration |
+| [Components](04-components.md) | Plan-reviewer and other component configuration |
 | [Workflow System](05-workflow-system.md) | How plan generation and the planning loop work |
 | [How It Works](01-how-it-works.md) | End-to-end command execution overview |

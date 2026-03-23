@@ -226,32 +226,170 @@ Start the adversarial developer/reviewer loop:
 
 The system generates tasks, then executes them with developer and reviewer agents working in an adversarial loop.
 
+## Project Initialization
+
+Before creating plans, your project needs three configuration files in `.semspec/`. These tell
+semspec what languages you use, what quality gates to enforce, and what standards agents should
+follow.
+
+### Required Files
+
+| File | Purpose | Used By |
+|------|---------|---------|
+| `project.json` | Detected stack: languages, frameworks, tooling | Context assembly, prompt generation |
+| `standards.json` | Rules injected into agent context | Plan reviewer, code reviewer, all agents |
+| `checklist.json` | Deterministic quality gates (shell commands) | Structural validator (runs after each task) |
+
+Semspec considers a project initialized when all three files exist. The `GET /api/project/status`
+endpoint reports initialization state — the UI uses this to determine what to show.
+
+### Option A: API-Driven Setup
+
+The project-api provides endpoints for automated project setup:
+
+```bash
+# Check initialization status
+curl http://localhost:8080/api/project/status | jq .
+
+# Detect languages, frameworks, and tooling
+curl -X POST http://localhost:8080/api/project/detect | jq .
+
+# Generate standards from detected stack + existing docs
+curl -X POST http://localhost:8080/api/project/generate-standards | jq .
+
+# Initialize all three files at once
+curl -X POST http://localhost:8080/api/project/init \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-project", "description": "What this project does"}'
+
+# Approve each file after reviewing
+curl -X POST http://localhost:8080/api/project/approve \
+  -H "Content-Type: application/json" \
+  -d '{"file": "project.json"}'
+```
+
+### Option B: Manual Setup
+
+Create the files directly. This is the fastest path for a demo or when you know your stack:
+
+```bash
+mkdir -p .semspec/sources/docs
+```
+
+**`.semspec/project.json`** — Project metadata:
+
+```json
+{
+  "name": "my-project",
+  "description": "Brief description of what this project does",
+  "version": "1",
+  "languages": [
+    {"name": "Go", "version": "1.25", "primary": true}
+  ],
+  "tooling": {
+    "task_runner": "Taskfile",
+    "linters": ["revive"],
+    "test_frameworks": ["testing"]
+  }
+}
+```
+
+**`.semspec/standards.json`** — Rules enforced by reviewers. Start empty, add as you go:
+
+```json
+{
+  "rules": [
+    {
+      "id": "error-handling",
+      "text": "All errors must be handled or explicitly propagated. No silently swallowed errors.",
+      "severity": "error",
+      "category": "code-quality",
+      "origin": "manual"
+    },
+    {
+      "id": "test-coverage",
+      "text": "All new functions must have corresponding test cases.",
+      "severity": "error",
+      "category": "testing",
+      "origin": "manual"
+    }
+  ]
+}
+```
+
+Rule severities: `error` (blocks approval), `warning` (flagged but allowed), `info` (informational).
+
+**`.semspec/checklist.json`** — Deterministic quality gates. These are shell commands that run
+after each agent task. A failing `required` check blocks progression to review:
+
+```json
+{
+  "checks": [
+    {
+      "name": "go-build",
+      "command": "go build ./...",
+      "trigger": ["*.go"],
+      "category": "compile",
+      "required": true,
+      "timeout": "120s",
+      "description": "Verify Go code compiles"
+    },
+    {
+      "name": "go-test",
+      "command": "go test ./...",
+      "trigger": ["*.go", "*_test.go"],
+      "category": "test",
+      "required": true,
+      "timeout": "120s",
+      "description": "Run Go unit tests"
+    }
+  ]
+}
+```
+
+Check categories: `compile`, `lint`, `typecheck`, `test`, `format`, `setup`.
+
+### SOPs (Optional but Recommended)
+
+SOPs are detailed enforcement rules stored as Markdown with YAML frontmatter in
+`.semspec/sources/docs/`. They provide richer context than `standards.json` rules — including
+ground truth, violation examples, and file-scoped applicability.
+
+See [SOP System](09-sop-system.md) for authoring and enforcement details.
+
+> **Standards vs SOPs**: `standards.json` rules are short, machine-readable statements injected
+> into every agent context. SOPs are detailed documents with examples and rationale, retrieved
+> selectively by scope and domain. Use standards for universal rules; use SOPs for nuanced,
+> context-dependent guidance.
+
 ## File Structure
 
-After working through the workflow, your `.semspec/` directory looks like:
+After initialization and running the planning workflow, your `.semspec/` directory looks like:
 
 ```
 .semspec/
+├── project.json              # Project metadata (languages, frameworks, tooling)
+├── standards.json            # Agent standards (rules injected into context)
+├── checklist.json            # Deterministic quality gates (shell commands)
 ├── sources/
 │   └── docs/                 # SOPs and source documents
 │       └── testing-sop.md    # Example SOP (optional)
-└── plans/
-    └── add-user-authentication-with-jwt-tokens/
-        ├── metadata.json     # Status, timestamps, author
-        ├── plan.json         # Goal, context, scope (JSON)
-        └── tasks.json        # Implementation tasks (JSON)
+├── plans/
+│   └── add-user-authentication-with-jwt-tokens/
+│       ├── metadata.json     # Status, timestamps, author
+│       └── plan.json         # Goal, context, scope (JSON)
+└── worktrees/                # Agent task worktrees (temporary, auto-cleaned)
 ```
 
 These files are git-friendly — commit them with your code to preserve context.
-
-SOPs in `.semspec/sources/docs/` define project-specific rules that are enforced during plan review.
-See [SOP System](09-sop-system.md) for authoring and enforcement details.
 
 ## Next Steps
 
 - Read [How Semspec Works](01-how-it-works.md) to understand the full message flow
 - Read [SOP System](09-sop-system.md) to write project-specific rules
-- Read [Workflow System](05-workflow-system.md) for validation and orchestration details
+- Read [Behavioral Controls](10-behavioral-controls.md) to understand how agent behavior is constrained
+- Read [Sandbox Security](13-sandbox-security.md) for the execution isolation model
+- Read [Plan API](12-plan-api.md) for the REST API reference
 - Run `/help` to see all available commands
 
 ## Troubleshooting

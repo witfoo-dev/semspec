@@ -119,12 +119,12 @@ Semspec is an **extension** of semstreams, not a standalone tool.
                           │
 ┌─────────────────────────────────────────────────────────┐
 │  semspec (this project)                                  │
-│  ├── Planning    (plan-coordinator, planner, reviewer)  │
-│  ├── Context     (context-builder, 6 strategies)        │
-│  ├── Sources     (source-ingester, SOP ingestion)       │
-│  ├── Execution   (task-generator, task-dispatcher)      │
-│  ├── Indexing    (ast-indexer)                          │
-│  └── Support     (workflow-api, trajectory-api, etc.)  │
+│  ├── Planning    (plan-coordinator, planner, reviewer,  │
+│  │               requirement-generator, scenario-gen)   │
+│  ├── Execution   (scenario-orchestrator, executor,      │
+│  │               execution-orchestrator, change-handler)│
+│  └── Support     (plan-api, project-api, trajectory-api,│
+│                   rdf-export, validators, Q&A, etc.)    │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -132,7 +132,7 @@ Semspec is an **extension** of semstreams, not a standalone tool.
 
 1. Semspec imports semstreams as a Go library
 2. Docker Compose runs the shared infrastructure (NATS, optional Ollama)
-3. The semspec binary registers and runs all 15 semspec-specific components
+3. The semspec binary registers and runs all 18 semspec-specific components
 
 ## What You Need Running
 
@@ -315,75 +315,73 @@ These files are git-friendly. Commit them to preserve context across sessions an
 
 ## Component Groups
 
-Semspec registers 15 components at startup alongside the full semstreams component suite.
+Semspec registers 18 components at startup alongside the full semstreams component suite.
 
 ```
 ┌──────────── Planning ────────────────────────────────────────────────┐
-│  plan-coordinator   Parallel planner orchestration (PLAN_SESSIONS)   │
-│  planner            Single-planner fallback path                     │
-│  plan-reviewer      SOP-aware plan validation with LLM review        │
-└──────────────────────────────────────────────────────────────────────┘
-
-┌──────────── Context ─────────────────────────────────────────────────┐
-│  context-builder    Strategy-based LLM context assembly              │
-│                     (6 strategies, graph readiness probe)            │
-└──────────────────────────────────────────────────────────────────────┘
-
-┌──────────── Sources ─────────────────────────────────────────────────┐
-│  source-ingester    Document and SOP ingestion with frontmatter      │
+│  plan-coordinator     Parallel planner orchestration                 │
+│  planner              Single-planner fallback path                   │
+│  plan-reviewer        SOP-aware plan validation with LLM review      │
+│  requirement-generator  Generates structured Requirements from plan  │
+│  scenario-generator   Generates BDD Scenarios from Requirements      │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────── Execution ───────────────────────────────────────────────┐
-│  task-generator     BDD task generation (static) OR advance plan to  │
-│                     ready_for_execution (reactive_mode=true)         │
-│  task-dispatcher    Dependency-aware task execution via agent loops  │
 │  scenario-orchestrator  Dispatches scenario-execution-loop per       │
-│                          pending Scenario (reactive mode only)       │
-└──────────────────────────────────────────────────────────────────────┘
-
-┌──────────── Indexing ────────────────────────────────────────────────┐
-│  ast-indexer        Code entity extraction (Go, TS, JS, Python, Java)│
+│                          pending Scenario                            │
+│  scenario-executor    Decomposes Scenarios into DAGs, serial node    │
+│                        dispatch, and scenario-level review           │
+│  execution-orchestrator  TDD pipeline per DAG node:                 │
+│                           tester → builder → validator → reviewer   │
+│  change-proposal-handler  ChangeProposal OODA loop and cascade      │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────── Support ─────────────────────────────────────────────────┐
-│  workflow-api       Workflow execution queries (HTTP)                 │
-│  trajectory-api     LLM call history queries (HTTP)                  │
-│  rdf-export         RDF serialization of graph entities              │
-│  workflow-validator Document structure validation (request/reply)    │
-│  workflow-documents File output to .semspec/plans/                   │
-│  question-answerer  LLM question answering for knowledge gaps        │
-│  question-timeout   SLA monitoring and escalation                    │
+│  plan-api             Requirement/Scenario/ChangeProposal HTTP API   │
+│  project-api          Project management HTTP API                    │
+│  trajectory-api       LLM call history queries (HTTP)                │
+│  rdf-export           RDF serialization of graph entities            │
+│  workflow-validator   Document structure validation (request/reply)  │
+│  workflow-documents   File output to .semspec/plans/                 │
+│  structural-validator  Structural integrity checks                   │
+│  question-answerer    LLM question answering for knowledge gaps      │
+│  question-timeout     SLA monitoring and escalation                  │
 └──────────────────────────────────────────────────────────────────────┘
 ```
+
+**Note**: `context-builder`, `task-generator`, `task-dispatcher`, `source-ingester`, and
+`ast-indexer` are now semstreams or semsource components, not registered by semspec directly.
+Source indexing is handled by the external semsource service.
 
 ## The Knowledge Graph
 
 Semspec stores three types of entities in the knowledge graph, which persists across sessions.
 
-### Code entities (from ast-indexer)
+### Code entities (from semsource)
 
-The AST indexer watches your repository and extracts code entities continuously:
+The semsource service watches your repository and extracts code entities continuously:
 
 - Functions and methods
 - Types and interfaces
 - Packages and imports
 
-These are published to `graph.ingest.entity` via JetStream and indexed for graph queries. The
-context-builder reads them when assembling codebase summaries and relevant code patterns.
+These are published to `graph.ingest.entity` via JetStream and indexed for graph queries. Agents
+read them when assembling codebase summaries and relevant code patterns via `graph_search` and
+`graph_query` tools.
 
-### Source documents and SOPs (from source-ingester)
+### Source documents and SOPs (from semsource)
 
 Standard Operating Procedures and reference documents stored in `.semspec/sources/docs/` are
-ingested into the graph as source entities. The plan-reviewer retrieves them automatically during
-plan review — no configuration required beyond placing the files.
+ingested into the graph as source entities by semsource. The plan-reviewer retrieves them
+automatically during plan review — no configuration required beyond placing the files.
 
 See [SOP System](09-sop-system.md) for authoring SOPs and the full enforcement lifecycle.
 
 ### Workflow entities (plans, tasks, sessions)
 
 Each plan and task becomes a graph entity with predicates describing its status, content, and
-relationships. The context-builder queries these when assembling planning context, so later plans
-benefit from awareness of earlier decisions.
+relationships. Agents query these when assembling planning context via `graph_search`, so later
+plans benefit from awareness of earlier decisions.
 
 ## LLM Configuration
 
