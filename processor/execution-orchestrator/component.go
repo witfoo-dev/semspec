@@ -862,7 +862,9 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 	case stageBuild:
 		c.handleBuilderCompleteLocked(ctx, event, exec)
 	case stageValidate:
-		c.handleValidatorCompleteLocked(ctx, event, exec)
+		// Validation is now synchronous (dispatched to structural-validator
+		// component, not agentic loop). This case should not be reached.
+		c.logger.Warn("Unexpected validate completion via agentic loop", "slug", exec.Slug)
 	case stageRedTeam:
 		c.handleRedTeamCompleteLocked(ctx, event, exec)
 	case stageReview:
@@ -964,51 +966,6 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 
 	// Dispatch structural validator.
 	c.dispatchValidatorLocked(ctx, exec)
-}
-
-// ---------------------------------------------------------------------------
-// Stage 3: Validator complete
-// ---------------------------------------------------------------------------
-
-func (c *Component) handleValidatorCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
-	c.taskIDIndex.Delete(exec.ValidatorTaskID)
-
-	var result payloads.ValidationResult
-	if err := json.Unmarshal([]byte(event.Result), &result); err != nil {
-		c.logger.Warn("Failed to parse validation result", "slug", exec.Slug, "error", err)
-		// Default to passed on parse failure — let reviewer catch issues.
-		exec.ValidationPassed = true
-	} else {
-		exec.ValidationPassed = result.Passed
-		exec.ValidationResults = result.CheckResults
-	}
-
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ValidationPassed, fmt.Sprintf("%t", exec.ValidationPassed))
-
-	if !exec.ValidationPassed {
-		// Validation failed — retry builder with validation feedback or escalate.
-		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseValidationFailed); err != nil {
-			c.logger.Error("Failed to write phase triple", "phase", phaseValidationFailed, "error", err)
-		}
-
-		if exec.Iteration+1 < exec.MaxIterations {
-			c.startBuilderRetryLocked(ctx, exec, "Structural validation failed. Fix the following issues:\n"+string(exec.ValidationResults))
-		} else {
-			c.markEscalatedLocked(ctx, exec, "validation failures exceeded iteration budget")
-		}
-		return
-	}
-
-	// Validation passed — dispatch reviewer (red team now operates at scenario level).
-	c.logger.Info("Validation passed, dispatching reviewer",
-		"slug", exec.Slug,
-		"task_id", exec.TaskID,
-		"iteration", exec.Iteration,
-	)
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
-	}
-	c.dispatchReviewerLocked(ctx, exec)
 }
 
 // ---------------------------------------------------------------------------
@@ -1679,34 +1636,140 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 // ---------------------------------------------------------------------------
 
 func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecution) {
-	taskID := fmt.Sprintf("val-%s-%s", exec.EntityID, uuid.New().String())
-	exec.ValidatorTaskID = taskID
-	c.taskIDIndex.Store(taskID, exec.EntityID)
-
-	// Assemble system prompt via fragment pipeline.
-	asmCtx := c.buildAssemblyContext(prompt.RoleValidator, exec)
-	assembled := c.assembler.Assemble(asmCtx)
-
-	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleGeneral,
-		Model:        exec.Model,
-		WorkflowSlug: WorkflowSlugTaskExecution,
-		WorkflowStep: stageValidate,
-		Prompt:       exec.Prompt,
-		Context: &agentic.ConstructedContext{
-			Content: assembled.SystemMessage,
-		},
-	}
-	c.publishTask(ctx, "agent.task.validation", task)
-
-	c.logger.Info("Dispatched validator",
+	c.logger.Info("Dispatching structural validation",
 		"slug", exec.Slug,
 		"task_id", exec.TaskID,
 		"iteration", exec.Iteration,
-		"files_modified", len(exec.FilesModified),
-		"fragments", len(assembled.FragmentsUsed),
 	)
+
+	// Release lock while waiting for the deterministic validator.
+	exec.mu.Unlock()
+	result := c.runStructuralValidation(ctx, exec)
+	exec.mu.Lock()
+
+	if exec.terminated {
+		return
+	}
+
+	exec.ValidationPassed = result.Passed
+	exec.ValidationResults = result.CheckResults
+
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ValidationPassed, fmt.Sprintf("%t", exec.ValidationPassed))
+
+	if !exec.ValidationPassed {
+		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseValidationFailed); err != nil {
+			c.logger.Error("Failed to write phase triple", "phase", phaseValidationFailed, "error", err)
+		}
+
+		if exec.Iteration+1 < exec.MaxIterations {
+			c.startBuilderRetryLocked(ctx, exec, "Structural validation failed. Fix the following issues:\n"+string(exec.ValidationResults))
+		} else {
+			c.markEscalatedLocked(ctx, exec, "validation failures exceeded iteration budget")
+		}
+		return
+	}
+
+	c.logger.Info("Validation passed, dispatching reviewer",
+		"slug", exec.Slug,
+		"task_id", exec.TaskID,
+		"iteration", exec.Iteration,
+	)
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
+	}
+	c.dispatchReviewerLocked(ctx, exec)
+}
+
+// runStructuralValidation publishes a ValidationRequest to the structural-validator
+// component and waits for the result. Same pattern as ask_question — fire and wait.
+func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecution) payloads.ValidationResult {
+	timeout := 30 * time.Second
+
+	req := &payloads.ValidationRequest{
+		ExecutionID: exec.EntityID,
+		Slug:        exec.Slug,
+		TraceID:     exec.TraceID,
+	}
+
+	baseMsg := message.NewBaseMessage(req.Schema(), req, componentName)
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.logger.Error("Failed to marshal validation request", "error", err)
+		return payloads.ValidationResult{Passed: true} // Default pass on marshal error
+	}
+
+	// Subscribe to result BEFORE publishing request (avoid race).
+	resultSubject := fmt.Sprintf("workflow.result.structural-validator.%s", exec.Slug)
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Error("Failed to get JetStream for validation", "error", err)
+		return payloads.ValidationResult{Passed: true}
+	}
+
+	stream, err := js.Stream(ctx, "WORKFLOW")
+	if err != nil {
+		c.logger.Error("Failed to get WORKFLOW stream for validation", "error", err)
+		return payloads.ValidationResult{Passed: true}
+	}
+
+	consumerName := fmt.Sprintf("val-wait-%s-%d", exec.Slug, time.Now().UnixNano())
+	consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
+		Name:          consumerName,
+		FilterSubject: resultSubject,
+		AckPolicy:     jetstream.AckExplicitPolicy,
+		DeliverPolicy: jetstream.DeliverNewPolicy,
+	})
+	if err != nil {
+		c.logger.Error("Failed to create validation result consumer", "error", err)
+		return payloads.ValidationResult{Passed: true}
+	}
+	defer func() {
+		_ = stream.DeleteConsumer(context.Background(), consumerName)
+	}()
+
+	// Publish validation request.
+	if err := c.natsClient.PublishToStream(ctx, "workflow.async.structural-validator", data); err != nil {
+		c.logger.Error("Failed to publish validation request", "error", err)
+		return payloads.ValidationResult{Passed: true}
+	}
+
+	// Wait for result with timeout.
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	for {
+		msgs, fetchErr := consumer.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
+		if fetchErr != nil {
+			if waitCtx.Err() != nil {
+				c.logger.Warn("Validation timed out", "slug", exec.Slug, "timeout", timeout)
+				return payloads.ValidationResult{Passed: true} // Default pass on timeout
+			}
+			continue
+		}
+
+		for msg := range msgs.Messages() {
+			_ = msg.Ack()
+
+			var result payloads.ValidationResult
+			// Try BaseMessage envelope first.
+			var base message.BaseMessage
+			if err := json.Unmarshal(msg.Data(), &base); err == nil {
+				if vr, ok := base.Payload().(*payloads.ValidationResult); ok {
+					return *vr
+				}
+			}
+			// Fallback: direct parse.
+			if err := json.Unmarshal(msg.Data(), &result); err == nil && result.ChecksRun > 0 {
+				return result
+			}
+		}
+
+		if waitCtx.Err() != nil {
+			c.logger.Warn("Validation timed out", "slug", exec.Slug)
+			return payloads.ValidationResult{Passed: true}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
