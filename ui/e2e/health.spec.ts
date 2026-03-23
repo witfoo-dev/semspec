@@ -1,110 +1,32 @@
-import { test, expect } from './helpers/setup';
+import { test, expect } from '@playwright/test';
+import { waitForHydration } from './helpers/hydration';
+import { connectionStatus } from './helpers/selectors';
 
-test.describe('System Health', () => {
-	test.beforeEach(async ({ page }) => {
-		// Board is the homepage, use explicit route
-		await page.goto('/board');
+test.describe('@mock @smoke health check', () => {
+	test('page loads and hydrates', async ({ page }) => {
+		await page.goto('/');
+		await waitForHydration(page);
 	});
 
-	test.describe('Health Indicator', () => {
-		test('shows healthy status when backend is available', async ({ sidebarPage }) => {
-			await sidebarPage.expectVisible();
-			await sidebarPage.expectHealthy();
-		});
-
-		test('health indicator has correct visual styling', async ({ sidebarPage }) => {
-			// When healthy, indicator should have the healthy class (green color)
-			await expect(sidebarPage.healthIndicator).toHaveClass(/healthy/);
-		});
-
-		test('status text shows "System healthy"', async ({ sidebarPage }) => {
-			const statusText = sidebarPage.systemStatus.locator('.status-text');
-			await expect(statusText).toHaveText('System healthy');
-		});
+	test('shows connected status', async ({ page }) => {
+		await page.goto('/');
+		await waitForHydration(page);
+		await expect(connectionStatus(page, 'Connected')).toBeVisible();
 	});
 
-	test.describe('Unhealthy State', () => {
-		test('shows unhealthy status when health check fails', async ({ sidebarPage, page }) => {
-			// Mock a failed health check
-			await page.route('**/agentic-dispatch/health', route => {
-				route.fulfill({
-					status: 503,
-					contentType: 'application/json',
-					body: JSON.stringify({ status: 'unhealthy', error: 'Backend unavailable' })
-				});
-			});
-
-			// Reload to trigger health check
-			await page.reload();
-
-			// Should show unhealthy state
-			await sidebarPage.expectUnhealthy();
-		});
-
-		test('unhealthy indicator has correct visual styling', async ({ sidebarPage, page }) => {
-			await page.route('**/agentic-dispatch/health', route => {
-				route.fulfill({
-					status: 503,
-					contentType: 'application/json',
-					body: JSON.stringify({ status: 'unhealthy' })
-				});
-			});
-
-			await page.reload();
-
-			// When unhealthy, indicator should NOT have the healthy class (red color)
-			await expect(sidebarPage.healthIndicator).not.toHaveClass(/healthy/);
-		});
-
-		test('status text shows "System issues" when unhealthy', async ({ sidebarPage, page }) => {
-			await page.route('**/agentic-dispatch/health', route => {
-				route.fulfill({
-					status: 503,
-					contentType: 'application/json',
-					body: JSON.stringify({ status: 'unhealthy' })
-				});
-			});
-
-			await page.reload();
-
-			const statusText = sidebarPage.systemStatus.locator('.status-text');
-			await expect(statusText).toHaveText('System issues');
-		});
+	test('left panel shows Plans mode by default', async ({ page }) => {
+		await page.goto('/');
+		await waitForHydration(page);
+		const plansRadio = page.getByRole('radio', { name: 'Plans' });
+		await expect(plansRadio).toBeVisible();
+		await expect(plansRadio).toHaveAttribute('aria-checked', 'true');
 	});
 
-	test.describe('Health Recovery', () => {
-		test('recovers to healthy state when backend becomes available', async ({ sidebarPage, page }) => {
-			// Start with unhealthy state
-			await page.route('**/agentic-dispatch/health', route => {
-				route.fulfill({
-					status: 503,
-					contentType: 'application/json',
-					body: JSON.stringify({ status: 'unhealthy' })
-				});
-			});
-
-			await page.reload();
-			await sidebarPage.expectUnhealthy();
-
-			// Remove the route to restore normal behavior
-			await page.unroute('**/agentic-dispatch/health');
-
-			// Reload to trigger fresh health check
-			await page.reload();
-
-			// Should show healthy state
-			await sidebarPage.expectHealthy();
-		});
-	});
-
-	test.describe('Health Status Accessibility', () => {
-		test('system status has live region for screen readers', async ({ sidebarPage }) => {
-			await expect(sidebarPage.systemStatus).toHaveAttribute('role', 'status');
-			await expect(sidebarPage.systemStatus).toHaveAttribute('aria-live', 'polite');
-		});
-
-		test('active loops has status role', async ({ sidebarPage }) => {
-			await expect(sidebarPage.activeLoopsCounter).toHaveAttribute('role', 'status');
-		});
+	test('navigates to new plan form', async ({ page }) => {
+		await page.goto('/');
+		await waitForHydration(page);
+		await page.getByTitle('New Plan').click();
+		await expect(page).toHaveURL('/plans/new');
+		await expect(page.getByLabel('What do you want to build?')).toBeVisible();
 	});
 });
