@@ -63,7 +63,7 @@ test.describe('@mock error-states', () => {
 				});
 			});
 
-			await approvePlanButton(page).click();
+			await approvePlanButton(page).first().click();
 
 			await expect(errorAlert(page)).toBeVisible();
 		} finally {

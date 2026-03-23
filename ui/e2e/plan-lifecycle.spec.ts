@@ -1,15 +1,15 @@
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
-import { createPlan, deletePlan, getPlan } from './helpers/api';
+import { createPlan, deletePlan, getPlan, promotePlan } from './helpers/api';
 import { MockLLMClient } from './helpers/mock-llm';
 import { startExecutionButton, planListItem } from './helpers/selectors';
 
 /**
- * Full plan lifecycle: create → approve → cascade → execute → complete.
+ * Full plan lifecycle: create → approve → cascade → approve scenarios → execute → complete.
  * Requires mock LLM (hello-world scenario).
  *
- * Serial: each step depends on the previous, and mock LLM fixtures are consumed sequentially.
- * Plan created via API to keep focus on the UI flow being tested.
+ * Two-stage approval: promote #1 approves plan, promote #2 approves scenarios.
+ * Serial: each step depends on the previous.
  */
 test.describe('@mock @happy-path plan-lifecycle', () => {
 	let slug: string;
@@ -17,7 +17,6 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 	test.describe.configure({ mode: 'serial' });
 
 	test.beforeAll(async () => {
-		// Reset mock LLM to hello-world with fresh fixture counters
 		const mockLLM = new MockLLMClient();
 		await mockLLM.resetScenario('hello-world');
 		const plan = await createPlan(`Lifecycle test ${Date.now()}`);
@@ -35,30 +34,32 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 		await expect(page.getByRole('button', { name: /Approve Plan/i }).first()).toBeVisible();
 	});
 
-	test('approve triggers cascade and reaches ready state', async ({ page }) => {
+	test('approve triggers cascade to scenarios_generated', async ({ page }) => {
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
 		await page.getByRole('button', { name: /Approve Plan/i }).first().click();
 
-		await expect(page.getByRole('button', { name: /Approve Plan/i })).not.toBeVisible({
-			timeout: 10000
-		});
-
-		// Wait for cascade to complete — "Start Execution" appears
+		// UI shows "Start Execution" when scenarios exist
 		await expect(startExecutionButton(page)).toBeVisible({ timeout: 60000 });
+
+		// Backend at scenarios_generated, awaiting 2nd promote
+		const plan = await getPlan(slug);
+		expect(plan.stage).toBe('scenarios_generated');
 	});
 
-	test('execute plan triggers execution pipeline', async ({ page }) => {
-		// Wait for backend to reach ready_for_execution (UI may show button before stage settles)
-		const preStart = Date.now();
+	test('second promote advances to ready_for_execution', async () => {
+		await promotePlan(slug);
 		let plan = await getPlan(slug);
-		while (plan.stage !== 'ready_for_execution' && Date.now() - preStart < 30000) {
-			await new Promise((r) => setTimeout(r, 1000));
+		const start = Date.now();
+		while (plan.stage !== 'ready_for_execution' && Date.now() - start < 15000) {
+			await new Promise((r) => setTimeout(r, 500));
 			plan = await getPlan(slug);
 		}
 		expect(plan.stage).toBe('ready_for_execution');
+	});
 
+	test('execute plan triggers execution pipeline', async ({ page }) => {
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
@@ -67,7 +68,7 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 
 		// Verify the pipeline advances past ready_for_execution
 		const start = Date.now();
-		plan = await getPlan(slug);
+		let plan = await getPlan(slug);
 		while (plan.stage === 'ready_for_execution' && Date.now() - start < 30000) {
 			await new Promise((r) => setTimeout(r, 1000));
 			plan = await getPlan(slug);
@@ -75,8 +76,7 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 		expect(['implementing', 'executing', 'reviewing_rollup', 'complete']).toContain(plan.stage);
 	});
 
-	// TODO: Execution stalls at reviewing_rollup with mock LLM — rollup review
-	// fixtures or component config needed. Un-skip when mock supports full cycle.
+	// TODO: Execution stalls at reviewing_rollup — rollup review mock fixture needed
 	test.skip('execution reaches complete', async ({ page }) => {
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);

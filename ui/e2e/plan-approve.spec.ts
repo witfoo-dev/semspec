@@ -1,12 +1,15 @@
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
-import { createPlan, deletePlan, getPlan } from './helpers/api';
+import { createPlan, deletePlan, getPlan, promotePlan } from './helpers/api';
 import { MockLLMClient } from './helpers/mock-llm';
 import { startExecutionButton } from './helpers/selectors';
 
 /**
- * Plan approval + cascade flow.
+ * Plan approval + cascade flow (two-stage approval).
  * Uses mock LLM (hello-world scenario).
+ *
+ * Flow: promote #1 (approve plan) → cascade → scenarios_generated
+ *       promote #2 (approve scenarios) → ready_for_execution
  *
  * Serial: the cascade consumes mock LLM fixtures, so tests must
  * share a single plan and run in order.
@@ -34,33 +37,32 @@ test.describe('@mock @happy-path plan-approve', () => {
 		await expect(page.getByRole('button', { name: /Approve Plan/i }).first()).toBeVisible();
 	});
 
-	test('approving triggers cascade and reaches ready state', async ({ page }) => {
+	test('first approval triggers cascade to scenarios_generated', async ({ page }) => {
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
 		await page.getByRole('button', { name: /Approve Plan/i }).first().click();
 
-		// Approve button should disappear after click
-		await expect(page.getByRole('button', { name: /Approve Plan/i })).not.toBeVisible({
-			timeout: 10000
-		});
-
-		// The cascade runs: planning → review → requirements → scenarios
-		// "Start Execution" appears when cascade completes
+		// UI shows "Start Execution" when scenarios exist (data-driven, not stage-driven)
 		await expect(startExecutionButton(page)).toBeVisible({ timeout: 60000 });
+
+		// Backend should be at scenarios_generated (awaiting 2nd approval)
+		const plan = await getPlan(slug);
+		expect(plan.approved).toBe(true);
+		expect(plan.stage).toBe('scenarios_generated');
 	});
 
-	test('backend confirms approved state', async () => {
-		// The UI shows "Start Execution" based on data presence (hasScenarios),
-		// but the backend stage field may still be catching up.
-		// Poll until the stage settles to ready_for_execution.
+	test('second approval advances to ready_for_execution', async () => {
+		// The backend requires a second promote to approve requirements/scenarios
+		// TODO: UI needs a "Review & Approve Scenarios" button at scenarios_generated
+		await promotePlan(slug);
+
 		let plan = await getPlan(slug);
 		const start = Date.now();
-		while (plan.stage !== 'ready_for_execution' && Date.now() - start < 30000) {
-			await new Promise((r) => setTimeout(r, 1000));
+		while (plan.stage !== 'ready_for_execution' && Date.now() - start < 15000) {
+			await new Promise((r) => setTimeout(r, 500));
 			plan = await getPlan(slug);
 		}
-		expect(plan.approved).toBe(true);
 		expect(plan.stage).toBe('ready_for_execution');
 	});
 
