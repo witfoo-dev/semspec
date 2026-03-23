@@ -176,7 +176,6 @@ type GitHubMetadata struct {
 type PlanFiles struct {
 	HasPlan            bool `json:"has_plan"`
 	HasTasks           bool `json:"has_tasks"`
-	HasPhases          bool `json:"has_phases"`
 	HasRequirements    bool `json:"has_requirements"`
 	HasScenarios       bool `json:"has_scenarios"`
 	HasChangeProposals bool `json:"has_change_proposals"`
@@ -529,9 +528,6 @@ type Task struct {
 
 	// PlanID is the parent plan entity ID
 	PlanID string `json:"plan_id"`
-
-	// PhaseID is the parent phase ID. Required when phases exist.
-	PhaseID string `json:"phase_id"`
 
 	// Sequence is the order within the plan (1-indexed)
 	Sequence int `json:"sequence"`

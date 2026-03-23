@@ -53,15 +53,6 @@
           "mock-fast"
         ]
       },
-      "phase_generation": {
-        "description": "Phase decomposition (mock: returns canned phases)",
-        "preferred": [
-          "mock-phase-generator"
-        ],
-        "fallback": [
-          "mock-fast"
-        ]
-      },
       "requirement_generation": {
         "description": "Requirement decomposition (mock: returns canned requirements)",
         "preferred": [
@@ -78,24 +69,6 @@
         ],
         "fallback": [
           "mock-planner"
-        ]
-      },
-      "task_generation": {
-        "description": "Task decomposition (mock: returns canned tasks)",
-        "preferred": [
-          "mock-task-generator"
-        ],
-        "fallback": [
-          "mock-fast"
-        ]
-      },
-      "task_reviewing": {
-        "description": "Task review (mock: returns approved verdict)",
-        "preferred": [
-          "mock-task-reviewer"
-        ],
-        "fallback": [
-          "mock-fast"
         ]
       },
       "fast": {
@@ -119,12 +92,6 @@
         "model": "mock-reviewer",
         "max_tokens": 8192
       },
-      "mock-phase-generator": {
-        "provider": "ollama",
-        "url": "http://mock-llm:11434/v1",
-        "model": "mock-phase-generator",
-        "max_tokens": 8192
-      },
       "mock-requirement-generator": {
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
@@ -136,18 +103,6 @@
         "url": "http://mock-llm:11434/v1",
         "model": "mock-scenario-generator",
         "max_tokens": 32768
-      },
-      "mock-task-generator": {
-        "provider": "ollama",
-        "url": "http://mock-llm:11434/v1",
-        "model": "mock-task-generator",
-        "max_tokens": 8192
-      },
-      "mock-task-reviewer": {
-        "provider": "ollama",
-        "url": "http://mock-llm:11434/v1",
-        "model": "mock-task-reviewer",
-        "max_tokens": 8192
       },
       "mock-coder": {
         "provider": "ollama",
@@ -256,10 +211,6 @@
             "url": "http://mock-llm:11434/v1",
             "model": "mock-reviewer"
           },
-          "mock-phase-generator": {
-            "url": "http://mock-llm:11434/v1",
-            "model": "mock-phase-generator"
-          },
           "mock-requirement-generator": {
             "url": "http://mock-llm:11434/v1",
             "model": "mock-requirement-generator"
@@ -267,14 +218,6 @@
           "mock-scenario-generator": {
             "url": "http://mock-llm:11434/v1",
             "model": "mock-scenario-generator"
-          },
-          "mock-task-generator": {
-            "url": "http://mock-llm:11434/v1",
-            "model": "mock-task-generator"
-          },
-          "mock-task-reviewer": {
-            "url": "http://mock-llm:11434/v1",
-            "model": "mock-task-reviewer"
           },
           "mock-coder": {
             "url": "http://mock-llm:11434/v1",
@@ -288,11 +231,8 @@
         "model_aliases": {
           "mock-planner": "mock-planner",
           "mock-reviewer": "mock-reviewer",
-          "mock-phase-generator": "mock-phase-generator",
           "mock-requirement-generator": "mock-requirement-generator",
           "mock-scenario-generator": "mock-scenario-generator",
-          "mock-task-generator": "mock-task-generator",
-          "mock-task-reviewer": "mock-task-reviewer",
           "mock-coder": "mock-coder",
           "mock-fast": "mock-fast",
           "default": "mock-planner"
@@ -509,7 +449,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "phase-generator",
         "trigger_subject": "workflow.async.phase-generator",
-        "default_capability": "phase_generation"
+        "default_capability": "planning"
       }
     },
     "requirement-generator": {
@@ -542,7 +482,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "task-generator",
         "trigger_subject": "workflow.async.task-generator",
-        "default_capability": "task_generation"
+        "default_capability": "planning"
       }
     },
     "trajectory-api": {
@@ -586,7 +526,7 @@
         "consumer_name": "task-reviewer",
         "trigger_subject": "workflow.async.task-reviewer",
         "result_subject_prefix": "workflow.result.task-reviewer",
-        "default_capability": "task_reviewing"
+        "default_capability": "reviewing"
       }
     },
     "project-api": {

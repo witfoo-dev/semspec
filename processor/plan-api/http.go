@@ -753,7 +753,7 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 			http.Error(w, "Failed to approve plan", http.StatusInternalServerError)
 			return
 		}
-		c.logger.Info("Plan approved via REST API", "slug", slug)
+		c.logger.Info("Plan approved via REST API", "slug", slug, "status", plan.Status)
 
 		// Publish plan entity and approval to graph (best-effort)
 		if pubErr := c.publishPlanEntity(r.Context(), plan); pubErr != nil {
@@ -764,10 +764,23 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 			c.logger.Warn("Failed to publish plan approval entity", "slug", slug, "error", pubErr)
 		}
 
-		// Trigger requirement/scenario generation cascade (ADR-026).
-		// This publishes to workflow.async.requirement-generator, which chains
-		// through scenario generation and transitions to ready_for_execution.
-		c.triggerRequirementGeneration(r.Context(), plan)
+		// Determine which round this approval is for based on plan state.
+		// Round 1: plan has no requirements yet → trigger requirement generation.
+		// Round 2: requirements/scenarios exist → plan is ready for execution.
+		requirements, _ := manager.LoadRequirements(r.Context(), slug)
+		if len(requirements) == 0 {
+			// Round 1 — human approved the plan, start requirement/scenario generation.
+			c.logger.Info("Round 1 human approval: triggering requirement generation", "slug", slug)
+			c.triggerRequirementGeneration(r.Context(), plan)
+		} else {
+			// Round 2 — human approved requirements/scenarios, mark ready for execution.
+			c.logger.Info("Round 2 human approval: plan ready for execution", "slug", slug)
+			if err := manager.SetPlanStatus(r.Context(), plan, workflow.StatusReadyForExecution); err != nil {
+				c.logger.Error("Failed to set plan ready for execution", "slug", slug, "error", err)
+				http.Error(w, "Failed to update plan status", http.StatusInternalServerError)
+				return
+			}
+		}
 	}
 
 	resp := &PlanWithStatus{

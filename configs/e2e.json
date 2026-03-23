@@ -62,15 +62,6 @@
           "qwen"
         ]
       },
-      "phase_generation": {
-        "description": "Phase decomposition from approved plans",
-        "preferred": [
-          "qwen"
-        ],
-        "fallback": [
-          "qwen"
-        ]
-      }
     },
     "endpoints": {
       "qwen": {

@@ -75,6 +75,13 @@ type coordinationExecution struct {
 	SynthesizedPlan *SynthesizedPlan
 	SynthesisLLMID  string // LLM request ID from synthesis call
 
+	// --- Review round tracking ---
+
+	// ReviewRound tracks which review gate we're at:
+	//   1 = plan review (after synthesis, before requirement generation)
+	//   2 = requirements/scenarios review (after scenario generation, before execution)
+	ReviewRound int
+
 	// --- Timeout ---
 
 	timeoutTimer *timeoutHandle

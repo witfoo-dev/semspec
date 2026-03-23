@@ -53,33 +53,6 @@
           "mock-fast"
         ]
       },
-      "task_generation": {
-        "description": "Task decomposition (mock: returns canned tasks)",
-        "preferred": [
-          "mock-task-generator"
-        ],
-        "fallback": [
-          "mock-fast"
-        ]
-      },
-      "task_reviewing": {
-        "description": "Task review (mock: returns approved verdict)",
-        "preferred": [
-          "mock-task-reviewer"
-        ],
-        "fallback": [
-          "mock-fast"
-        ]
-      },
-      "phase_generation": {
-        "description": "Phase decomposition (mock: returns canned phases)",
-        "preferred": [
-          "mock-phase-generator"
-        ],
-        "fallback": [
-          "mock-fast"
-        ]
-      },
       "requirement_generation": {
         "description": "Requirement decomposition (mock: returns canned requirements)",
         "preferred": [
@@ -117,24 +90,6 @@
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-reviewer",
-        "max_tokens": 32768
-      },
-      "mock-task-generator": {
-        "provider": "ollama",
-        "url": "http://mock-llm:11434/v1",
-        "model": "mock-task-generator",
-        "max_tokens": 32768
-      },
-      "mock-task-reviewer": {
-        "provider": "ollama",
-        "url": "http://mock-llm:11434/v1",
-        "model": "mock-task-reviewer",
-        "max_tokens": 32768
-      },
-      "mock-phase-generator": {
-        "provider": "ollama",
-        "url": "http://mock-llm:11434/v1",
-        "model": "mock-phase-generator",
         "max_tokens": 32768
       },
       "mock-requirement-generator": {

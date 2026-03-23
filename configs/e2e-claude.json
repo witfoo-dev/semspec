@@ -53,15 +53,6 @@
           "claude-sonnet"
         ]
       },
-      "phase_generation": {
-        "description": "Phase decomposition from approved plans",
-        "preferred": [
-          "claude-sonnet"
-        ],
-        "fallback": [
-          "claude-sonnet"
-        ]
-      },
       "fast": {
         "description": "Quick responses, simple tasks",
         "preferred": [
@@ -378,7 +369,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "phase-generator",
         "trigger_subject": "workflow.async.phase-generator",
-        "default_capability": "phase_generation"
+        "default_capability": "planning"
       }
     },
     "task-generator": {

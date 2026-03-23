@@ -662,16 +662,18 @@ func (c *Component) finishSynthesisLocked(ctx context.Context, exec *coordinatio
 
 	c.advancePhase(ctx, exec, phasePlanned)
 
-	c.logger.Info("Plan synthesized, dispatching reviewer",
+	c.logger.Info("Plan synthesized, dispatching reviewer (round 1)",
 		"entity_id", entityID,
 		"slug", exec.Slug,
 		"planner_count", exec.ExpectedPlanners,
 	)
 
 	c.publishEntity(context.Background(), NewCoordinationEntity(exec).WithPhase(phasePlanned))
-	// Requirement generation is triggered AFTER approval (auto or human),
-	// not immediately after synthesis. See handleReviewResult for auto_approve
-	// and handlePromotePlan in plan-api for human approval.
+
+	// Dispatch plan reviewer (round 1). On approval, handleReviewerCompleteLocked
+	// triggers requirement/scenario generation (round 2).
+	exec.ReviewRound = 1
+	c.dispatchReviewerLocked(ctx, exec)
 }
 
 // ---------------------------------------------------------------------------
@@ -1012,7 +1014,8 @@ func (c *Component) handleScenariosGeneratedLocked(ctx context.Context, exec *co
 
 	c.advancePhase(ctx, exec, phaseScenariosGenerated)
 
-	// Advance to review.
+	// Dispatch reviewer (round 2) — reviews requirements + scenarios together.
+	exec.ReviewRound = 2
 	c.dispatchReviewerLocked(ctx, exec)
 }
 
@@ -1039,60 +1042,97 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 
 	switch verdict {
 	case "approved":
-		if c.config.AutoApprove {
-			// Auto-approve: approve + trigger requirement/scenario generation.
-			c.advancePhase(ctx, exec, phaseApproved)
-			c.publishPlanApprovedEvent(ctx, exec, verdict, summary)
-			c.dispatchRequirementGeneratorLocked(ctx, exec)
-		} else {
-			// Human gate: pause at awaiting_human. A human must call
-			// POST /plans/{slug}/approve to advance to phaseApproved.
-			// Requirement generation is triggered from handlePromotePlan
-			// in plan-api after human approval.
-			c.advancePhase(ctx, exec, phaseAwaitingHuman)
-			c.logger.Info("Plan awaiting human approval",
-				"slug", exec.Slug, "iteration", exec.Iteration)
-			exec.terminated = true
-			c.coordinationsCompleted.Add(1)
-			c.cleanupExecutionLocked(exec)
-		}
+		c.handleReviewApprovalLocked(ctx, exec, verdict, summary)
 
 	case "needs_changes":
-		exec.Iteration++
-		exec.ReviewFeedback = summary
-		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Iteration, exec.Iteration)
-
-		if exec.Iteration >= c.config.MaxReviewIterations {
-			c.logger.Warn("Review budget exhausted, escalating",
-				"slug", exec.Slug,
-				"iteration", exec.Iteration,
-				"max", c.config.MaxReviewIterations,
-			)
-			c.advancePhase(ctx, exec, phaseEscalated)
-			exec.terminated = true
-			c.coordinationsFailed.Add(1)
-			c.cleanupExecutionLocked(exec)
-			return
-		}
-
-		c.logger.Info("Reviewer requested changes, retrying planner",
-			"slug", exec.Slug,
-			"iteration", exec.Iteration,
-			"max", c.config.MaxReviewIterations,
-			"feedback_length", len(summary),
-		)
-
-		// Re-dispatch the planner with reviewer feedback. The full pipeline
-		// (plan → requirements → scenarios → review) runs again.
-		c.advancePhase(ctx, exec, phasePlanning)
-		exec.CompletedResults = make(map[string]*workflow.PlannerResult)
-		exec.PlannerTaskIDs = nil
-		c.dispatchPlannersLocked(ctx, exec)
+		c.handleReviewRejectionLocked(ctx, exec, summary)
 
 	default:
 		c.logger.Warn("Unknown reviewer verdict, treating as error",
 			"verdict", verdict, "slug", exec.Slug)
 		c.markErrorLocked(ctx, exec, fmt.Sprintf("unknown reviewer verdict: %s", verdict))
+	}
+}
+
+// handleReviewApprovalLocked processes an "approved" verdict from the reviewer.
+// Round 1 approval triggers requirement/scenario generation (round 2).
+// Round 2 approval means the plan is complete and ready for execution.
+// Caller must hold exec.mu.
+func (c *Component) handleReviewApprovalLocked(ctx context.Context, exec *coordinationExecution, verdict, summary string) {
+	if exec.ReviewRound <= 1 {
+		// Round 1: plan approved — start requirement/scenario generation.
+		if c.config.AutoApprove {
+			c.logger.Info("Round 1 approved (auto), starting requirement generation",
+				"slug", exec.Slug)
+			c.advancePhase(ctx, exec, phaseApproved)
+			c.publishPlanApprovedEvent(ctx, exec, verdict, summary)
+			c.dispatchRequirementGeneratorLocked(ctx, exec)
+		} else {
+			// Human gate: pause for human to review/CRUD plan before approving.
+			c.advancePhase(ctx, exec, phaseAwaitingHuman)
+			c.logger.Info("Round 1 awaiting human approval (plan review)",
+				"slug", exec.Slug, "iteration", exec.Iteration)
+			exec.terminated = true
+			c.coordinationsCompleted.Add(1)
+			c.cleanupExecutionLocked(exec)
+		}
+	} else {
+		// Round 2: requirements + scenarios approved — plan is complete.
+		c.advancePhase(ctx, exec, phaseApproved)
+		c.publishPlanApprovedEvent(ctx, exec, verdict, summary)
+
+		c.logger.Info("Round 2 approved, plan ready for execution",
+			"slug", exec.Slug)
+
+		exec.terminated = true
+		c.coordinationsCompleted.Add(1)
+		c.cleanupExecutionLocked(exec)
+	}
+}
+
+// handleReviewRejectionLocked processes a "needs_changes" verdict.
+// Round 1 rejection retries planning. Round 2 rejection retries
+// requirement/scenario generation.
+// Caller must hold exec.mu.
+func (c *Component) handleReviewRejectionLocked(ctx context.Context, exec *coordinationExecution, summary string) {
+	exec.Iteration++
+	exec.ReviewFeedback = summary
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Iteration, exec.Iteration)
+
+	if exec.Iteration >= c.config.MaxReviewIterations {
+		c.logger.Warn("Review budget exhausted, escalating",
+			"slug", exec.Slug,
+			"round", exec.ReviewRound,
+			"iteration", exec.Iteration,
+			"max", c.config.MaxReviewIterations,
+		)
+		c.advancePhase(ctx, exec, phaseEscalated)
+		exec.terminated = true
+		c.coordinationsFailed.Add(1)
+		c.cleanupExecutionLocked(exec)
+		return
+	}
+
+	if exec.ReviewRound <= 1 {
+		// Round 1 rejection: retry planning.
+		c.logger.Info("Round 1 reviewer requested changes, retrying planners",
+			"slug", exec.Slug,
+			"iteration", exec.Iteration,
+			"max", c.config.MaxReviewIterations,
+		)
+		c.advancePhase(ctx, exec, phasePlanning)
+		exec.CompletedResults = make(map[string]*workflow.PlannerResult)
+		exec.PlannerTaskIDs = nil
+		c.dispatchPlannersLocked(ctx, exec)
+	} else {
+		// Round 2 rejection: retry requirement/scenario generation.
+		c.logger.Info("Round 2 reviewer requested changes, retrying requirement generation",
+			"slug", exec.Slug,
+			"iteration", exec.Iteration,
+			"max", c.config.MaxReviewIterations,
+		)
+		c.advancePhase(ctx, exec, phaseGeneratingRequirements)
+		c.dispatchRequirementGeneratorLocked(ctx, exec)
 	}
 }
 
