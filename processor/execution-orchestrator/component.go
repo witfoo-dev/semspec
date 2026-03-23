@@ -749,23 +749,35 @@ func (c *Component) handleQuestionLocked(ctx context.Context, event *agentic.Loo
 		)
 
 		if err := c.questionStore.Store(ctx, q); err != nil {
-			c.logger.Error("Failed to store question", "error", err)
-			// Don't return — still record the pause state.
-		} else {
-			exec.WaitingForQuestionID = q.ID
+			c.logger.Error("Failed to store question in KV", "error", err)
+			// Don't return — still write to graph and record the pause state.
+		}
 
-			// Route the question to an answerer (el jefe or human).
-			if c.questionRouter != nil {
-				result, routeErr := c.questionRouter.RouteQuestion(ctx, q)
-				if routeErr != nil {
-					c.logger.Warn("Failed to route question",
-						"question_id", q.ID, "error", routeErr)
-				} else {
-					c.logger.Info("Question routed",
-						"question_id", q.ID,
-						"answerer", result.Route.Answerer,
-						"message", result.Message)
-				}
+		exec.WaitingForQuestionID = q.ID
+
+		// Write question entity to graph (source of truth, survives restart).
+		questionEntityID := "question." + q.ID
+		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.text", q.Question)
+		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.context", q.Context)
+		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.status", string(workflow.QuestionStatusPending))
+		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.category", string(q.Category))
+		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.from_agent", q.FromAgent)
+		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.execution_entity", exec.EntityID)
+		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.workflow_step", event.WorkflowStep)
+		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.trace_id", exec.TraceID)
+		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.slug", exec.Slug)
+
+		// Route the question to an answerer (el jefe or human).
+		if c.questionRouter != nil {
+			result, routeErr := c.questionRouter.RouteQuestion(ctx, q)
+			if routeErr != nil {
+				c.logger.Warn("Failed to route question",
+					"question_id", q.ID, "error", routeErr)
+			} else {
+				c.logger.Info("Question routed",
+					"question_id", q.ID,
+					"answerer", result.Route.Answerer,
+					"message", result.Message)
 			}
 		}
 	}

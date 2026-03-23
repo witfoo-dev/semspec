@@ -16,6 +16,7 @@ import (
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/answerer"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -38,6 +39,7 @@ type Component struct {
 
 	llmClient     llmCompleter
 	questionStore *workflow.QuestionStore
+	tripleWriter  *graphutil.TripleWriter
 
 	// Lifecycle
 	running   bool
@@ -97,6 +99,11 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		logger:        logger,
 		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger)),
 		questionStore: store,
+		tripleWriter: &graphutil.TripleWriter{
+			NATSClient:    deps.NATSClient,
+			Logger:        logger,
+			ComponentName: "question-answerer",
+		},
 	}, nil
 }
 
@@ -312,12 +319,21 @@ func (c *Component) buildPromptWithContext(task *answerer.QuestionAnswerTask, gr
 
 // publishAnswer publishes the answer to the question.answer subject.
 func (c *Component) publishAnswer(ctx context.Context, task *answerer.QuestionAnswerTask, answer string) error {
+	answeredBy := fmt.Sprintf("agent/%s", task.AgentName)
+
+	// Write answer triples to graph (source of truth).
+	questionEntityID := "question." + task.QuestionID
+	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.status", string(workflow.QuestionStatusAnswered))
+	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.answer", answer)
+	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.answered_by", answeredBy)
+
+	// Publish answer event so the execution-orchestrator can resume.
 	payload := &workflow.AnswerPayload{
 		QuestionID:   task.QuestionID,
-		AnsweredBy:   fmt.Sprintf("agent/%s", task.AgentName),
+		AnsweredBy:   answeredBy,
 		AnswererType: "agent",
 		Answer:       answer,
-		Confidence:   "medium", // Could be determined from LLM response
+		Confidence:   "medium",
 		Sources:      "LLM generation",
 	}
 
@@ -331,6 +347,11 @@ func (c *Component) publishAnswer(ctx context.Context, task *answerer.QuestionAn
 	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
 		return fmt.Errorf("publish to %s: %w", subject, err)
 	}
+
+	c.logger.Info("Answer published",
+		"question_id", task.QuestionID,
+		"answered_by", answeredBy,
+		"subject", subject)
 
 	return nil
 }
