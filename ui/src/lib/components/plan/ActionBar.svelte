@@ -4,21 +4,28 @@
 
 	interface Props {
 		plan: PlanWithStatus;
+		hasRequirements?: boolean;
+		hasScenarios?: boolean;
 		onPromote: () => Promise<void>;
 		onExecute: () => Promise<void>;
 		onReplay?: () => Promise<void>;
 	}
 
-	let { plan, onPromote, onExecute, onReplay }: Props = $props();
+	let { plan, hasRequirements = false, hasScenarios = false, onPromote, onExecute, onReplay }: Props = $props();
 
 	// Button visibility logic
 	const showApprovePlan = $derived(!plan.approved && !!plan.goal);
 
-	// Cascade status: show when plan is approved but not yet ready for execution
-	const cascadeStages: PlanStage[] = ['approved', 'requirements_generated', 'scenarios_generated'];
-	const isCascading = $derived(plan.approved && cascadeStages.includes(plan.stage));
+	// Cascade: approved but requirements/scenarios not yet generated
+	// If data already exists, skip the cascade status even if stage is stale
+	const isCascading = $derived(
+		plan.approved &&
+			!hasScenarios &&
+			['approved', 'requirements_generated', 'scenarios_generated'].includes(plan.stage)
+	);
 
 	const cascadeLabel = $derived.by(() => {
+		if (hasRequirements && !hasScenarios) return 'Generating scenarios...';
 		switch (plan.stage) {
 			case 'approved':
 				return 'Generating requirements...';
@@ -31,20 +38,21 @@
 		}
 	});
 
-	// Execute when auto-cascade is complete
+	// Execute: ready when approved + has scenarios (regardless of stage field)
 	const showExecute = $derived(
 		plan.approved &&
-			['ready_for_execution', 'tasks_approved', 'tasks', 'tasks_generated'].includes(plan.stage)
+			hasScenarios &&
+			!['implementing', 'executing', 'complete', 'failed', 'reviewing_rollup'].includes(plan.stage)
 	);
 
 	// Show executing status when plan is actively running
 	const isExecuting = $derived(
-		plan.approved && ['implementing', 'executing'].includes(plan.stage)
+		plan.approved && ['implementing', 'executing', 'reviewing_rollup'].includes(plan.stage)
 	);
 
-	// Replay when plan has failed or been escalated
+	// Replay when plan has failed
 	const showReplay = $derived(
-		plan.approved && ['failed'].includes(plan.stage) && !!onReplay
+		plan.approved && plan.stage === 'failed' && !!onReplay
 	);
 
 	// Loading states

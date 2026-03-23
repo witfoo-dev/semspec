@@ -24,6 +24,10 @@
 	const plan = $derived(data.plan);
 	const pipeline = $derived(plan ? derivePlanPipeline(plan) : null);
 	const tasks = $derived(data.tasks);
+	const requirements = $derived(data.requirements);
+	const scenariosByReq = $derived(data.scenariosByReq);
+	const hasRequirements = $derived(requirements.length > 0);
+	const hasScenarios = $derived(Object.values(scenariosByReq).some((s) => s.length > 0));
 
 	const activeRejection = $derived.by(() => {
 		const rejectedTask = tasks.find((t) => t.rejection && t.status === 'in_progress');
@@ -125,6 +129,8 @@
 					{/if}
 					<ActionBar
 						{plan}
+						{hasRequirements}
+						{hasScenarios}
 						onPromote={handlePromote}
 						onExecute={handleExecute}
 						onReplay={handleReplay}
