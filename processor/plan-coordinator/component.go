@@ -673,6 +673,7 @@ func (c *Component) finishSynthesisLocked(ctx context.Context, exec *coordinatio
 	// Dispatch plan reviewer (round 1). On approval, handleReviewerCompleteLocked
 	// triggers requirement/scenario generation (round 2).
 	exec.ReviewRound = 1
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.coordination.review_round", 1)
 	c.dispatchReviewerLocked(ctx, exec)
 }
 
@@ -1016,6 +1017,7 @@ func (c *Component) handleScenariosGeneratedLocked(ctx context.Context, exec *co
 
 	// Dispatch reviewer (round 2) — reviews requirements + scenarios together.
 	exec.ReviewRound = 2
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.coordination.review_round", 2)
 	c.dispatchReviewerLocked(ctx, exec)
 }
 

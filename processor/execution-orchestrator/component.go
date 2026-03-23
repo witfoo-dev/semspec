@@ -639,6 +639,19 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.MaxIterations, c.config.MaxIterations)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
 
+	// Write durable fields needed for restart recovery.
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.model", exec.Model)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.current_stage", phaseTesting)
+	if exec.Prompt != "" {
+		_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.prompt", exec.Prompt)
+	}
+	if exec.AgentID != "" {
+		_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.agent_id", exec.AgentID)
+	}
+	if exec.BlueTeamID != "" {
+		_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.blue_team_id", exec.BlueTeamID)
+	}
+
 	// Create sandbox worktree if sandbox is enabled.
 	if c.sandbox != nil {
 		var wtOpts []sandbox.WorktreeOption

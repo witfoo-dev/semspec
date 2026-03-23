@@ -90,6 +90,105 @@ func (tw *TripleWriter) WriteTriple(ctx context.Context, entityID, predicate str
 	return nil
 }
 
+// ReadEntity fetches an entity's triples from ENTITY_STATES via graph-ingest
+// NATS request/reply. Returns a map of predicate → object (as string).
+// Non-string objects are JSON-encoded.
+func (tw *TripleWriter) ReadEntity(ctx context.Context, entityID string) (map[string]string, error) {
+	if tw.NATSClient == nil {
+		return nil, fmt.Errorf("NATS client not configured")
+	}
+
+	reqData, err := json.Marshal(map[string]string{"id": entityID})
+	if err != nil {
+		return nil, fmt.Errorf("marshal entity query: %w", err)
+	}
+
+	respData, err := tw.NATSClient.Request(ctx, "graph.ingest.query.entity", reqData, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("query entity %s: %w", entityID, err)
+	}
+
+	var entity graph.EntityState
+	if err := json.Unmarshal(respData, &entity); err != nil {
+		return nil, fmt.Errorf("unmarshal entity %s: %w", entityID, err)
+	}
+
+	result := make(map[string]string, len(entity.Triples))
+	for _, t := range entity.Triples {
+		switch v := t.Object.(type) {
+		case string:
+			result[t.Predicate] = v
+		case float64:
+			if v == float64(int64(v)) {
+				result[t.Predicate] = fmt.Sprintf("%d", int64(v))
+			} else {
+				result[t.Predicate] = fmt.Sprintf("%g", v)
+			}
+		case bool:
+			result[t.Predicate] = fmt.Sprintf("%t", v)
+		default:
+			data, _ := json.Marshal(v)
+			result[t.Predicate] = string(data)
+		}
+	}
+
+	return result, nil
+}
+
+// ReadEntitiesByPrefix fetches all entities matching an ID prefix from
+// ENTITY_STATES via graph-ingest. Returns a map of entityID → predicate map.
+func (tw *TripleWriter) ReadEntitiesByPrefix(ctx context.Context, prefix string, limit int) (map[string]map[string]string, error) {
+	if tw.NATSClient == nil {
+		return nil, fmt.Errorf("NATS client not configured")
+	}
+
+	if limit <= 0 {
+		limit = 100
+	}
+
+	reqData, err := json.Marshal(map[string]any{"prefix": prefix, "limit": limit})
+	if err != nil {
+		return nil, fmt.Errorf("marshal prefix query: %w", err)
+	}
+
+	respData, err := tw.NATSClient.Request(ctx, "graph.ingest.query.prefix", reqData, 10*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("query prefix %s: %w", prefix, err)
+	}
+
+	var resp struct {
+		Entities []graph.EntityState `json:"entities"`
+	}
+	if err := json.Unmarshal(respData, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal prefix response: %w", err)
+	}
+
+	result := make(map[string]map[string]string, len(resp.Entities))
+	for _, entity := range resp.Entities {
+		triples := make(map[string]string, len(entity.Triples))
+		for _, t := range entity.Triples {
+			switch v := t.Object.(type) {
+			case string:
+				triples[t.Predicate] = v
+			case float64:
+				if v == float64(int64(v)) {
+					triples[t.Predicate] = fmt.Sprintf("%d", int64(v))
+				} else {
+					triples[t.Predicate] = fmt.Sprintf("%g", v)
+				}
+			case bool:
+				triples[t.Predicate] = fmt.Sprintf("%t", v)
+			default:
+				data, _ := json.Marshal(v)
+				triples[t.Predicate] = string(data)
+			}
+		}
+		result[entity.ID] = triples
+	}
+
+	return result, nil
+}
+
 // PortSubject extracts the subject string from a port's config.
 // Works with both NATSPort and JetStreamPort configurations.
 // Returns an empty string if the port has no config or no subjects.
