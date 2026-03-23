@@ -202,3 +202,34 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 		execute: executeState
 	};
 }
+
+/**
+ * Human-readable label for a plan stage.
+ */
+export function getStageLabel(stage: PlanStage): string {
+	const labels: Record<string, string> = {
+		draft: 'Draft',
+		drafting: 'Draft',
+		ready_for_approval: 'Ready for Approval',
+		reviewed: 'Reviewed',
+		needs_changes: 'Needs Changes',
+		planning: 'Planning',
+		approved: 'Approved',
+		rejected: 'Rejected',
+		requirements_generated: 'Requirements Generated',
+		scenarios_generated: 'Scenarios Generated',
+		ready_for_execution: 'Ready to Execute',
+		phases_generated: 'Phases Generated',
+		phases_approved: 'Phases Approved',
+		tasks_generated: 'Tasks Generated',
+		tasks_approved: 'Ready to Execute',
+		tasks: 'Ready to Execute',
+		implementing: 'Executing',
+		executing: 'Executing',
+		reviewing_rollup: 'Reviewing',
+		complete: 'Complete',
+		archived: 'Archived',
+		failed: 'Failed'
+	};
+	return labels[stage] ?? stage;
+}

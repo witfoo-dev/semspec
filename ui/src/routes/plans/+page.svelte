@@ -2,7 +2,7 @@
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import ModeIndicator from '$lib/components/board/ModeIndicator.svelte';
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
-	import { derivePlanPipeline, type PlanStage, type PlanWithStatus } from '$lib/types/plan';
+	import { derivePlanPipeline, getStageLabel, type PlanWithStatus } from '$lib/types/plan';
 	import type { LayoutData } from '../$types';
 
 	interface Props {
@@ -51,51 +51,6 @@
 		return 'just now';
 	}
 
-	function getStageLabel(stage: PlanStage): string {
-		switch (stage) {
-			case 'draft':
-			case 'drafting':
-				return 'Draft';
-			case 'ready_for_approval':
-				return 'Ready for Approval';
-			case 'reviewed':
-				return 'Reviewed';
-			case 'needs_changes':
-				return 'Needs Changes';
-			case 'planning':
-				return 'Planning';
-			case 'approved':
-				return 'Approved';
-			case 'rejected':
-				return 'Rejected';
-			case 'requirements_generated':
-				return 'Reqs Generated';
-			case 'scenarios_generated':
-				return 'Scenarios Generated';
-			case 'ready_for_execution':
-				return 'Ready';
-			case 'phases_generated':
-				return 'Phases Generated';
-			case 'phases_approved':
-				return 'Phases Approved';
-			case 'tasks_generated':
-				return 'Tasks Generated';
-			case 'tasks_approved':
-			case 'tasks':
-				return 'Ready';
-			case 'implementing':
-			case 'executing':
-				return 'Executing';
-			case 'complete':
-				return 'Complete';
-			case 'archived':
-				return 'Archived';
-			case 'failed':
-				return 'Failed';
-			default:
-				return stage;
-		}
-	}
 </script>
 
 <svelte:head>

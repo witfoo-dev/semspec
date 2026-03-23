@@ -1,24 +1,17 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { invalidate } from '$app/navigation';
 	import Icon from '$lib/components/shared/Icon.svelte';
-	// ThreePanelLayout is now at the root layout level — plan detail renders directly in the center panel
 	import ModeIndicator from '$lib/components/board/ModeIndicator.svelte';
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
 	import PlanDetailPanel from '$lib/components/plan/PlanDetailPanel.svelte';
 	import RejectionBanner from '$lib/components/plan/RejectionBanner.svelte';
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
-	// ReviewDashboard and TrajectoryPanel are now rendered in the layout-level RightPanel
-	import { planSelectionStore, type PlanSelection } from '$lib/stores/planSelection.svelte';
+	import { planSelectionStore } from '$lib/stores/planSelection.svelte';
 	import { api } from '$lib/api/client';
 	import { promotePlan, executePlan } from '$lib/actions/plans';
-	import { derivePlanPipeline, type PlanStage } from '$lib/types/plan';
-	import type { Task } from '$lib/types/task';
-	import type { Phase } from '$lib/types/phase';
-	import type { Requirement } from '$lib/types/requirement';
-	import type { Scenario } from '$lib/types/scenario';
+	import { derivePlanPipeline, getStageLabel } from '$lib/types/plan';
 	import type { PageData } from './$types';
 
 	interface Props {
@@ -27,125 +20,56 @@
 
 	let { data }: Props = $props();
 
+	// All data comes from SvelteKit load function — no local $state copies
 	const slug = $derived(page.params.slug);
 	const plan = $derived(data.plan);
 	const pipeline = $derived(plan ? derivePlanPipeline(plan) : null);
+	const requirements = $derived(data.requirements);
+	const scenariosByReq = $derived(data.scenariosByReq);
+	const tasks = $derived(data.tasks);
 
-	// Mutable local state — synced from load data, updated by mutations
-	let tasks = $state<Task[]>([]);
-	let phases = $state<Phase[]>([]);
-	let requirements = $state<Requirement[]>([]);
-	let scenariosByReq = $state<Record<string, Scenario[]>>({});
-
-	// Sync from load data on initial render and when SvelteKit re-runs the load
-	$effect(() => {
-		tasks = data.tasks;
-		requirements = data.requirements;
-		scenariosByReq = data.scenariosByReq;
-	});
-
-	// Group tasks by phase ID for legacy nav tree support
+	// Derived from load data — no local state needed
 	const tasksByPhase = $derived.by(() => {
-		const grouped: Record<string, Task[]> = {};
+		const grouped: Record<string, typeof tasks> = {};
 		for (const task of tasks) {
 			const phaseId = task.phase_id ?? '__unassigned__';
-			if (!grouped[phaseId]) {
-				grouped[phaseId] = [];
-			}
-			grouped[phaseId].push(task);
+			(grouped[phaseId] ??= []).push(task);
 		}
 		return grouped;
 	});
 
-	// Update label cache when data changes.
-	// labelCache is a plain Map (not reactive), so these writes don't trigger re-renders.
-	function updateLabels(
-		_plan: typeof plan,
-		_reqs: typeof requirements,
-		_scenarios: typeof scenariosByReq,
-		_tasks: typeof tasks
-	) {
-		if (plan) {
-			planSelectionStore.setLabel(`plan:${plan.slug}`, plan.title || plan.slug);
-		}
-		for (const req of requirements) {
-			planSelectionStore.setLabel(`requirement:${req.id}`, req.title);
-		}
-		for (const [, scenarios] of Object.entries(scenariosByReq)) {
-			for (const scenario of scenarios) {
-				planSelectionStore.setLabel(`scenario:${scenario.id}`, `When ${scenario.when}`.slice(0, 30));
-			}
-		}
-		for (const task of tasks) {
-			const label = task.description.length > 30 ? task.description.slice(0, 30) + '...' : task.description;
-			planSelectionStore.setLabel(`task:${task.id}`, label);
-		}
-	}
-
-	// Run label update as a side effect — safe because labelCache is not $state.
-	// Dependencies are passed as args so Svelte tracks them explicitly.
-	$effect(() => {
-		updateLabels(plan, requirements, scenariosByReq, tasks);
-	});
-
-	// Browser-only: selection init, chat context, periodic refresh for auto-cascade stages
-	onMount(() => {
-		if (slug) {
-			planSelectionStore.selectPlan(slug);
-		}
-
-		// Periodically refresh requirements during auto-cascade stages
-		const interval = setInterval(() => {
-			if (plan && ['approved', 'requirements_generated', 'scenarios_generated'].includes(plan.stage)) {
-				fetchRequirements();
-			}
-		}, 5000);
-
-		return () => {
-			clearInterval(interval);
-			planSelectionStore.clear();
-		};
-	});
-
-	// Find any task with an active rejection
 	const activeRejection = $derived.by(() => {
 		const rejectedTask = tasks.find((t) => t.rejection && t.status === 'in_progress');
 		return rejectedTask ? { task: rejectedTask, rejection: rejectedTask.rejection! } : null;
 	});
 
-	function handleSelect(selection: PlanSelection): void {
-		planSelectionStore.selection = selection;
-	}
+	// Cascade stages that need periodic refresh
+	const isCascading = $derived(
+		plan !== null && ['approved', 'requirements_generated', 'scenarios_generated'].includes(plan.stage)
+	);
 
-	async function fetchRequirements(): Promise<void> {
-		if (!slug) return;
-		try {
-			requirements = await api.requirements.list(slug);
-			for (const req of requirements) {
-				fetchScenariosForReq(req.id);
-			}
-		} catch {
-			requirements = [];
-		}
-	}
+	// Auto-refresh during cascade — $effect recreates interval when isCascading changes
+	$effect(() => {
+		if (!isCascading) return;
+		const interval = setInterval(() => invalidate('app:plans'), 5000);
+		return () => clearInterval(interval);
+	});
 
-	async function fetchScenariosForReq(reqId: string): Promise<void> {
-		if (!slug) return;
-		try {
-			const scenarios = await api.scenarios.listByRequirement(slug, reqId);
-			scenariosByReq = { ...scenariosByReq, [reqId]: scenarios };
-		} catch {
-			scenariosByReq = { ...scenariosByReq, [reqId]: [] };
-		}
-	}
+	// Sync plan selection store for child components that read it
+	$effect(() => {
+		if (slug) planSelectionStore.selectPlan(slug);
+		return () => planSelectionStore.clear();
+	});
 
-	// Action handlers — call API + invalidate for fresh data via SvelteKit cascade
+	// Action handlers — all mutations invalidate to let the load function re-fetch
 	let actionError = $state<string | null>(null);
 
 	async function handlePromote() {
 		if (!plan) return;
 		actionError = null;
-		try { await promotePlan(plan.slug); } catch (e) {
+		try {
+			await promotePlan(plan.slug);
+		} catch (e) {
 			actionError = e instanceof Error ? e.message : 'Failed to promote plan';
 		}
 	}
@@ -153,7 +77,9 @@
 	async function handleExecute() {
 		if (!plan) return;
 		actionError = null;
-		try { await executePlan(plan.slug); } catch (e) {
+		try {
+			await executePlan(plan.slug);
+		} catch (e) {
 			actionError = e instanceof Error ? e.message : 'Failed to start execution';
 		}
 	}
@@ -161,133 +87,48 @@
 	async function handleReplay() {
 		if (!plan) return;
 		actionError = null;
-		try { await executePlan(plan.slug); } catch (e) {
+		try {
+			await executePlan(plan.slug);
+		} catch (e) {
 			actionError = e instanceof Error ? e.message : 'Failed to replay';
 		}
 	}
 
-	async function handleRefreshPlan() {
+	// All refresh handlers use invalidate — SvelteKit re-runs the load function
+	async function handleRefresh() {
 		await invalidate('app:plans');
 	}
 
-	async function handleRefreshRequirements() {
-		await fetchRequirements();
-	}
-
-	async function handleRefreshScenarios(reqId: string) {
-		await fetchScenariosForReq(reqId);
-	}
-
+	// Mutation handlers that call API then invalidate
 	async function handleDeleteRequirement(reqId: string) {
 		if (!slug) return;
 		await api.requirements.delete(slug, reqId);
-		await fetchRequirements();
-		// Clear scenarios cache
-		const { [reqId]: _, ...rest } = scenariosByReq;
-		scenariosByReq = rest;
-		// Navigate back to plan
+		await invalidate('app:plans');
 		planSelectionStore.selectPlan(slug);
-	}
-
-	async function handleExpandRequirement(reqId: string) {
-		if (!scenariosByReq[reqId]) {
-			await fetchScenariosForReq(reqId);
-		}
-	}
-
-	// Legacy handlers for phases/tasks
-	async function handleRefreshTasks() {
-		if (slug) {
-			tasks = await api.plans.getTasks(slug);
-		}
-	}
-
-	async function handleRefreshPhases() {
-		if (slug) {
-			try {
-				phases = await api.phases.list(slug);
-			} catch {
-				// ignore
-			}
-		}
 	}
 
 	async function handleApprovePhase(phaseId: string) {
 		if (!slug) return;
 		await api.phases.approve(slug, phaseId);
-		await handleRefreshPhases();
+		await invalidate('app:plans');
 	}
 
 	async function handleRejectPhase(phaseId: string, reason: string) {
 		if (!slug) return;
 		await api.phases.reject(slug, phaseId, reason);
-		await handleRefreshPhases();
+		await invalidate('app:plans');
 	}
 
 	async function handleApproveTask(taskId: string) {
 		if (!slug) return;
-		const updated = await api.tasks.approve(slug, taskId);
-		const index = tasks.findIndex((t) => t.id === taskId);
-		if (index !== -1) {
-			tasks[index] = updated;
-			tasks = [...tasks];
-		}
+		await api.tasks.approve(slug, taskId);
+		await invalidate('app:plans');
 	}
 
 	async function handleRejectTask(taskId: string, reason: string) {
 		if (!slug) return;
-		const updated = await api.tasks.reject(slug, taskId, reason);
-		const index = tasks.findIndex((t) => t.id === taskId);
-		if (index !== -1) {
-			tasks[index] = updated;
-			tasks = [...tasks];
-		}
-	}
-
-	function getStageLabel(stage: PlanStage): string {
-		switch (stage) {
-			case 'draft':
-			case 'drafting':
-				return 'Draft';
-			case 'ready_for_approval':
-				return 'Ready for Approval';
-			case 'reviewed':
-				return 'Reviewed';
-			case 'needs_changes':
-				return 'Needs Changes';
-			case 'planning':
-				return 'Planning';
-			case 'approved':
-				return 'Approved';
-			case 'rejected':
-				return 'Rejected';
-			case 'requirements_generated':
-				return 'Requirements Generated';
-			case 'scenarios_generated':
-				return 'Scenarios Generated';
-			case 'ready_for_execution':
-				return 'Ready to Execute';
-			case 'phases_generated':
-				return 'Phases Generated';
-			case 'phases_approved':
-				return 'Phases Approved';
-			case 'tasks_generated':
-				return 'Tasks Generated';
-			case 'tasks_approved':
-			case 'tasks':
-				return 'Ready to Execute';
-			case 'implementing':
-			case 'executing':
-				return 'Executing';
-			case 'complete':
-				return 'Complete';
-			case 'archived':
-				return 'Archived';
-			case 'failed':
-				return 'Failed';
-			default:
-				return stage;
-		}
+		await api.tasks.reject(slug, taskId, reason);
+		await invalidate('app:plans');
 	}
 </script>
 
@@ -298,9 +139,9 @@
 <div class="plan-detail">
 	<header class="detail-header">
 		<div class="header-left">
-			<a href="/plans" class="back-link">
+			<a href="/" class="back-link">
 				<Icon name="chevron-left" size={16} />
-				Back to Plans
+				Back
 			</a>
 		</div>
 		<div class="header-center">
@@ -334,12 +175,10 @@
 			<Icon name="alert-circle" size={48} />
 			<h2>Plan not found</h2>
 			<p>The plan "{slug}" could not be found.</p>
-			<a href="/plans" class="btn btn-primary">Back to Plans</a>
+			<a href="/" class="btn btn-primary">Back to Board</a>
 		</div>
 	{:else}
-		<!-- Progressive plan view — content adapts to plan stage -->
 		<div class="plan-content">
-			<!-- Pipeline + Action bar (always visible when plan has content) -->
 			{#if plan.approved}
 				<div class="pipeline-bar">
 					<div class="pipeline-left">
@@ -374,14 +213,12 @@
 				</div>
 			{/if}
 
-			<!-- Agent pipeline (visible during execution) -->
 			{#if plan.active_loops && plan.active_loops.length > 0}
 				<div class="agent-pipeline-section">
 					<AgentPipelineView slug={plan.slug} loops={plan.active_loops} />
 				</div>
 			{/if}
 
-			<!-- Rejection banner -->
 			{#if activeRejection}
 				<RejectionBanner
 					rejection={activeRejection.rejection}
@@ -389,20 +226,19 @@
 				/>
 			{/if}
 
-			<!-- Stage-driven content -->
 			<div class="stage-content">
 				<PlanDetailPanel
 					selection={planSelectionStore.selection}
 					{plan}
-					{phases}
+					phases={[]}
 					{tasksByPhase}
 					{requirements}
 					{scenariosByReq}
-					onRefreshPlan={handleRefreshPlan}
-					onRefreshPhases={handleRefreshPhases}
-					onRefreshTasks={handleRefreshTasks}
-					onRefreshRequirements={handleRefreshRequirements}
-					onRefreshScenarios={handleRefreshScenarios}
+					onRefreshPlan={handleRefresh}
+					onRefreshPhases={handleRefresh}
+					onRefreshTasks={handleRefresh}
+					onRefreshRequirements={handleRefresh}
+					onRefreshScenarios={handleRefresh}
 					onDeleteRequirement={handleDeleteRequirement}
 					onApprovePhase={handleApprovePhase}
 					onRejectPhase={handleRejectPhase}
@@ -435,12 +271,12 @@
 
 	.header-left {
 		flex-shrink: 0;
-		min-width: 150px;
+		min-width: 80px;
 	}
 
 	.header-right {
 		flex-shrink: 0;
-		min-width: 150px;
+		min-width: 80px;
 	}
 
 	.header-center {
@@ -545,7 +381,6 @@
 		color: var(--color-text-primary);
 	}
 
-	/* Progressive plan content — single scrollable column */
 	.plan-content {
 		flex: 1;
 		min-height: 0;
@@ -586,7 +421,6 @@
 		border-top: 1px solid var(--color-border);
 	}
 
-	/* Responsive: mobile */
 	@media (max-width: 900px) {
 		.detail-header {
 			flex-direction: column;

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
-	import { derivePlanPipeline, type PlanWithStatus } from '$lib/types/plan';
+	import { derivePlanPipeline, getStageLabel, type PlanWithStatus } from '$lib/types/plan';
 
 	type PlanFilter = 'all' | 'active' | 'draft' | 'complete';
 
@@ -41,26 +41,6 @@
 
 	// New Plan button is now a link — no handler needed
 
-	function getStageLabel(stage: string): string {
-		const labels: Record<string, string> = {
-			draft: 'Draft',
-			drafting: 'Draft',
-			planning: 'Planning',
-			ready_for_approval: 'Review',
-			reviewed: 'Reviewed',
-			needs_changes: 'Changes',
-			approved: 'Approved',
-			requirements_generated: 'Reqs',
-			scenarios_generated: 'Scenarios',
-			ready_for_execution: 'Ready',
-			implementing: 'Running',
-			executing: 'Running',
-			reviewing_rollup: 'Reviewing',
-			complete: 'Done',
-			failed: 'Failed'
-		};
-		return labels[stage] ?? stage;
-	}
 </script>
 
 <div class="plans-list">
