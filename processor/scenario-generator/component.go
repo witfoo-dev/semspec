@@ -294,6 +294,9 @@ func (c *Component) Stop(_ time.Duration) error {
 // ---------------------------------------------------------------------------
 
 // consumeLoop continuously fetches and processes messages from JetStream.
+// Fetches up to 10 messages at once and processes them concurrently so that
+// multiple requirements dispatched in a single cascade are handled in parallel
+// rather than one-at-a-time.
 func (c *Component) consumeLoop(ctx context.Context) {
 	for {
 		select {
@@ -302,7 +305,7 @@ func (c *Component) consumeLoop(ctx context.Context) {
 		default:
 		}
 
-		msgs, err := c.consumer.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
+		msgs, err := c.consumer.Fetch(10, jetstream.FetchMaxWait(5*time.Second))
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -311,8 +314,27 @@ func (c *Component) consumeLoop(ctx context.Context) {
 			continue
 		}
 
+		var batch []jetstream.Msg
 		for msg := range msgs.Messages() {
-			c.handleMessage(ctx, msg)
+			batch = append(batch, msg)
+		}
+
+		if len(batch) > 1 {
+			// Process batch concurrently — each requirement is independent.
+			var wg sync.WaitGroup
+			for _, msg := range batch {
+				wg.Add(1)
+				go func(m jetstream.Msg) {
+					defer wg.Done()
+					c.handleMessage(ctx, m)
+				}(msg)
+			}
+			wg.Wait()
+		} else {
+			// Single message — no goroutine overhead.
+			for _, msg := range batch {
+				c.handleMessage(ctx, msg)
+			}
 		}
 
 		if msgs.Error() != nil && msgs.Error() != context.DeadlineExceeded {
