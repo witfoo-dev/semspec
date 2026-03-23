@@ -8,9 +8,22 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
 )
+
+func init() {
+	// Register QuestionAnswerTask for BaseMessage deserialization.
+	_ = component.RegisterPayload(&component.PayloadRegistration{
+		Domain:      "question",
+		Category:    "answer-task",
+		Version:     "v1",
+		Description: "Question answer task payload",
+		Factory:     func() any { return &QuestionAnswerTask{} },
+	})
+}
 
 // Router handles question routing based on topic patterns.
 type Router struct {
@@ -102,7 +115,8 @@ func (r *Router) routeToAgent(ctx context.Context, q *workflow.Question, route *
 		LoopID:  q.BlockedLoopID,
 	}
 
-	data, err := json.Marshal(task)
+	baseMsg := message.NewBaseMessage(task.Schema(), &task, "answerer-router")
+	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		return fmt.Errorf("marshal task: %w", err)
 	}
@@ -254,6 +268,13 @@ func parseNotificationSubject(channel string) string {
 	return subject
 }
 
+// QuestionAnswerTaskType is the message type for question-answering tasks.
+var QuestionAnswerTaskType = message.Type{
+	Domain:   "question",
+	Category: "answer-task",
+	Version:  "v1",
+}
+
 // QuestionAnswerTask is the payload for agent question-answering tasks.
 type QuestionAnswerTask struct {
 	TaskID     string        `json:"task_id"`
@@ -265,10 +286,31 @@ type QuestionAnswerTask struct {
 	AgentName  string        `json:"agent_name"`
 	SLA        time.Duration `json:"sla,omitempty"`
 	CreatedAt  time.Time     `json:"created_at"`
-	// TraceID correlates this task with other messages in the same request flow.
-	TraceID string `json:"trace_id,omitempty"`
-	// LoopID is the agent loop that initiated this task (if any).
-	LoopID string `json:"loop_id,omitempty"`
+	TraceID    string        `json:"trace_id,omitempty"`
+	LoopID     string        `json:"loop_id,omitempty"`
+}
+
+// Schema implements message.Payload.
+func (t *QuestionAnswerTask) Schema() message.Type { return QuestionAnswerTaskType }
+
+// Validate implements message.Payload.
+func (t *QuestionAnswerTask) Validate() error {
+	if t.QuestionID == "" {
+		return fmt.Errorf("question_id required")
+	}
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (t *QuestionAnswerTask) MarshalJSON() ([]byte, error) {
+	type Alias QuestionAnswerTask
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (t *QuestionAnswerTask) UnmarshalJSON(data []byte) error {
+	type Alias QuestionAnswerTask
+	return json.Unmarshal(data, (*Alias)(t))
 }
 
 // ToolAnswerTask is the payload for tool question-answering tasks.
