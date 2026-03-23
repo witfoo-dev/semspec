@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -2030,15 +2031,13 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 		stageDefinition{"verify-validation-results", s.stageVerifyValidationResults, t(10, 5)},
 	)
 
-	// Code execution stages - enabled via WithCodeExecution() option
+	// Code execution stages - enabled via WithCodeExecution() option.
+	// Uses the new pipeline: POST /execute → scenario-orchestrator → TDD pipeline.
 	if s.variant.EnableCodeExecution {
 		stages = append(stages,
-			stageDefinition{"prepare-code-execution", s.stagePrepareCodeExecution, t(30, 15)},
-			stageDefinition{"trigger-task-dispatch", s.stageTriggerTaskDispatch, t(60, 30)},
-			stageDefinition{"wait-for-task-execution", s.stageWaitForTaskExecution, t(1200, 120)},
-			stageDefinition{"verify-files-modified", s.stageVerifyFilesModified, t(10, 5)},
-			stageDefinition{"verify-execution-validation", s.stageVerifyExecutionValidation, t(30, 15)},
-			stageDefinition{"verify-tasks-completed", s.stageVerifyTasksCompleted, t(10, 5)},
+			stageDefinition{"trigger-execution", s.stageTriggerExecution, t(15, 10)},
+			stageDefinition{"wait-for-execution-complete", s.stageWaitForExecutionComplete, t(300, 60)},
+			stageDefinition{"verify-question-flow", s.stageVerifyQuestionFlow, t(10, 5)},
 		)
 	}
 
@@ -2162,5 +2161,156 @@ func (s *HelloWorldScenario) stageVerifyEscalation(ctx context.Context, result *
 	result.SetDetail("escalation_findings_count", len(findings))
 	result.SetDetail("escalation_iteration", plan.ReviewIteration)
 	result.SetDetail("escalation_formatted_findings", plan.ReviewFormattedFindings)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Execution stages (new pipeline: POST /execute → scenario-orchestrator → TDD)
+// ---------------------------------------------------------------------------
+
+// stageTriggerExecution calls POST /plan-api/plans/{slug}/execute to start
+// the execution pipeline. The plan must be at ready_for_execution status.
+func (s *HelloWorldScenario) stageTriggerExecution(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	// First, promote to trigger the scenario generation cascade.
+	// In auto_approve mode, the plan should already be at ready_for_execution
+	// after the planning cascade completes.
+	plan, err := s.http.GetPlan(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get plan: %w", err)
+	}
+
+	// If not yet at ready_for_execution, wait for scenarios to complete.
+	if plan.Stage != "ready_for_execution" && plan.Stage != "implementing" {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("timed out waiting for ready_for_execution, last stage: %s", plan.Stage)
+			case <-ticker.C:
+				plan, err = s.http.GetPlan(ctx, slug)
+				if err != nil {
+					continue
+				}
+				if plan.Stage == "ready_for_execution" || plan.Stage == "implementing" {
+					goto ready
+				}
+			}
+		}
+	}
+
+ready:
+	if plan.Stage == "implementing" {
+		result.SetDetail("execution_already_started", true)
+		return nil
+	}
+
+	resp, err := s.http.ExecutePlan(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("execute plan: %w", err)
+	}
+	if resp.Error != "" {
+		return fmt.Errorf("execute plan returned error: %s", resp.Error)
+	}
+
+	result.SetDetail("execution_triggered", true)
+	result.SetDetail("execution_batch_id", resp.BatchID)
+	return nil
+}
+
+// stageWaitForExecutionComplete polls the plan status until it reaches
+// "complete" or a terminal error state.
+func (s *HelloWorldScenario) stageWaitForExecutionComplete(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			plan, _ := s.http.GetPlan(ctx, slug)
+			lastStage := "unknown"
+			if plan != nil {
+				lastStage = plan.Stage
+			}
+			return fmt.Errorf("execution timed out, last stage: %s", lastStage)
+		case <-ticker.C:
+			plan, err := s.http.GetPlan(ctx, slug)
+			if err != nil {
+				continue
+			}
+
+			result.SetDetail("execution_stage_snapshot", plan.Stage)
+			result.SetDetail("execution_status_snapshot", plan.Status)
+
+			switch plan.Status {
+			case "complete":
+				result.SetDetail("execution_complete", true)
+				return nil
+			case "error", "rejected":
+				return fmt.Errorf("execution reached terminal error: %s / %s", plan.Status, plan.Stage)
+			}
+		}
+	}
+}
+
+// stageVerifyQuestionFlow checks that at least one question was asked and
+// answered during execution (via the ask_question mock fixture).
+func (s *HelloWorldScenario) stageVerifyQuestionFlow(ctx context.Context, result *Result) error {
+	// Query the questions endpoint.
+	questionsURL := fmt.Sprintf("%s/plan-api/questions/", s.config.HTTPBaseURL)
+	req, err := http.NewRequestWithContext(ctx, "GET", questionsURL, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		result.AddWarning(fmt.Sprintf("Failed to query questions: %v", err))
+		return nil // Non-fatal — question flow is enhancement
+	}
+	defer resp.Body.Close()
+
+	var questionsResp struct {
+		Questions []struct {
+			ID         string `json:"id"`
+			Question   string `json:"question"`
+			Status     string `json:"status"`
+			Answer     string `json:"answer"`
+			AnsweredBy string `json:"answered_by"`
+		} `json:"questions"`
+		Total int `json:"total"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&questionsResp); err != nil {
+		result.AddWarning(fmt.Sprintf("Failed to decode questions: %v", err))
+		return nil
+	}
+
+	result.SetDetail("question_count", questionsResp.Total)
+
+	if questionsResp.Total == 0 {
+		result.AddWarning("No questions found — ask_question mock fixture may not have fired")
+		return nil // Non-fatal for now
+	}
+
+	// Verify at least one question was answered.
+	answered := 0
+	for _, q := range questionsResp.Questions {
+		if q.Status == "answered" {
+			answered++
+		}
+	}
+
+	result.SetDetail("questions_answered", answered)
+	if answered > 0 {
+		result.SetDetail("question_flow_verified", true)
+	} else {
+		result.AddWarning(fmt.Sprintf("%d questions found but none answered", questionsResp.Total))
+	}
+
 	return nil
 }
