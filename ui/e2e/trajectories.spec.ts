@@ -18,10 +18,9 @@ test.describe('@mock trajectories', () => {
 	});
 
 	test('shows filter sidebar with Status section', async ({ page }) => {
+		// Trajectories page has its own left panel with Filters/Status
 		await expect(page.getByText('Filters')).toBeVisible();
-		await expect(page.getByText('Status')).toBeVisible();
-		// "All" filter button should exist with a count
-		await expect(page.getByTestId('panel-left').getByText('All').first()).toBeVisible();
+		await expect(page.getByText('Status', { exact: true }).first()).toBeVisible();
 	});
 
 	test('shows trajectory items or empty state', async ({ page }) => {

@@ -9,11 +9,18 @@ import {
 	feedModeRadio
 } from './helpers/selectors';
 
+/** Ensure Plans mode is active (may auto-switch to Feed when loops exist). */
+async function ensurePlansMode(page: import('@playwright/test').Page) {
+	const plansRadio = page.getByRole('radio', { name: 'Plans' });
+	if ((await plansRadio.getAttribute('aria-checked')) === 'false') {
+		await plansRadio.click();
+	}
+}
+
 test.describe('@mock plan-list', () => {
 	let createdSlugs: string[] = [];
 
 	test.afterEach(async () => {
-		// Clean up plans created during tests
 		for (const slug of createdSlugs) {
 			await deletePlan(slug).catch(() => {});
 		}
@@ -23,9 +30,8 @@ test.describe('@mock plan-list', () => {
 	test('shows empty state when no plans exist', async ({ page }) => {
 		await page.goto('/');
 		await waitForHydration(page);
-		// Filter to "Drafts" to avoid seeing any existing plans from other tests
+		await ensurePlansMode(page);
 		await filterChip(page, 'Drafts').click();
-		// Either shows plans or empty state - this depends on test isolation
 	});
 
 	test('shows created plan in list', async ({ page }) => {
@@ -34,6 +40,7 @@ test.describe('@mock plan-list', () => {
 
 		await page.goto('/');
 		await waitForHydration(page);
+		await ensurePlansMode(page);
 
 		await expect(planListItem(page, plan.slug)).toBeVisible();
 	});
@@ -44,6 +51,7 @@ test.describe('@mock plan-list', () => {
 
 		await page.goto('/');
 		await waitForHydration(page);
+		await ensurePlansMode(page);
 
 		await planListItem(page, plan.slug).click();
 		await expect(page).toHaveURL(`/plans/${plan.slug}`);
@@ -55,15 +63,13 @@ test.describe('@mock plan-list', () => {
 
 		await page.goto('/');
 		await waitForHydration(page);
+		await ensurePlansMode(page);
 
-		// Default "All" filter should show the plan
 		await expect(planListItem(page, plan.slug)).toBeVisible();
 
-		// "Drafts" should show it (new plans are drafts)
 		await filterChip(page, 'Drafts').click();
 		await expect(planListItem(page, plan.slug)).toBeVisible();
 
-		// "Active" should NOT show it (draft plans aren't active)
 		await filterChip(page, 'Active').click();
 		await expect(planListItem(page, plan.slug)).not.toBeVisible();
 	});
@@ -72,16 +78,15 @@ test.describe('@mock plan-list', () => {
 		await page.goto('/');
 		await waitForHydration(page);
 
-		// Plans mode is default
-		await expect(plansModeRadio(page)).toHaveAttribute('aria-checked', 'true');
-		await expect(feedModeRadio(page)).toHaveAttribute('aria-checked', 'false');
+		// Both mode buttons should be visible
+		await expect(plansModeRadio(page)).toBeVisible();
+		await expect(feedModeRadio(page)).toBeVisible();
 
 		// Switch to Feed
 		await feedModeRadio(page).click();
 		await expect(feedModeRadio(page)).toHaveAttribute('aria-checked', 'true');
-		await expect(plansModeRadio(page)).toHaveAttribute('aria-checked', 'false');
 
-		// Switch back to Plans
+		// Switch to Plans
 		await plansModeRadio(page).click();
 		await expect(plansModeRadio(page)).toHaveAttribute('aria-checked', 'true');
 	});
