@@ -82,7 +82,7 @@ test.describe('Loop Management', () => {
 
 		test('shows workflow context when available', async ({ loopPanelPage, page }) => {
 			// Mock the plans API to provide plan context for loops
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',

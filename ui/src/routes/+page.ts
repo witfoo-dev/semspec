@@ -12,7 +12,7 @@ export const load: PageLoad = async ({ parent, fetch, depends }) => {
 	// Fetch tasks for each active plan in parallel
 	const taskEntries = await Promise.all(
 		activePlans.map(async (p) => {
-			const tasks = await fetch(`/workflow-api/plans/${p.slug}/tasks`)
+			const tasks = await fetch(`/plan-api/plans/${p.slug}/tasks`)
 				.then((r) => (r.ok ? (r.json() as Promise<Task[]>) : []))
 				.catch(() => [] as Task[]);
 			return [p.slug, tasks] as const;

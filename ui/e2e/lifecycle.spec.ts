@@ -2,19 +2,19 @@ import { test, expect, waitForHydration, mockPlan } from './helpers/setup';
 
 function mockPlanRoutes(page: any, plan: any, extra?: { requirements?: any[]; scenarios?: any[] }) {
 	return Promise.all([
-		page.route('**/workflow-api/plans', (r: any) =>
+		page.route('**/plan-api/plans', (r: any) =>
 			r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([plan]) })
 		),
-		page.route(`**/workflow-api/plans/${plan.slug}`, (r: any) =>
+		page.route(`**/plan-api/plans/${plan.slug}`, (r: any) =>
 			r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(plan) })
 		),
-		page.route(`**/workflow-api/plans/${plan.slug}/tasks`, (r: any) =>
+		page.route(`**/plan-api/plans/${plan.slug}/tasks`, (r: any) =>
 			r.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
 		),
-		page.route(`**/workflow-api/plans/${plan.slug}/requirements`, (r: any) =>
+		page.route(`**/plan-api/plans/${plan.slug}/requirements`, (r: any) =>
 			r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(extra?.requirements ?? []) })
 		),
-		page.route(`**/workflow-api/plans/${plan.slug}/scenarios**`, (r: any) =>
+		page.route(`**/plan-api/plans/${plan.slug}/scenarios**`, (r: any) =>
 			r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(extra?.scenarios ?? []) })
 		)
 	]);

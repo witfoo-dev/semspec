@@ -72,7 +72,7 @@ test.describe('Plan Creation', () => {
 	test.describe('Submission', () => {
 		test('successful submit redirects to plan detail', async ({ page }) => {
 			// Mock the create API to return a slug
-			await page.route('**/workflow-api/plans', (route) => {
+			await page.route('**/plan-api/plans', (route) => {
 				if (route.request().method() === 'POST') {
 					route.fulfill({
 						status: 200,
@@ -90,7 +90,7 @@ test.describe('Plan Creation', () => {
 			});
 
 			// Also mock the plan detail page data so navigation doesn't 404
-			await page.route('**/workflow-api/plans/add-greeting-endpoint', (route) => {
+			await page.route('**/plan-api/plans/add-greeting-endpoint', (route) => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -113,7 +113,7 @@ test.describe('Plan Creation', () => {
 		});
 
 		test('failed submit shows error message', async ({ page }) => {
-			await page.route('**/workflow-api/plans', (route) => {
+			await page.route('**/plan-api/plans', (route) => {
 				if (route.request().method() === 'POST') {
 					route.fulfill({
 						status: 500,

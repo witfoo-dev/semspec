@@ -168,7 +168,7 @@ test.describe('BottomChatBar on plan detail page', () => {
 			active_loops: []
 		};
 
-		await page.route('**/workflow-api/plans', (route) => {
+		await page.route('**/plan-api/plans', (route) => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -176,7 +176,7 @@ test.describe('BottomChatBar on plan detail page', () => {
 			});
 		});
 
-		await page.route('**/workflow-api/plans/chat-test-plan', (route) => {
+		await page.route('**/plan-api/plans/chat-test-plan', (route) => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -184,11 +184,11 @@ test.describe('BottomChatBar on plan detail page', () => {
 			});
 		});
 
-		await page.route('**/workflow-api/plans/chat-test-plan/phases', (route) => {
+		await page.route('**/plan-api/plans/chat-test-plan/phases', (route) => {
 			route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
 		});
 
-		await page.route('**/workflow-api/plans/chat-test-plan/tasks', (route) => {
+		await page.route('**/plan-api/plans/chat-test-plan/tasks', (route) => {
 			route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
 		});
 

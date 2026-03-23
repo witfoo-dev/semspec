@@ -14,7 +14,7 @@ test.describe('Plan Detail Draft', () => {
 		});
 
 		await Promise.all([
-			page.route('**/workflow-api/plans', (route) => {
+			page.route('**/plan-api/plans', (route) => {
 				if (route.request().method() === 'GET') {
 					route.fulfill({
 						status: 200,
@@ -25,23 +25,23 @@ test.describe('Plan Detail Draft', () => {
 					route.continue();
 				}
 			}),
-			page.route('**/workflow-api/plans/add-user-auth', (route) => {
+			page.route('**/plan-api/plans/add-user-auth', (route) => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
 					body: JSON.stringify(plan)
 				});
 			}),
-			page.route('**/workflow-api/plans/add-user-auth/tasks', (route) => {
+			page.route('**/plan-api/plans/add-user-auth/tasks', (route) => {
 				route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
 			}),
-			page.route('**/workflow-api/plans/add-user-auth/phases', (route) => {
+			page.route('**/plan-api/plans/add-user-auth/phases', (route) => {
 				route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
 			}),
-			page.route('**/workflow-api/plans/add-user-auth/requirements', (route) => {
+			page.route('**/plan-api/plans/add-user-auth/requirements', (route) => {
 				route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
 			}),
-			page.route('**/workflow-api/plans/add-user-auth/scenarios**', (route) => {
+			page.route('**/plan-api/plans/add-user-auth/scenarios**', (route) => {
 				route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
 			})
 		]);
@@ -96,14 +96,14 @@ test.describe('Plan Detail Draft', () => {
 
 test.describe('Plan Not Found', () => {
 	test('shows not found for invalid slug', async ({ page }) => {
-		await page.route('**/workflow-api/plans/nonexistent', (route) => {
+		await page.route('**/plan-api/plans/nonexistent', (route) => {
 			route.fulfill({
 				status: 404,
 				contentType: 'application/json',
 				body: JSON.stringify({ error: 'Not found' })
 			});
 		});
-		await page.route('**/workflow-api/plans', (route) => {
+		await page.route('**/plan-api/plans', (route) => {
 			route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
 		});
 

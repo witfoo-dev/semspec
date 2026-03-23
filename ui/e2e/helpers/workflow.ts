@@ -127,7 +127,7 @@ export async function triggerWorkflow(page: Page, description: string): Promise<
  */
 export async function getPlans(page: Page): Promise<Plan[]> {
 	const baseURL = getBaseURL(page);
-	const response = await page.request.get(`${baseURL}/workflow-api/plans`);
+	const response = await page.request.get(`${baseURL}/plan-api/plans`);
 
 	if (!response.ok()) {
 		console.error('Failed to fetch plans:', response.status());
@@ -142,7 +142,7 @@ export async function getPlans(page: Page): Promise<Plan[]> {
  */
 export async function getPlan(page: Page, slug: string): Promise<Plan | null> {
 	const baseURL = getBaseURL(page);
-	const response = await page.request.get(`${baseURL}/workflow-api/plans/${slug}`);
+	const response = await page.request.get(`${baseURL}/plan-api/plans/${slug}`);
 
 	if (!response.ok()) {
 		return null;
@@ -156,7 +156,7 @@ export async function getPlan(page: Page, slug: string): Promise<Plan | null> {
  */
 export async function getReviews(page: Page, slug: string): Promise<ReviewResult | null> {
 	const baseURL = getBaseURL(page);
-	const response = await page.request.get(`${baseURL}/workflow-api/plans/${slug}/reviews`);
+	const response = await page.request.get(`${baseURL}/plan-api/plans/${slug}/reviews`);
 
 	if (!response.ok()) {
 		return null;

@@ -36,7 +36,7 @@ async function setupMocks(page: Page, questions: MockQuestion[] = []) {
 	}));
 
 	// Questions list endpoint (questionsStore.fetch on connect)
-	await page.route('**/workflow-api/questions**', (route) => {
+	await page.route('**/plan-api/questions**', (route) => {
 		const url = route.request().url();
 		if (url.includes('/stream')) {
 			// SSE stream — return heartbeat and keep open
@@ -64,7 +64,7 @@ async function setupMocks(page: Page, questions: MockQuestion[] = []) {
 	});
 
 	// Stub layout data endpoints so the page loads without backend
-	await page.route('**/workflow-api/plans**', (route) => {
+	await page.route('**/plan-api/plans**', (route) => {
 		route.fulfill({
 			status: 200,
 			contentType: 'application/json',
@@ -182,7 +182,7 @@ test.describe('Inline Question Messages', () => {
 			]);
 
 			// Override the stream route AFTER setupMocks so this registration wins
-			await page.route('**/workflow-api/questions/stream**', (route) => {
+			await page.route('**/plan-api/questions/stream**', (route) => {
 				route.fulfill({
 					status: 200,
 					contentType: 'text/event-stream',
@@ -260,7 +260,7 @@ test.describe('Inline Question Messages', () => {
 			]);
 
 			// Override the stream route AFTER setupMocks so this registration wins
-			await page.route('**/workflow-api/questions/stream**', (route) => {
+			await page.route('**/plan-api/questions/stream**', (route) => {
 				route.fulfill({
 					status: 200,
 					contentType: 'text/event-stream',
@@ -371,7 +371,7 @@ test.describe('Inline Question Messages', () => {
 			]);
 
 			// Intercept to capture the request body
-			await page.route('**/workflow-api/questions/q-submit-api/answer', (route) => {
+			await page.route('**/plan-api/questions/q-submit-api/answer', (route) => {
 				const body = route.request().postData();
 				if (body) answerRequests.push(body);
 				route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });

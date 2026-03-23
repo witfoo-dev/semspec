@@ -26,7 +26,7 @@ test.describe('Semspec Workflow', () => {
 
 		test('loop card displays workflow slug', async ({ loopPanelPage, page }) => {
 			// Mock plans API with matching active_loops
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -69,7 +69,7 @@ test.describe('Semspec Workflow', () => {
 
 		test('loop card displays workflow step correctly', async ({ loopPanelPage, page }) => {
 			// Test that plan slug is shown - workflow step shown via AgentBadge
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -116,7 +116,7 @@ test.describe('Semspec Workflow', () => {
 			await page.route('**/agentic-dispatch/activity/events**', route => route.abort());
 
 			// Mock plans API with multiple plans
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',

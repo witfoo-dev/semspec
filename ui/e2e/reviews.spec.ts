@@ -4,7 +4,7 @@ import { createMockReviewResult, createMockFinding } from './helpers/workflow';
 test.describe('Review Dashboard', () => {
 	test.describe('Reviews Toggle', () => {
 		test('shows reviews toggle on executing plan', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -20,7 +20,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/review-toggle-plan', route => {
+			await page.route('**/plan-api/plans/review-toggle-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -34,7 +34,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/review-toggle-plan/tasks', route => {
+			await page.route('**/plan-api/plans/review-toggle-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -47,7 +47,7 @@ test.describe('Review Dashboard', () => {
 		});
 
 		test('shows reviews toggle on complete plan', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -63,7 +63,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/complete-review-plan', route => {
+			await page.route('**/plan-api/plans/complete-review-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -77,7 +77,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/complete-review-plan/tasks', route => {
+			await page.route('**/plan-api/plans/complete-review-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -90,7 +90,7 @@ test.describe('Review Dashboard', () => {
 		});
 
 		test('hides reviews toggle on uncommitted plan', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -106,7 +106,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/uncommitted-review-plan', route => {
+			await page.route('**/plan-api/plans/uncommitted-review-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -120,7 +120,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/uncommitted-review-plan/tasks', route => {
+			await page.route('**/plan-api/plans/uncommitted-review-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -133,7 +133,7 @@ test.describe('Review Dashboard', () => {
 		});
 
 		test('expands to show review dashboard', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -149,7 +149,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/expand-review-plan', route => {
+			await page.route('**/plan-api/plans/expand-review-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -163,7 +163,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/expand-review-plan/tasks', route => {
+			await page.route('**/plan-api/plans/expand-review-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -171,7 +171,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/expand-review-plan/reviews', route => {
+			await page.route('**/plan-api/plans/expand-review-plan/reviews', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -185,7 +185,7 @@ test.describe('Review Dashboard', () => {
 		});
 
 		test('collapses when toggle clicked again', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -201,7 +201,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/collapse-review-plan', route => {
+			await page.route('**/plan-api/plans/collapse-review-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -215,7 +215,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/collapse-review-plan/tasks', route => {
+			await page.route('**/plan-api/plans/collapse-review-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -223,7 +223,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/collapse-review-plan/reviews', route => {
+			await page.route('**/plan-api/plans/collapse-review-plan/reviews', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -242,7 +242,7 @@ test.describe('Review Dashboard', () => {
 
 	test.describe('Spec Compliance Gate', () => {
 		test('shows spec gate component', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -258,7 +258,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/spec-gate-plan', route => {
+			await page.route('**/plan-api/plans/spec-gate-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -272,7 +272,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/spec-gate-plan/tasks', route => {
+			await page.route('**/plan-api/plans/spec-gate-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -280,7 +280,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/spec-gate-plan/reviews', route => {
+			await page.route('**/plan-api/plans/spec-gate-plan/reviews', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -294,7 +294,7 @@ test.describe('Review Dashboard', () => {
 		});
 
 		test('shows passed state when spec compliant', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -310,7 +310,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/spec-passed-plan', route => {
+			await page.route('**/plan-api/plans/spec-passed-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -324,7 +324,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/spec-passed-plan/tasks', route => {
+			await page.route('**/plan-api/plans/spec-passed-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -332,7 +332,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/spec-passed-plan/reviews', route => {
+			await page.route('**/plan-api/plans/spec-passed-plan/reviews', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -351,7 +351,7 @@ test.describe('Review Dashboard', () => {
 		});
 
 		test('shows failed state when spec non-compliant', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -367,7 +367,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/spec-failed-plan', route => {
+			await page.route('**/plan-api/plans/spec-failed-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -381,7 +381,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/spec-failed-plan/tasks', route => {
+			await page.route('**/plan-api/plans/spec-failed-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -389,7 +389,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/spec-failed-plan/reviews', route => {
+			await page.route('**/plan-api/plans/spec-failed-plan/reviews', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -410,7 +410,7 @@ test.describe('Review Dashboard', () => {
 
 	test.describe('Quality Reviewer Cards', () => {
 		test('shows reviewer cards for quality reviewers', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -426,7 +426,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/reviewer-cards-plan', route => {
+			await page.route('**/plan-api/plans/reviewer-cards-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -440,7 +440,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/reviewer-cards-plan/tasks', route => {
+			await page.route('**/plan-api/plans/reviewer-cards-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -448,7 +448,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/reviewer-cards-plan/reviews', route => {
+			await page.route('**/plan-api/plans/reviewer-cards-plan/reviews', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -478,7 +478,7 @@ test.describe('Review Dashboard', () => {
 		});
 
 		test('shows pass/fail indicators on reviewer cards', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -494,7 +494,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/pass-fail-plan', route => {
+			await page.route('**/plan-api/plans/pass-fail-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -508,7 +508,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/pass-fail-plan/tasks', route => {
+			await page.route('**/plan-api/plans/pass-fail-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -516,7 +516,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/pass-fail-plan/reviews', route => {
+			await page.route('**/plan-api/plans/pass-fail-plan/reviews', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -548,7 +548,7 @@ test.describe('Review Dashboard', () => {
 		});
 
 		test('shows reviewer stats', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -564,7 +564,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/stats-plan', route => {
+			await page.route('**/plan-api/plans/stats-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -578,7 +578,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/stats-plan/tasks', route => {
+			await page.route('**/plan-api/plans/stats-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -586,7 +586,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/stats-plan/reviews', route => {
+			await page.route('**/plan-api/plans/stats-plan/reviews', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -616,7 +616,7 @@ test.describe('Review Dashboard', () => {
 
 	test.describe('Findings List', () => {
 		test('displays findings with severity', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -632,7 +632,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/findings-plan', route => {
+			await page.route('**/plan-api/plans/findings-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -646,7 +646,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/findings-plan/tasks', route => {
+			await page.route('**/plan-api/plans/findings-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -654,7 +654,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/findings-plan/reviews', route => {
+			await page.route('**/plan-api/plans/findings-plan/reviews', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -682,7 +682,7 @@ test.describe('Review Dashboard', () => {
 		});
 
 		test('shows file and line references in findings', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -698,7 +698,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/file-refs-plan', route => {
+			await page.route('**/plan-api/plans/file-refs-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -712,7 +712,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/file-refs-plan/tasks', route => {
+			await page.route('**/plan-api/plans/file-refs-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -720,7 +720,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/file-refs-plan/reviews', route => {
+			await page.route('**/plan-api/plans/file-refs-plan/reviews', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -758,7 +758,7 @@ test.describe('Review Dashboard', () => {
 
 	test.describe('Empty and Error States', () => {
 		test('handles empty reviews gracefully', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -774,7 +774,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/empty-reviews-plan', route => {
+			await page.route('**/plan-api/plans/empty-reviews-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -788,7 +788,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/empty-reviews-plan/tasks', route => {
+			await page.route('**/plan-api/plans/empty-reviews-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -797,7 +797,7 @@ test.describe('Review Dashboard', () => {
 			});
 
 			// Return empty/null response for reviews (no reviews yet)
-			await page.route('**/workflow-api/plans/empty-reviews-plan/reviews', route => {
+			await page.route('**/plan-api/plans/empty-reviews-plan/reviews', route => {
 				// Return null/undefined to simulate no reviews yet
 				route.fulfill({
 					status: 200,
@@ -812,7 +812,7 @@ test.describe('Review Dashboard', () => {
 		});
 
 		test('shows error state when reviews fetch fails', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -828,7 +828,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/error-reviews-plan', route => {
+			await page.route('**/plan-api/plans/error-reviews-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -842,7 +842,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/error-reviews-plan/tasks', route => {
+			await page.route('**/plan-api/plans/error-reviews-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -851,7 +851,7 @@ test.describe('Review Dashboard', () => {
 			});
 
 			// Return 500 for reviews
-			await page.route('**/workflow-api/plans/error-reviews-plan/reviews', route => {
+			await page.route('**/plan-api/plans/error-reviews-plan/reviews', route => {
 				route.fulfill({
 					status: 500,
 					contentType: 'application/json',
@@ -867,7 +867,7 @@ test.describe('Review Dashboard', () => {
 
 	test.describe('Verdict Badge', () => {
 		test('shows passed verdict badge', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -883,7 +883,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/passed-verdict-plan', route => {
+			await page.route('**/plan-api/plans/passed-verdict-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -897,7 +897,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/passed-verdict-plan/tasks', route => {
+			await page.route('**/plan-api/plans/passed-verdict-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -905,7 +905,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/passed-verdict-plan/reviews', route => {
+			await page.route('**/plan-api/plans/passed-verdict-plan/reviews', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -921,7 +921,7 @@ test.describe('Review Dashboard', () => {
 		});
 
 		test('shows failed verdict badge', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -937,7 +937,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/failed-verdict-plan', route => {
+			await page.route('**/plan-api/plans/failed-verdict-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -951,7 +951,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/failed-verdict-plan/tasks', route => {
+			await page.route('**/plan-api/plans/failed-verdict-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -959,7 +959,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/failed-verdict-plan/reviews', route => {
+			await page.route('**/plan-api/plans/failed-verdict-plan/reviews', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',

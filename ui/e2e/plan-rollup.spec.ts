@@ -11,7 +11,7 @@ test.describe('Plan Rollup Review', () => {
 	// All plan detail pages fetch phases, requirements, scenarios, and tasks.
 	// Provide default empty responses so missing mocks don't cause 404s.
 	test.beforeEach(async ({ page }) => {
-		await page.route('**/workflow-api/plans/*/phases', route => {
+		await page.route('**/plan-api/plans/*/phases', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -19,7 +19,7 @@ test.describe('Plan Rollup Review', () => {
 			});
 		});
 
-		await page.route('**/workflow-api/plans/*/requirements', route => {
+		await page.route('**/plan-api/plans/*/requirements', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -27,7 +27,7 @@ test.describe('Plan Rollup Review', () => {
 			});
 		});
 
-		await page.route('**/workflow-api/plans/*/scenarios**', route => {
+		await page.route('**/plan-api/plans/*/scenarios**', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -35,7 +35,7 @@ test.describe('Plan Rollup Review', () => {
 			});
 		});
 
-		await page.route('**/workflow-api/plans/*/tasks', route => {
+		await page.route('**/plan-api/plans/*/tasks', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -53,7 +53,7 @@ test.describe('Plan Rollup Review', () => {
 			stage: 'reviewing_rollup'
 		});
 
-		await page.route('**/workflow-api/plans', route => {
+		await page.route('**/plan-api/plans', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -61,7 +61,7 @@ test.describe('Plan Rollup Review', () => {
 			});
 		});
 
-		await page.route('**/workflow-api/plans/test-rollup', route => {
+		await page.route('**/plan-api/plans/test-rollup', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -87,7 +87,7 @@ test.describe('Plan Rollup Review', () => {
 			stage: 'reviewing_rollup'
 		});
 
-		await page.route('**/workflow-api/plans', route => {
+		await page.route('**/plan-api/plans', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -95,7 +95,7 @@ test.describe('Plan Rollup Review', () => {
 			});
 		});
 
-		await page.route('**/workflow-api/plans/test-rollup-pipeline', route => {
+		await page.route('**/plan-api/plans/test-rollup-pipeline', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -123,7 +123,7 @@ test.describe('Plan Rollup Review', () => {
 		// Use a flag to control which stage to return: before reload vs after
 		let reloaded = false;
 
-		await page.route('**/workflow-api/plans/test-transition', route => {
+		await page.route('**/plan-api/plans/test-transition', route => {
 			const stage = reloaded ? 'complete' : 'reviewing_rollup';
 			const plan = mockPlan({
 				slug: 'test-transition',
@@ -139,7 +139,7 @@ test.describe('Plan Rollup Review', () => {
 		});
 
 		// Also override the list route for reload
-		await page.route('**/workflow-api/plans', route => {
+		await page.route('**/plan-api/plans', route => {
 			const stage = reloaded ? 'complete' : 'reviewing_rollup';
 			const plan = mockPlan({
 				slug: 'test-transition',
@@ -195,7 +195,7 @@ test.describe('Plan Rollup Review', () => {
 			]
 		});
 
-		await page.route('**/workflow-api/plans', route => {
+		await page.route('**/plan-api/plans', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -203,7 +203,7 @@ test.describe('Plan Rollup Review', () => {
 			});
 		});
 
-		await page.route('**/workflow-api/plans/rollup-approved', route => {
+		await page.route('**/plan-api/plans/rollup-approved', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -242,7 +242,7 @@ test.describe('Plan Rollup Review', () => {
 			]
 		});
 
-		await page.route('**/workflow-api/plans', route => {
+		await page.route('**/plan-api/plans', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -250,7 +250,7 @@ test.describe('Plan Rollup Review', () => {
 			});
 		});
 
-		await page.route('**/workflow-api/plans/rollup-with-loop', route => {
+		await page.route('**/plan-api/plans/rollup-with-loop', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -278,7 +278,7 @@ test.describe('Plan Rollup Review', () => {
 			active_loops: []
 		});
 
-		await page.route('**/workflow-api/plans', route => {
+		await page.route('**/plan-api/plans', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -286,7 +286,7 @@ test.describe('Plan Rollup Review', () => {
 			});
 		});
 
-		await page.route('**/workflow-api/plans/post-rollup-complete', route => {
+		await page.route('**/plan-api/plans/post-rollup-complete', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',

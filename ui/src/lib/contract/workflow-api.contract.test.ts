@@ -33,7 +33,7 @@ import type { SynthesisResult, ReviewFinding, ReviewerSummary, SynthesisStats } 
  * If these tests fail, it means the Go API contract changed and the frontend
  * types need updating — or vice versa.
  */
-describe('workflow-api contract', () => {
+describe('plan-api contract', () => {
 	// ---------------------------------------------------------------------------
 	// PlanWithStatus
 	// ---------------------------------------------------------------------------

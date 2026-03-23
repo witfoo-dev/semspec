@@ -96,7 +96,7 @@ test.describe('Agent Timeline', () => {
 			});
 
 			// Also mock the plans API to return active loops with roles
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -137,7 +137,7 @@ test.describe('Agent Timeline', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -176,7 +176,7 @@ test.describe('Agent Timeline', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -257,7 +257,7 @@ test.describe('Agent Timeline', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -303,7 +303,7 @@ test.describe('Agent Timeline', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',

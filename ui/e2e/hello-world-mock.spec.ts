@@ -45,7 +45,7 @@ test.describe('Hello World Mock LLM E2E', () => {
 			await chatPage.expectMode('plan');
 			await chatPage.expectModeLabel('Planning');
 
-			// Send plan description (routes to POST /workflow-api/plans)
+			// Send plan description (routes to POST /plan-api/plans)
 			await chatPage.sendMessage('Add a goodbye endpoint');
 
 			// Wait for status message indicating plan creation
@@ -95,7 +95,7 @@ test.describe('Hello World Mock LLM E2E', () => {
 	test.describe('Plan Approval Workflow', () => {
 		test.beforeEach(async ({ page }) => {
 			// Pre-create a plan by mocking API responses
-			await page.route('**/workflow-api/plans', (route) => {
+			await page.route('**/plan-api/plans', (route) => {
 				if (route.request().method() === 'GET') {
 					route.fulfill({
 						status: 200,
@@ -118,7 +118,7 @@ test.describe('Hello World Mock LLM E2E', () => {
 				}
 			});
 
-			await page.route('**/workflow-api/plans/add-goodbye-endpoint', (route) => {
+			await page.route('**/plan-api/plans/add-goodbye-endpoint', (route) => {
 				if (route.request().method() === 'GET') {
 					route.fulfill({
 						status: 200,
@@ -144,7 +144,7 @@ test.describe('Hello World Mock LLM E2E', () => {
 				}
 			});
 
-			await page.route('**/workflow-api/plans/add-goodbye-endpoint/tasks', (route) => {
+			await page.route('**/plan-api/plans/add-goodbye-endpoint/tasks', (route) => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -152,7 +152,7 @@ test.describe('Hello World Mock LLM E2E', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/add-goodbye-endpoint/phases', (route) => {
+			await page.route('**/plan-api/plans/add-goodbye-endpoint/phases', (route) => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',

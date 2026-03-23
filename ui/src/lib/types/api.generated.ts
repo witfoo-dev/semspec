@@ -2098,7 +2098,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans": {
+    "/plan-api/plans": {
         parameters: {
             query?: never;
             header?: never;
@@ -2181,7 +2181,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}": {
+    "/plan-api/plans/{slug}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2306,7 +2306,7 @@ export interface paths {
         };
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/execute": {
+    "/plan-api/plans/{slug}/execute": {
         parameters: {
             query?: never;
             header?: never;
@@ -2362,7 +2362,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/phases": {
+    "/plan-api/plans/{slug}/phases": {
         parameters: {
             query?: never;
             header?: never;
@@ -2456,7 +2456,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/phases/{phaseId}": {
+    "/plan-api/plans/{slug}/phases/{phaseId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2587,7 +2587,7 @@ export interface paths {
         };
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/phases/{phaseId}/approve": {
+    "/plan-api/plans/{slug}/phases/{phaseId}/approve": {
         parameters: {
             query?: never;
             header?: never;
@@ -2643,7 +2643,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/phases/{phaseId}/reject": {
+    "/plan-api/plans/{slug}/phases/{phaseId}/reject": {
         parameters: {
             query?: never;
             header?: never;
@@ -2706,7 +2706,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/phases/{phaseId}/tasks": {
+    "/plan-api/plans/{slug}/phases/{phaseId}/tasks": {
         parameters: {
             query?: never;
             header?: never;
@@ -2757,7 +2757,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/phases/approve": {
+    "/plan-api/plans/{slug}/phases/approve": {
         parameters: {
             query?: never;
             header?: never;
@@ -2806,7 +2806,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/phases/generate": {
+    "/plan-api/plans/{slug}/phases/generate": {
         parameters: {
             query?: never;
             header?: never;
@@ -2862,7 +2862,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/phases/reorder": {
+    "/plan-api/plans/{slug}/phases/reorder": {
         parameters: {
             query?: never;
             header?: never;
@@ -2923,7 +2923,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/promote": {
+    "/plan-api/plans/{slug}/promote": {
         parameters: {
             query?: never;
             header?: never;
@@ -2972,7 +2972,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/reviews": {
+    "/plan-api/plans/{slug}/reviews": {
         parameters: {
             query?: never;
             header?: never;
@@ -3021,7 +3021,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/tasks": {
+    "/plan-api/plans/{slug}/tasks": {
         parameters: {
             query?: never;
             header?: never;
@@ -3108,7 +3108,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/tasks/{taskId}": {
+    "/plan-api/plans/{slug}/tasks/{taskId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -3239,7 +3239,7 @@ export interface paths {
         };
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/tasks/{taskId}/approve": {
+    "/plan-api/plans/{slug}/tasks/{taskId}/approve": {
         parameters: {
             query?: never;
             header?: never;
@@ -3295,7 +3295,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/tasks/{taskId}/reject": {
+    "/plan-api/plans/{slug}/tasks/{taskId}/reject": {
         parameters: {
             query?: never;
             header?: never;
@@ -3358,7 +3358,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/tasks/approve": {
+    "/plan-api/plans/{slug}/tasks/approve": {
         parameters: {
             query?: never;
             header?: never;
@@ -3407,7 +3407,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflow-api/plans/{slug}/tasks/generate": {
+    "/plan-api/plans/{slug}/tasks/generate": {
         parameters: {
             query?: never;
             header?: never;

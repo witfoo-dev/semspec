@@ -71,14 +71,14 @@ function buildPlanRoutes(
 	scenarios: Scenario[] = []
 ) {
 	return Promise.all([
-		page.route('**/workflow-api/plans', (route) => {
+		page.route('**/plan-api/plans', (route) => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
 				body: JSON.stringify([plan])
 			});
 		}),
-		page.route(`**/workflow-api/plans/${plan.slug}`, (route) => {
+		page.route(`**/plan-api/plans/${plan.slug}`, (route) => {
 			if (route.request().method() === 'GET') {
 				route.fulfill({
 					status: 200,
@@ -89,14 +89,14 @@ function buildPlanRoutes(
 				route.continue();
 			}
 		}),
-		page.route(`**/workflow-api/plans/${plan.slug}/phases`, (route) => {
+		page.route(`**/plan-api/plans/${plan.slug}/phases`, (route) => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
 				body: JSON.stringify(phases)
 			});
 		}),
-		page.route(`**/workflow-api/plans/${plan.slug}/tasks`, (route) => {
+		page.route(`**/plan-api/plans/${plan.slug}/tasks`, (route) => {
 			if (route.request().method() === 'GET') {
 				route.fulfill({
 					status: 200,
@@ -107,14 +107,14 @@ function buildPlanRoutes(
 				route.continue();
 			}
 		}),
-		page.route(`**/workflow-api/plans/${plan.slug}/requirements`, (route) => {
+		page.route(`**/plan-api/plans/${plan.slug}/requirements`, (route) => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
 				body: JSON.stringify(requirements)
 			});
 		}),
-		page.route(`**/workflow-api/plans/${plan.slug}/scenarios**`, (route) => {
+		page.route(`**/plan-api/plans/${plan.slug}/scenarios**`, (route) => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -321,7 +321,7 @@ test.describe('Plan Detail UX', () => {
 		test('save persists changes via API', async ({ planDetailPage, page }) => {
 			// Mock the PATCH endpoint
 			let patchCalled = false;
-			await page.route('**/workflow-api/plans/test-edit-plan', async (route) => {
+			await page.route('**/plan-api/plans/test-edit-plan', async (route) => {
 				if (route.request().method() === 'PATCH') {
 					patchCalled = true;
 					route.fulfill({

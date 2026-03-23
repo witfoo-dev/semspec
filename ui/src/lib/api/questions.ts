@@ -40,10 +40,10 @@ export interface QuestionEvent {
  * Questions REST + SSE API client.
  *
  * Endpoints:
- * - GET /workflow-api/questions - List questions (filterable)
- * - GET /workflow-api/questions/{id} - Get single question
- * - POST /workflow-api/questions/{id}/answer - Submit answer
- * - GET /workflow-api/questions/stream - SSE real-time events
+ * - GET /plan-api/questions - List questions (filterable)
+ * - GET /plan-api/questions/{id} - Get single question
+ * - POST /plan-api/questions/{id}/answer - Submit answer
+ * - GET /plan-api/questions/stream - SSE real-time events
  */
 export const questionsApi = {
 	/**
@@ -61,7 +61,7 @@ export const questionsApi = {
 			params.set('limit', String(filters.limit));
 		}
 		const query = params.toString();
-		const path = `/workflow-api/questions${query ? `?${query}` : ''}`;
+		const path = `/plan-api/questions${query ? `?${query}` : ''}`;
 		const response = await request<{ questions: Question[]; total: number }>(path);
 		return response.questions;
 	},
@@ -70,14 +70,14 @@ export const questionsApi = {
 	 * Get a single question by ID.
 	 */
 	async get(id: string): Promise<Question> {
-		return request<Question>(`/workflow-api/questions/${id}`);
+		return request<Question>(`/plan-api/questions/${id}`);
 	},
 
 	/**
 	 * Submit an answer to a question.
 	 */
 	async answer(id: string, req: AnswerRequest): Promise<void> {
-		await request<void>(`/workflow-api/questions/${id}/answer`, {
+		await request<void>(`/plan-api/questions/${id}/answer`, {
 			method: 'POST',
 			body: req
 		});
@@ -95,7 +95,7 @@ export const questionsApi = {
 		onEvent: (event: QuestionEvent) => void,
 		onError?: (error: Error) => void
 	): () => void {
-		const url = `${BASE_URL}/workflow-api/questions/stream`;
+		const url = `${BASE_URL}/plan-api/questions/stream`;
 		const eventSource = new EventSource(url);
 
 		// Handle specific event types

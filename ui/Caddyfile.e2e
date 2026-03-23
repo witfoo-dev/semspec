@@ -2,42 +2,37 @@
 # Routes API requests to semspec backend, all else to UI (Node SSR server)
 
 :3000 {
-    # Proxy agentic-dispatch API to semspec backend
+    # Plan API (plans, requirements, scenarios, questions, workspace)
+    handle /plan-api/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Agentic dispatch (loops, activity SSE, health)
     handle /agentic-dispatch/* {
         reverse_proxy semspec:8080
     }
 
-    # Proxy workflow API to semspec backend
-    handle /workflow-api/* {
-        reverse_proxy semspec:8080
-    }
-
-    # Proxy context-builder API to semspec backend
+    # Context builder
     handle /context-builder/* {
         reverse_proxy semspec:8080
     }
 
-    # Proxy GraphQL to graph-gateway
+    # GraphQL (graph-gateway)
     handle /graphql {
         reverse_proxy semspec:8082
     }
 
-    # Proxy project API to semspec backend
+    # Project API
     handle /project-api/* {
         reverse_proxy semspec:8080
     }
 
-    # Proxy sources API to semspec backend
-    handle /sources-api/* {
-        reverse_proxy semspec:8080
-    }
-
-    # Proxy trajectory API to semspec backend
+    # Trajectory API
     handle /trajectory-api/* {
         reverse_proxy semspec:8080
     }
 
-    # Proxy all other requests to UI Node SSR server
+    # All other routes to UI Node SSR server
     handle {
         reverse_proxy ui:3000
     }

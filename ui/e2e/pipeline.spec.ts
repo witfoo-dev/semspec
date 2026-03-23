@@ -3,7 +3,7 @@ import { test, expect, testData, mockPlan } from './helpers/setup';
 test.describe('Agent Pipeline View', () => {
 	// All plan detail pages fetch phases, requirements, and scenarios - provide default empty responses
 	test.beforeEach(async ({ page }) => {
-		await page.route('**/workflow-api/plans/*/phases', route => {
+		await page.route('**/plan-api/plans/*/phases', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -11,7 +11,7 @@ test.describe('Agent Pipeline View', () => {
 			});
 		});
 
-		await page.route('**/workflow-api/plans/*/requirements', route => {
+		await page.route('**/plan-api/plans/*/requirements', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -19,7 +19,7 @@ test.describe('Agent Pipeline View', () => {
 			});
 		});
 
-		await page.route('**/workflow-api/plans/*/scenarios**', route => {
+		await page.route('**/plan-api/plans/*/scenarios**', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -31,7 +31,7 @@ test.describe('Agent Pipeline View', () => {
 	test.describe('Pipeline Rendering', () => {
 		test('shows pipeline section on committed plan', async ({ page, planDetailPage }) => {
 			// Mock a committed plan with active loops
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -56,7 +56,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/test-pipeline-plan', route => {
+			await page.route('**/plan-api/plans/test-pipeline-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -79,7 +79,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/test-pipeline-plan/tasks', route => {
+			await page.route('**/plan-api/plans/test-pipeline-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -93,7 +93,7 @@ test.describe('Agent Pipeline View', () => {
 
 		test('hides pipeline section on uncommitted plan', async ({ page, planDetailPage }) => {
 			// Mock an uncommitted plan
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -109,7 +109,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/uncommitted-plan', route => {
+			await page.route('**/plan-api/plans/uncommitted-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -123,7 +123,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/uncommitted-plan/tasks', route => {
+			await page.route('**/plan-api/plans/uncommitted-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -136,7 +136,7 @@ test.describe('Agent Pipeline View', () => {
 		});
 
 		test('shows pipeline stages', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -161,7 +161,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/stages-plan', route => {
+			await page.route('**/plan-api/plans/stages-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -184,7 +184,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/stages-plan/tasks', route => {
+			await page.route('**/plan-api/plans/stages-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -204,7 +204,7 @@ test.describe('Agent Pipeline View', () => {
 
 	test.describe('Active Stage', () => {
 		test('shows active stage with spinner', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -229,7 +229,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/active-stage-plan', route => {
+			await page.route('**/plan-api/plans/active-stage-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -252,7 +252,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/active-stage-plan/tasks', route => {
+			await page.route('**/plan-api/plans/active-stage-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -273,7 +273,7 @@ test.describe('Agent Pipeline View', () => {
 		});
 
 		test('shows iteration progress on active stage', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -298,7 +298,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/progress-plan', route => {
+			await page.route('**/plan-api/plans/progress-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -321,7 +321,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/progress-plan/tasks', route => {
+			await page.route('**/plan-api/plans/progress-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -342,7 +342,7 @@ test.describe('Agent Pipeline View', () => {
 
 	test.describe('Completed Stages', () => {
 		test('shows completed stages with success styling', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -358,7 +358,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/complete-plan', route => {
+			await page.route('**/plan-api/plans/complete-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -372,7 +372,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/complete-plan/tasks', route => {
+			await page.route('**/plan-api/plans/complete-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -390,7 +390,7 @@ test.describe('Agent Pipeline View', () => {
 
 	test.describe('Review Branch', () => {
 		test('shows parallel reviewer branch when in review', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -415,7 +415,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/review-plan', route => {
+			await page.route('**/plan-api/plans/review-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -438,7 +438,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/review-plan/tasks', route => {
+			await page.route('**/plan-api/plans/review-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -457,7 +457,7 @@ test.describe('Agent Pipeline View', () => {
 
 	test.describe('Plan Navigation', () => {
 		test('shows not found for invalid slug', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -465,7 +465,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/nonexistent-plan', route => {
+			await page.route('**/plan-api/plans/nonexistent-plan', route => {
 				route.fulfill({
 					status: 404,
 					contentType: 'application/json',
@@ -478,7 +478,7 @@ test.describe('Agent Pipeline View', () => {
 		});
 
 		test('back link returns to plans list', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -494,7 +494,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/nav-plan', route => {
+			await page.route('**/plan-api/plans/nav-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -508,7 +508,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/nav-plan/tasks', route => {
+			await page.route('**/plan-api/plans/nav-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -526,7 +526,7 @@ test.describe('Agent Pipeline View', () => {
 
 	test.describe('ActionBar Buttons', () => {
 		test('shows Approve Plan button for uncommitted plan with goal', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -543,7 +543,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/promote-plan', route => {
+			await page.route('**/plan-api/plans/promote-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -558,7 +558,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/promote-plan/tasks', route => {
+			await page.route('**/plan-api/plans/promote-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -578,7 +578,7 @@ test.describe('Agent Pipeline View', () => {
 				stage: 'approved'
 			});
 
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -586,7 +586,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/cascade-plan', route => {
+			await page.route('**/plan-api/plans/cascade-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -594,7 +594,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/cascade-plan/tasks', route => {
+			await page.route('**/plan-api/plans/cascade-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -618,7 +618,7 @@ test.describe('Agent Pipeline View', () => {
 				stage: 'ready_for_execution'
 			});
 
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -626,7 +626,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/ready-plan', route => {
+			await page.route('**/plan-api/plans/ready-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -634,7 +634,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/ready-plan/tasks', route => {
+			await page.route('**/plan-api/plans/ready-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -647,7 +647,7 @@ test.describe('Agent Pipeline View', () => {
 		});
 
 		test('shows Execute button when tasks are ready', async ({ page, planDetailPage }) => {
-			await page.route('**/workflow-api/plans', route => {
+			await page.route('**/plan-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -663,7 +663,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/execute-plan', route => {
+			await page.route('**/plan-api/plans/execute-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -677,7 +677,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await page.route('**/workflow-api/plans/execute-plan/tasks', route => {
+			await page.route('**/plan-api/plans/execute-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',

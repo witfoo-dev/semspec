@@ -126,7 +126,7 @@ async function mockAgentTreeAPI(
 	page: import('@playwright/test').Page,
 	loops: AgentLoop[] = mockLoops
 ): Promise<void> {
-	await page.route('**/workflow-api/plans/test-plan/agent-tree', (route) => {
+	await page.route('**/plan-api/plans/test-plan/agent-tree', (route) => {
 		route.fulfill({
 			status: 200,
 			contentType: 'application/json',
@@ -142,7 +142,7 @@ async function mockDAGExecutionAPI(
 	page: import('@playwright/test').Page,
 	execution: DAGExecution = mockDAG
 ): Promise<void> {
-	await page.route('**/workflow-api/executions/exec-test', (route) => {
+	await page.route('**/plan-api/executions/exec-test', (route) => {
 		route.fulfill({
 			status: 200,
 			contentType: 'application/json',
@@ -158,7 +158,7 @@ async function mockRetrospectiveAPI(
 	page: import('@playwright/test').Page,
 	phases: RetrospectivePhase[] = mockPhases
 ): Promise<void> {
-	await page.route('**/workflow-api/plans/test-plan/phases/retrospective', (route) => {
+	await page.route('**/plan-api/plans/test-plan/phases/retrospective', (route) => {
 		route.fulfill({
 			status: 200,
 			contentType: 'application/json',

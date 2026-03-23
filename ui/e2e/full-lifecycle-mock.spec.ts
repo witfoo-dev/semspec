@@ -203,7 +203,7 @@ test.describe('Full UI Lifecycle', () => {
 		// If on legacy path with tasks, try to approve them
 		if (['tasks_generated'].includes(stage)) {
 			const response = await page.request.post(
-				`http://localhost:3000/workflow-api/plans/${planSlug}/tasks/approve`,
+				`http://localhost:3000/plan-api/plans/${planSlug}/tasks/approve`,
 				{ data: {} }
 			);
 			if (!response.ok() && response.status() !== 409) {
@@ -221,7 +221,7 @@ test.describe('Full UI Lifecycle', () => {
 	test('start execution and verify pipeline indicator', async ({ page, planDetailPage }) => {
 		// Use API to start execution (may already be executing if auto-triggered)
 		const response = await page.request.post(
-			`http://localhost:3000/workflow-api/plans/${planSlug}/execute`,
+			`http://localhost:3000/plan-api/plans/${planSlug}/execute`,
 			{ data: {} }
 		);
 		if (!response.ok() && response.status() !== 409) {
