@@ -502,7 +502,8 @@
         "consumer_name": "scenario-orchestrator",
         "trigger_subject": "scenario.orchestrate.*",
         "workflow_trigger_subject": "workflow.trigger.scenario-execution-loop",
-        "execution_timeout": "120s"
+        "execution_timeout": "120s",
+        "max_concurrent": 1
       }
     },
     "scenario-executor": {
