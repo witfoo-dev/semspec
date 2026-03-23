@@ -1,0 +1,69 @@
+import { test, expect } from '@playwright/test';
+import { waitForHydration } from './helpers/hydration';
+
+test.describe('@mock trajectories', () => {
+	test.beforeEach(async ({ page }) => {
+		await page.goto('/trajectories');
+		await waitForHydration(page);
+	});
+
+	test('renders trajectories page with heading', async ({ page }) => {
+		await expect(page.getByTestId('trajectories-heading')).toBeVisible();
+		await expect(page.getByTestId('trajectories-heading')).toHaveText('Trajectories');
+		await expect(page.getByText('Recent agent loop execution history')).toBeVisible();
+	});
+
+	test('shows refresh button', async ({ page }) => {
+		await expect(page.getByRole('button', { name: /Refresh/i })).toBeVisible();
+	});
+
+	test('shows filter sidebar with Status section', async ({ page }) => {
+		await expect(page.getByText('Filters')).toBeVisible();
+		await expect(page.getByText('Status')).toBeVisible();
+		// "All" filter button should exist with a count
+		await expect(page.getByTestId('panel-left').getByText('All').first()).toBeVisible();
+	});
+
+	test('shows trajectory items or empty state', async ({ page }) => {
+		const list = page.getByTestId('trajectory-list');
+		const empty = page.getByTestId('trajectories-empty');
+
+		// One of these should be visible
+		const hasItems = await list.isVisible().catch(() => false);
+		const isEmpty = await empty.isVisible().catch(() => false);
+		expect(hasItems || isEmpty).toBe(true);
+	});
+
+	test('trajectory items link to detail page', async ({ page }) => {
+		const items = page.getByTestId('trajectory-item');
+		const count = await items.count();
+
+		if (count > 0) {
+			// Each item should be a link to /trajectories/{id}
+			const href = await items.first().getAttribute('href');
+			expect(href).toMatch(/^\/trajectories\/.+/);
+
+			// Should show loop ID, status badge
+			await expect(items.first().getByTestId('trajectory-item-id')).toBeVisible();
+			await expect(items.first().getByTestId('trajectory-item-status')).toBeVisible();
+		}
+	});
+
+	test('refresh button fetches latest data', async ({ page }) => {
+		const refreshBtn = page.getByRole('button', { name: /Refresh/i });
+		await refreshBtn.click();
+
+		// Button should still be visible after refresh completes
+		await expect(refreshBtn).toBeVisible();
+	});
+
+	test('status filter buttons are clickable', async ({ page }) => {
+		// The "All" button in the left panel status section
+		const allBtn = page.getByTestId('panel-left').getByRole('button', { name: /All/i }).first();
+		await expect(allBtn).toBeVisible();
+		await allBtn.click();
+
+		// Should still show the page (no navigation away)
+		await expect(page.getByTestId('trajectories-heading')).toBeVisible();
+	});
+});

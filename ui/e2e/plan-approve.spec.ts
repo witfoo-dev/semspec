@@ -16,7 +16,7 @@ test.describe('@mock @happy-path plan-approve', () => {
 	test.describe.configure({ mode: 'serial' });
 
 	test.beforeAll(async () => {
-		const plan = await createPlan('Build an approve flow test feature');
+		const plan = await createPlan(`Approve flow test ${Date.now()}`);
 		slug = plan.slug;
 	});
 

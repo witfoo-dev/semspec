@@ -16,7 +16,7 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 	test.describe.configure({ mode: 'serial' });
 
 	test.beforeAll(async () => {
-		const plan = await createPlan('Build a lifecycle test feature');
+		const plan = await createPlan(`Lifecycle test ${Date.now()}`);
 		slug = plan.slug;
 	});
 

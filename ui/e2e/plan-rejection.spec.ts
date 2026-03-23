@@ -16,7 +16,7 @@ test.describe('@mock @rejection plan-rejection', () => {
 
 	test.beforeAll(async () => {
 		await mockLLM.resetScenario('hello-world-plan-rejection');
-		const plan = await createPlan('Build a rejection recovery test feature');
+		const plan = await createPlan(`Rejection test ${Date.now()}`);
 		slug = plan.slug;
 	});
 
