@@ -602,10 +602,16 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *scenario
 	exec.DecomposerTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
+	// Use separate decomposer model if configured, otherwise fall back to exec model.
+	decomposerModel := c.config.DecomposerModel
+	if decomposerModel == "" {
+		decomposerModel = exec.Model
+	}
+
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
-		Model:        exec.Model,
+		Model:        decomposerModel,
 		WorkflowSlug: WorkflowSlugScenarioExecution,
 		WorkflowStep: stageDecompose,
 		Prompt:       exec.Prompt,

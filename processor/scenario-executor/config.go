@@ -26,6 +26,10 @@ type Config struct {
 	// Model is the model endpoint name passed through to dispatched agents.
 	Model string `json:"model" schema:"type:string,description:Model endpoint name for agent tasks,category:basic,default:default"`
 
+	// DecomposerModel is the model endpoint for the decomposer agent. When empty,
+	// falls back to Model. Separate model allows independent mock fixtures.
+	DecomposerModel string `json:"decomposer_model" schema:"type:string,description:Model endpoint for decomposer agent,category:advanced"`
+
 	// SandboxURL is the base URL of the sandbox server. When set, the
 	// scenario-executor creates per-scenario branches for worktree isolation.
 	SandboxURL string `json:"sandbox_url" schema:"type:string,description:Sandbox server URL for branch management,category:advanced"`

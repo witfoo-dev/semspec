@@ -310,7 +310,7 @@ func (c *Component) dispatchPlanRollupReview(ctx context.Context, plan *workflow
 		RequestID:    uuid.New().String(),
 		Slug:         plan.Slug,
 		TraceID:      latestTraceID(plan),
-		PlanContent:  []byte(rollupContent.String()),
+		PlanContent:  mustJSON(rollupContent.String()),
 	}
 
 	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
@@ -340,6 +340,13 @@ func (c *Component) dispatchPlanRollupReview(ctx context.Context, plan *workflow
 		"requirements", len(requirements),
 		"scenarios", len(scenarios),
 	)
+}
+
+// mustJSON encodes a string as a JSON value (quoted string bytes).
+// Used for PlanContent which is json.RawMessage and must be valid JSON.
+func mustJSON(s string) json.RawMessage {
+	data, _ := json.Marshal(s)
+	return data
 }
 
 // rollupReviewerTools returns the tool names available to the rollup reviewer.
