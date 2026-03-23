@@ -46,7 +46,6 @@ import (
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
-	"github.com/c360studio/semspec/tools/spawn"
 	"github.com/c360studio/semspec/workflow"
 	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
 	"github.com/c360studio/semspec/workflow/payloads"
@@ -57,7 +56,6 @@ import (
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/c360studio/semstreams/service"
 	"github.com/c360studio/semstreams/types"
-	"github.com/nats-io/nats.go"
 	"github.com/spf13/cobra"
 )
 
@@ -699,29 +697,8 @@ func registerAgenticToolsFromKV(ctx context.Context, natsClient *natsclient.Clie
 
 	// Register infrastructure-dependent tools.
 	tools.RegisterAgenticTools(tools.AgenticToolDeps{
-		NATSClient:            &spawnNATSAdapter{client: natsClient},
+		NATSClient:            natsClient,
 		GraphHelper:           agentHelper,
 		ErrorCategoryRegistry: registry,
 	})
-}
-
-// spawnNATSAdapter adapts *natsclient.Client to spawn.NATSClient.
-// The Subscribe signatures differ: natsclient uses func(context.Context, *nats.Msg)
-// while spawn uses func(msg []byte). This adapter bridges the gap.
-type spawnNATSAdapter struct {
-	client *natsclient.Client
-}
-
-func (a *spawnNATSAdapter) PublishToStream(ctx context.Context, subject string, data []byte) error {
-	return a.client.PublishToStream(ctx, subject, data)
-}
-
-func (a *spawnNATSAdapter) Subscribe(ctx context.Context, subject string, handler func(msg []byte)) (spawn.Subscription, error) {
-	sub, err := a.client.Subscribe(ctx, subject, func(_ context.Context, msg *nats.Msg) {
-		handler(msg.Data)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return sub, nil
 }

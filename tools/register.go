@@ -18,7 +18,9 @@ import (
 	"github.com/c360studio/semspec/tools/spawn"
 	"github.com/c360studio/semspec/tools/terminal"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/answerer"
+	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semstreams/natsclient"
+	nats "github.com/nats-io/nats.go"
 	// Register graph tools (graph_search, graph_query, graph_summary) via init()
 	_ "github.com/c360studio/semspec/tools/workflow"
 	// Register web search tool via init() — only active when BRAVE_SEARCH_API_KEY is set.
@@ -30,9 +32,9 @@ import (
 // spawn_agent and other runtime tools. These are not available at init() time
 // so callers must invoke RegisterAgenticTools explicitly during startup.
 type AgenticToolDeps struct {
-	// NATSClient is required by spawn_agent for publishing task messages and
-	// subscribing to child completion events.
-	NATSClient spawn.NATSClient
+	// NATSClient is the concrete NATS client. Every tool that needs NATS
+	// uses this directly. The spawn tool adapts internally.
+	NATSClient *natsclient.Client
 
 	// GraphHelper is required by spawn_agent for recording spawn relationships.
 	GraphHelper spawn.GraphHelper
@@ -48,13 +50,8 @@ type AgenticToolDeps struct {
 	// If nil, the review tool is not registered.
 	ErrorCategoryRegistry *workflow.ErrorCategoryRegistry
 
-	// QuestionStore is required by raise_question for storing questions.
-	// If nil, the raise_question tool is not registered.
-	QuestionStore *workflow.QuestionStore
-
-	// QuestionRouter is optional — if provided, raise_question routes questions
-	// after storing them.
-	QuestionRouter *answerer.Router
+	// TripleWriter is used by ask_question for writing question triples to graph.
+	TripleWriter *graphutil.TripleWriter
 }
 
 // RegisterAgenticTools registers tools that require runtime infrastructure
@@ -78,6 +75,9 @@ func RegisterAgenticTools(deps AgenticToolDeps) {
 	}
 
 	// spawn_agent — requires NATS and graph.
+	// The spawn tool has its own NATSClient interface (different Subscribe signature),
+	// so we adapt the concrete client here.
+	spawnNC := &spawnNATSAdapter{client: deps.NATSClient}
 	spawnOpts := []spawn.Option{}
 	if deps.DefaultModel != "" {
 		spawnOpts = append(spawnOpts, spawn.WithDefaultModel(deps.DefaultModel))
@@ -85,7 +85,7 @@ func RegisterAgenticTools(deps AgenticToolDeps) {
 	if deps.MaxDepth > 0 {
 		spawnOpts = append(spawnOpts, spawn.WithMaxDepth(deps.MaxDepth))
 	}
-	spawnExec := spawn.NewExecutor(deps.NATSClient, deps.GraphHelper, spawnOpts...)
+	spawnExec := spawn.NewExecutor(spawnNC, deps.GraphHelper, spawnOpts...)
 	for _, tool := range spawnExec.ListTools() {
 		_ = agentictools.RegisterTool(tool.Name, spawnExec)
 	}
@@ -105,10 +105,10 @@ func registerOptionalTools(deps AgenticToolDeps) {
 		}
 	}
 
-	// raise_question — requires question store. Kept as alias alongside ask_question
-	// for backward compatibility during migration.
-	if deps.QuestionStore != nil {
-		questionExec := question.NewExecutor(deps.QuestionStore, deps.QuestionRouter)
+	// ask_question — non-terminal tool that blocks until answer arrives.
+	// Uses graph triples for question storage, NATS for answer delivery.
+	if deps.NATSClient != nil {
+		questionExec := question.NewExecutor(deps.NATSClient, deps.TripleWriter, nil)
 		for _, tool := range questionExec.ListTools() {
 			_ = agentictools.RegisterTool(tool.Name, questionExec)
 		}
@@ -150,4 +150,25 @@ func init() {
 
 	// Graph tools (graph_search, graph_query, graph_summary) and web_search
 	// are registered via blank imports above.
+}
+
+// spawnNATSAdapter adapts *natsclient.Client to spawn.NATSClient.
+// The Subscribe signatures differ: natsclient uses func(context.Context, *nats.Msg)
+// while spawn uses func(msg []byte).
+type spawnNATSAdapter struct {
+	client *natsclient.Client
+}
+
+func (a *spawnNATSAdapter) PublishToStream(ctx context.Context, subject string, data []byte) error {
+	return a.client.PublishToStream(ctx, subject, data)
+}
+
+func (a *spawnNATSAdapter) Subscribe(ctx context.Context, subject string, handler func(msg []byte)) (spawn.Subscription, error) {
+	sub, err := a.client.Subscribe(ctx, subject, func(_ context.Context, msg *nats.Msg) {
+		handler(msg.Data)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sub, nil
 }
