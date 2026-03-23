@@ -176,6 +176,7 @@
 	.plan-detail {
 		padding: var(--space-4) var(--space-6);
 		max-width: 900px;
+		margin: 0 auto;
 		height: 100%;
 		display: flex;
 		flex-direction: column;

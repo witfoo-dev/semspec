@@ -153,9 +153,11 @@
 	.harness-dag-view,
 	.harness-retro-view {
 		max-width: 900px;
+		margin: 0 auto;
 	}
 
 	.harness-loop-detail {
 		max-width: 600px;
+		margin: 0 auto;
 	}
 </style>
