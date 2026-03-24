@@ -16,7 +16,7 @@ test.describe('@mock board', () => {
 		await waitForHydration(page);
 
 		// Default ON columns — chips contain label + optional count
-		for (const label of ['Review', 'Ready', 'Executing', 'Complete']) {
+		for (const label of ['Review', 'Ready', 'Running', 'Complete']) {
 			await expect(page.getByRole('button', { name: new RegExp(`^${label}`) }).first()).toBeVisible();
 		}
 	});
