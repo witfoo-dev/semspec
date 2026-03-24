@@ -30,7 +30,7 @@ test.describe('@mock @rejection plan-rejection', () => {
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
-		await page.getByRole('button', { name: /Approve Plan/i }).first().click();
+		await page.getByRole('button', { name: /Create Requirements/i }).first().click();
 
 		// Mock reviewer rejects first, then approves. Full cycle completes with scenarios.
 		await expect(

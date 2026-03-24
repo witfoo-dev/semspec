@@ -35,7 +35,7 @@
 	const guidance = $derived.by(() => {
 		if (!plan.approved) {
 			return {
-				message: 'Review the plan details and approve to begin the auto-cascade.',
+				message: 'Review the plan details, then create requirements and scenarios.',
 				showApprove: true,
 				showEdit: true
 			};
@@ -317,7 +317,7 @@
 							Approving...
 						{:else}
 							<Icon name="check" size={14} />
-							Approve Plan
+							Create Requirements
 						{/if}
 					</button>
 				{/if}

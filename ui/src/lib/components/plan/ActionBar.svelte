@@ -105,7 +105,7 @@
 				aria-busy={promoteLoading}
 			>
 				<Icon name="arrow-up" size={16} />
-				<span>Approve Plan</span>
+				<span>Create Requirements</span>
 			</button>
 		{/if}
 

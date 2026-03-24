@@ -31,14 +31,14 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
-		await expect(page.getByRole('button', { name: /Approve Plan/i }).first()).toBeVisible();
+		await expect(page.getByRole('button', { name: /Create Requirements/i }).first()).toBeVisible();
 	});
 
 	test('approve triggers cascade to scenarios_generated', async ({ page }) => {
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
-		await page.getByRole('button', { name: /Approve Plan/i }).first().click();
+		await page.getByRole('button', { name: /Create Requirements/i }).first().click();
 
 		// UI shows "Approve & Continue" when cascade reaches scenarios_generated
 		await expect(

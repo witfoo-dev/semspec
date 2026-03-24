@@ -8,7 +8,7 @@ import { startExecutionButton } from './helpers/selectors';
  *
  * Exercises the full plan flow with a real LLM provider.
  * Handles both auto_approve=true (cascade runs automatically) and
- * auto_approve=false (human clicks Approve Plan in UI).
+ * auto_approve=false (human clicks Create Requirements in UI).
  *
  * Run with: task e2e:ui:test:llm
  * Or: PLAYWRIGHT_TIMEOUT=600000 npx playwright test plan-lifecycle-llm.spec.ts --project cascade --no-deps
@@ -58,9 +58,9 @@ test.describe('@easy @happy-path plan-lifecycle-llm', () => {
 		let plan = await getPlan(slug);
 
 		if (!plan.approved) {
-			// Manual approval needed — click Approve Plan button
-			console.log('[easy] Manual approval flow — clicking Approve Plan');
-			await page.getByRole('button', { name: /Approve Plan/i }).first().click();
+			// Manual approval needed — click Create Requirements button
+			console.log('[easy] Manual approval flow — clicking Create Requirements');
+			await page.getByRole('button', { name: /Create Requirements/i }).first().click();
 		} else {
 			console.log(`[easy] Plan already approved (auto_approve=true), stage=${plan.stage}`);
 		}

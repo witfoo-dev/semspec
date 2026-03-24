@@ -12,7 +12,7 @@ export const createPlanButton = (page: Page) =>
 // Action Bar (plan detail page)
 // ---------------------------------------------------------------------------
 export const approvePlanButton = (page: Page) =>
-	page.getByRole('button', { name: /Approve Plan/i });
+	page.getByRole('button', { name: /Create Requirements/i });
 
 export const startExecutionButton = (page: Page) =>
 	page.getByRole('button', { name: /Start Execution/i });
