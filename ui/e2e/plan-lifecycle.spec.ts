@@ -94,6 +94,12 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 		await page.goto('/');
 		await waitForHydration(page);
 
+		// Ensure Plans mode (may auto-switch to Feed when loops are active)
+		const plansRadio = page.getByRole('radio', { name: 'Plans' });
+		if ((await plansRadio.getAttribute('aria-checked')) === 'false') {
+			await plansRadio.click();
+		}
+
 		await page.getByRole('radio', { name: 'Done' }).click();
 		await expect(planListItem(page, slug)).toBeVisible();
 	});
