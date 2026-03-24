@@ -13,32 +13,35 @@ If you're new to semspec, read [How Semspec Works](01-how-it-works.md) first. It
 
 - Docker and Docker Compose
 - An LLM provider (see [LLM Setup](#llm-setup))
-- A project directory to work with
+- A target project with `.semspec/` configuration (see [Project Initialization](#project-initialization) below)
+
+## Setup Overview
+
+Getting semspec running on your project has three steps:
+
+1. **Initialize your project** — create `.semspec/` config files in your repo
+2. **Configure an LLM** — Ollama (local) or an API key (cloud)
+3. **Start the stack** — `docker compose up -d` pointing at your repo
+
+The demo mode skips steps 1-2 by using the semspec repo itself with a mock LLM.
 
 ## Run Semspec
 
 ### Option A: Docker Compose (Recommended)
 
-The easiest way to run semspec:
-
 ```bash
-# Clone the repository
+# Clone the semspec repo (contains the Docker stack)
 git clone https://github.com/c360studio/semspec.git
 cd semspec
 
-# Start NATS and semspec
-docker compose up -d
+# Point at your project and start
+SEMSPEC_REPO=/path/to/your/project docker compose up -d
 ```
 
 Open **http://localhost:8080** in your browser.
 
-> **Note:** If the Docker image isn't published yet, use Option B below.
-
-To work with a different project directory:
-
-```bash
-SEMSPEC_REPO=/path/to/your/project docker compose up -d
-```
+> Your project must have `.semspec/project.json`, `standards.json`, and `checklist.json` —
+> see [Project Initialization](#project-initialization) below if you haven't set these up yet.
 
 > **File permissions:** The sandbox defaults to UID 1000. If that doesn't match your host user,
 > add your UID to `.env` so agent-created files have correct ownership:
