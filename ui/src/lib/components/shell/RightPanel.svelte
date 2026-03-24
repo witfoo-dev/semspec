@@ -16,6 +16,14 @@
 
 	let selectedTab = $state<RightTab>('trajectory');
 
+	// Plan is in an execution stage
+	const isExecuting = $derived(
+		plan !== null && ['implementing', 'executing', 'reviewing_rollup'].includes(plan.stage)
+	);
+	const isComplete = $derived(
+		plan !== null && ['complete', 'failed'].includes(plan.stage)
+	);
+
 	// Filter loops to the active plan (by workflow_slug)
 	const planLoops = $derived(
 		plan ? loops.filter((l) => l.workflow_slug === plan.slug) : []
@@ -25,16 +33,18 @@
 	);
 	const hasLoops = $derived(activePlanLoops.length > 0);
 
-	// Auto-select most recent active loop for this plan
+	// Auto-select most recent active or completed loop for this plan
 	const effectiveLoopId = $derived(
 		hasLoops ? activePlanLoops[0].loop_id : planLoops.length > 0 ? planLoops[0].loop_id : null
 	);
 
+	// Show Trajectory when executing, has loops, or is complete with history
+	const showTrajectory = $derived(isExecuting || isComplete || planLoops.length > 0);
+
 	const tabs = $derived.by(() => {
 		const t: { id: RightTab; label: string; icon: string }[] = [];
 
-		// Show Trajectory when this plan has loops
-		if (planLoops.length > 0) {
+		if (showTrajectory) {
 			t.push({ id: 'trajectory', label: 'Trajectory', icon: 'git-branch' });
 		}
 
@@ -49,10 +59,18 @@
 		return t;
 	});
 
-	// Ensure selected tab is valid for current state
-	const activeTab = $derived(
-		tabs.find((t) => t.id === selectedTab) ? selectedTab : tabs[0]?.id ?? 'reviews'
-	);
+	// Auto-switch to Trajectory when execution starts
+	const activeTab = $derived.by(() => {
+		// If user manually selected a valid tab, respect it
+		if (tabs.find((t) => t.id === selectedTab)) {
+			// But auto-switch to trajectory when execution starts and we're on reviews
+			if (isExecuting && selectedTab === 'reviews' && showTrajectory) {
+				return 'trajectory';
+			}
+			return selectedTab;
+		}
+		return tabs[0]?.id ?? 'reviews';
+	});
 </script>
 
 <div class="right-panel">
@@ -74,8 +92,15 @@
 	{/if}
 
 	<div class="tab-content">
-		{#if activeTab === 'trajectory' && effectiveLoopId}
-			<TrajectoryPanel loopId={effectiveLoopId} compact />
+		{#if activeTab === 'trajectory'}
+			{#if effectiveLoopId}
+				<TrajectoryPanel loopId={effectiveLoopId} compact />
+			{:else}
+				<div class="empty-tab">
+					<Icon name="git-branch" size={24} />
+					<span>{isExecuting ? 'Waiting for agent activity...' : 'No trajectory data yet'}</span>
+				</div>
+			{/if}
 		{:else if activeTab === 'reviews' && plan}
 			<div class="review-wrapper">
 				<ReviewDashboard slug={plan.slug} />
