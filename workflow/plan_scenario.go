@@ -2,17 +2,17 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+
+	"github.com/c360studio/semstreams/natsclient"
 )
 
 // ScenariosJSONFile is the filename for machine-readable scenario storage (JSON format).
 const ScenariosJSONFile = "scenarios.json"
 
-// SaveScenarios saves scenarios to .semspec/projects/default/plans/{slug}/scenarios.json.
-func (m *Manager) SaveScenarios(ctx context.Context, scenarios []Scenario, slug string) error {
+// SaveScenarios saves scenarios to ENTITY_STATES KV bucket.
+// Each scenario is stored as a separate entity keyed by ScenarioEntityID.
+func SaveScenarios(ctx context.Context, kv *natsclient.KVStore, scenarios []Scenario, slug string) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
 	}
@@ -21,27 +21,20 @@ func (m *Manager) SaveScenarios(ctx context.Context, scenarios []Scenario, slug 
 		return err
 	}
 
-	scenPath := filepath.Join(m.ProjectPlanPath(DefaultProjectSlug, slug), ScenariosJSONFile)
-
-	dir := filepath.Dir(scenPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	data, err := json.MarshalIndent(scenarios, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal scenarios: %w", err)
-	}
-
-	if err := os.WriteFile(scenPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write scenarios: %w", err)
+	for _, s := range scenarios {
+		entityID := ScenarioEntityID(s.ID)
+		triples := ScenarioTriples(slug, &s)
+		if err := kvPutEntity(ctx, kv, entityID, ScenarioEntityType, triples); err != nil {
+			return fmt.Errorf("save scenario %s: %w", s.ID, err)
+		}
 	}
 
 	return nil
 }
 
-// LoadScenarios loads scenarios from .semspec/projects/default/plans/{slug}/scenarios.json.
-func (m *Manager) LoadScenarios(ctx context.Context, slug string) ([]Scenario, error) {
+// LoadScenarios loads scenarios for a plan from ENTITY_STATES KV bucket.
+// Scans all scenario entities by prefix and filters by plan's requirements.
+func LoadScenarios(ctx context.Context, kv *natsclient.KVStore, slug string) ([]Scenario, error) {
 	if err := ValidateSlug(slug); err != nil {
 		return nil, err
 	}
@@ -50,19 +43,42 @@ func (m *Manager) LoadScenarios(ctx context.Context, slug string) ([]Scenario, e
 		return nil, err
 	}
 
-	scenPath := filepath.Join(m.ProjectPlanPath(DefaultProjectSlug, slug), ScenariosJSONFile)
-
-	data, err := os.ReadFile(scenPath)
+	// First load requirements to know which requirement IDs belong to this plan
+	requirements, err := LoadRequirements(ctx, kv, slug)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return []Scenario{}, nil
-		}
-		return nil, fmt.Errorf("failed to read scenarios: %w", err)
+		return nil, fmt.Errorf("load requirements for scenario filter: %w", err)
+	}
+
+	reqIDs := make(map[string]bool, len(requirements))
+	for _, req := range requirements {
+		reqIDs[req.ID] = true
+	}
+
+	prefix := EntityPrefix() + ".wf.plan.scenario."
+	keys, err := kv.KeysByPrefix(ctx, prefix)
+	if err != nil {
+		return []Scenario{}, nil
 	}
 
 	var scenarios []Scenario
-	if err := json.Unmarshal(data, &scenarios); err != nil {
-		return nil, fmt.Errorf("failed to parse scenarios: %w", err)
+	for _, key := range keys {
+		entity, err := kvGetEntity(ctx, kv, key)
+		if err != nil {
+			continue
+		}
+
+		s, err := ScenarioFromEntity(entity)
+		if err != nil {
+			continue
+		}
+
+		if reqIDs[s.RequirementID] {
+			scenarios = append(scenarios, *s)
+		}
+	}
+
+	if scenarios == nil {
+		scenarios = []Scenario{}
 	}
 
 	return scenarios, nil

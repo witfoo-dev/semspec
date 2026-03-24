@@ -13,10 +13,10 @@ func setupCascadeFixture(t *testing.T) (*workflow.Manager, string) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "cascade-test"
 
-	if _, err := m.CreatePlan(ctx, slug, "Cascade Test Plan"); err != nil {
+	if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "Cascade Test Plan"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
@@ -25,7 +25,7 @@ func setupCascadeFixture(t *testing.T) (*workflow.Manager, string) {
 		{ID: "req-1", PlanID: workflow.PlanEntityID(slug), Title: "Auth", Status: workflow.RequirementStatusActive},
 		{ID: "req-2", PlanID: workflow.PlanEntityID(slug), Title: "Logging", Status: workflow.RequirementStatusActive},
 	}
-	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
 
@@ -35,7 +35,7 @@ func setupCascadeFixture(t *testing.T) (*workflow.Manager, string) {
 		{ID: "sc-2", RequirementID: "req-1", Given: "a token"},
 		{ID: "sc-3", RequirementID: "req-2", Given: "log files"},
 	}
-	if err := m.SaveScenarios(ctx, scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, m.KV(), scenarios, slug); err != nil {
 		t.Fatalf("SaveScenarios: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func setupCascadeFixture(t *testing.T) (*workflow.Manager, string) {
 }
 
 func TestChangeProposal_NilProposal(t *testing.T) {
-	m := workflow.NewManager(t.TempDir())
+	m := workflow.NewManager(t.TempDir(), nil)
 	_, err := ChangeProposal(context.Background(), m, "test", nil)
 	if err == nil {
 		t.Fatal("expected error for nil proposal")
@@ -179,23 +179,23 @@ func TestChangeProposal_AlreadyDirtyTaskNotCounted(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "already-dirty"
-	if _, err := m.CreatePlan(ctx, slug, "Already Dirty"); err != nil {
+	if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "Already Dirty"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
 	reqs := []workflow.Requirement{
 		{ID: "req-1", PlanID: workflow.PlanEntityID(slug), Title: "R1", Status: workflow.RequirementStatusActive},
 	}
-	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
 
 	scenarios := []workflow.Scenario{
 		{ID: "sc-1", RequirementID: "req-1", Given: "s1"},
 	}
-	if err := m.SaveScenarios(ctx, scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, m.KV(), scenarios, slug); err != nil {
 		t.Fatalf("SaveScenarios: %v", err)
 	}
 
@@ -232,23 +232,23 @@ func TestChangeProposal_TerminalTasksSkipped(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "terminal-skip"
-	if _, err := m.CreatePlan(ctx, slug, "Terminal Skip"); err != nil {
+	if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "Terminal Skip"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
 	reqs := []workflow.Requirement{
 		{ID: "req-1", PlanID: workflow.PlanEntityID(slug), Title: "R1", Status: workflow.RequirementStatusActive},
 	}
-	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
 
 	scenarios := []workflow.Scenario{
 		{ID: "sc-1", RequirementID: "req-1", Given: "s1"},
 	}
-	if err := m.SaveScenarios(ctx, scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, m.KV(), scenarios, slug); err != nil {
 		t.Fatalf("SaveScenarios: %v", err)
 	}
 

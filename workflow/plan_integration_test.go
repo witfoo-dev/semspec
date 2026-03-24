@@ -21,13 +21,13 @@ const largeTaskCount = 50
 func setupPlanWithGoalContext(t *testing.T, m *Manager, slug, title, goal, ctx string) *Plan {
 	t.Helper()
 	bgCtx := context.Background()
-	plan, err := m.CreatePlan(bgCtx, slug, title)
+	plan, err := CreatePlan(bgCtx, m.kv, slug, title)
 	if err != nil {
 		t.Fatalf("CreatePlan(%q) failed: %v", slug, err)
 	}
 	plan.Goal = goal
 	plan.Context = ctx
-	if err := m.SavePlan(bgCtx, plan); err != nil {
+	if err := SavePlan(bgCtx, m.kv, plan); err != nil {
 		t.Fatalf("SavePlan(%q) failed: %v", slug, err)
 	}
 	return plan
@@ -59,10 +59,10 @@ func setupPlanWithTasks(t *testing.T, m *Manager, slug, title string, taskDescri
 func TestIntegration_PlanToTaskWorkflow(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// 1. Create plan
-	plan, err := m.CreatePlan(ctx, "auth-feature", "Add authentication")
+	plan, err := CreatePlan(ctx, m.kv, "auth-feature", "Add authentication")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestIntegration_PlanToTaskWorkflow(t *testing.T) {
 		DoNotTouch: []string{"config.yaml", ".env"},
 	}
 
-	if err := m.SavePlan(ctx, plan); err != nil {
+	if err := SavePlan(ctx, m.kv, plan); err != nil {
 		t.Fatalf("SavePlan failed: %v", err)
 	}
 
@@ -133,7 +133,7 @@ func TestIntegration_PlanToTaskWorkflow(t *testing.T) {
 	}
 
 	// 7. Verify plan can be loaded with all fields
-	loadedPlan, err := m.LoadPlan(ctx, "auth-feature")
+	loadedPlan, err := LoadPlan(ctx, m.kv, "auth-feature")
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestIntegration_PlanToTaskWorkflow(t *testing.T) {
 func TestIntegration_TaskExecutionWorkflow(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Setup plan with tasks
 	taskDescs := []string{"First step", "Second step", "Third step"}
@@ -190,7 +190,7 @@ func TestIntegration_TaskExecutionWorkflow(t *testing.T) {
 func TestIntegration_MultiPlanIsolation(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create two plans with identical task descriptions
 	taskDescs := []string{"Setup database", "Create API endpoint", "Write tests"}
@@ -226,10 +226,10 @@ func TestIntegration_MultiPlanIsolation(t *testing.T) {
 func TestIntegration_PlanApproval(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create draft plan
-	plan, _ := m.CreatePlan(ctx, "approve-test", "Approval Test")
+	plan, _ := CreatePlan(ctx, m.kv, "approve-test", "Approval Test")
 
 	if plan.Approved {
 		t.Error("new plan should start unapproved")
@@ -241,10 +241,10 @@ func TestIntegration_PlanApproval(t *testing.T) {
 	plan.Scope = Scope{
 		Include: []string{"src/", "lib/"},
 	}
-	m.SavePlan(ctx, plan)
+	SavePlan(ctx, m.kv, plan)
 
 	// Approve the plan
-	if err := m.ApprovePlan(ctx, plan); err != nil {
+	if err := ApprovePlan(ctx, m.kv, plan); err != nil {
 		t.Fatalf("ApprovePlan failed: %v", err)
 	}
 
@@ -272,7 +272,7 @@ func TestIntegration_PlanApproval(t *testing.T) {
 	}
 
 	// Verify persistence of approved status
-	loadedPlan, _ := m.LoadPlan(ctx, "approve-test")
+	loadedPlan, _ := LoadPlan(ctx, m.kv, "approve-test")
 	if !loadedPlan.Approved {
 		t.Error("approved status not persisted")
 	}
@@ -282,29 +282,29 @@ func TestIntegration_PlanApproval(t *testing.T) {
 func TestIntegration_ListWithMixedStates(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create unapproved plan (draft)
-	plan1, _ := m.CreatePlan(ctx, "draft", "Draft Plan")
+	plan1, _ := CreatePlan(ctx, m.kv, "draft", "Draft Plan")
 	plan1.Goal = "Just exploring"
-	m.SavePlan(ctx, plan1)
+	SavePlan(ctx, m.kv, plan1)
 
 	// Create and approve plan
-	plan2, _ := m.CreatePlan(ctx, "approved", "Approved Plan")
+	plan2, _ := CreatePlan(ctx, m.kv, "approved", "Approved Plan")
 	plan2.Goal = "Ready to execute"
 	plan2.Context = "Implementation ready"
-	m.SavePlan(ctx, plan2)
-	m.ApprovePlan(ctx, plan2)
+	SavePlan(ctx, m.kv, plan2)
+	ApprovePlan(ctx, m.kv, plan2)
 
 	// Create tasks for approved plan
 	task1, _ := CreateTask(plan2.ID, plan2.Slug, 1, "Do the thing")
 	m.SaveTasks(ctx, []Task{*task1}, plan2.Slug)
 
 	// Create plan with partial task execution
-	plan3, _ := m.CreatePlan(ctx, "partial", "Partial Execution")
+	plan3, _ := CreatePlan(ctx, m.kv, "partial", "Partial Execution")
 	plan3.Goal = "Multi-step feature"
-	m.SavePlan(ctx, plan3)
-	m.ApprovePlan(ctx, plan3)
+	SavePlan(ctx, m.kv, plan3)
+	ApprovePlan(ctx, m.kv, plan3)
 
 	// Create multiple tasks
 	var partialTasks []Task
@@ -319,7 +319,7 @@ func TestIntegration_ListWithMixedStates(t *testing.T) {
 	m.UpdateTaskStatus(ctx, "partial", TaskEntityID("partial", 1), TaskStatusCompleted)
 
 	// List all plans
-	result, err := m.ListPlans(ctx)
+	result, err := ListPlans(ctx, m.kv)
 	if err != nil {
 		t.Fatalf("ListPlans failed: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestIntegration_ConcurrentPlanOperations(t *testing.T) {
 	defer cancel()
 
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create multiple plans with tasks
 	slugs := []string{"concurrent-a", "concurrent-b", "concurrent-c"}
@@ -414,11 +414,11 @@ func TestIntegration_ConcurrentPlanOperations(t *testing.T) {
 func TestIntegration_TaskReplacement(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, _ := m.CreatePlan(ctx, "regen", "Task Replacement Test")
+	plan, _ := CreatePlan(ctx, m.kv, "regen", "Task Replacement Test")
 	plan.Goal = "Test task replacement"
-	m.SavePlan(ctx, plan)
+	SavePlan(ctx, m.kv, plan)
 
 	// Create initial tasks
 	var tasks1 []Task
@@ -458,11 +458,11 @@ func TestIntegration_TaskReplacement(t *testing.T) {
 func TestIntegration_EmptyTaskList(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, _ := m.CreatePlan(ctx, "empty-tasks", "Empty Tasks")
+	plan, _ := CreatePlan(ctx, m.kv, "empty-tasks", "Empty Tasks")
 	plan.Goal = "Plan with no tasks"
-	m.SavePlan(ctx, plan)
+	SavePlan(ctx, m.kv, plan)
 
 	// Save empty task list
 	if err := m.SaveTasks(ctx, []Task{}, plan.Slug); err != nil {
@@ -480,12 +480,12 @@ func TestIntegration_EmptyTaskList(t *testing.T) {
 func TestIntegration_GetTaskFromLargeList(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create plan
-	plan, _ := m.CreatePlan(ctx, "large-list", "Large Task List")
+	plan, _ := CreatePlan(ctx, m.kv, "large-list", "Large Task List")
 	plan.Goal = "Test with many tasks"
-	m.SavePlan(ctx, plan)
+	SavePlan(ctx, m.kv, plan)
 
 	// Create largeTaskCount tasks
 	var tasks []Task
@@ -522,12 +522,12 @@ func TestIntegration_GetTaskFromLargeList(t *testing.T) {
 func TestIntegration_FilesystemStructure(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create plan with tasks
-	plan, _ := m.CreatePlan(ctx, "fs-test", "Filesystem Test")
+	plan, _ := CreatePlan(ctx, m.kv, "fs-test", "Filesystem Test")
 	plan.Goal = "Test filesystem layout"
-	m.SavePlan(ctx, plan)
+	SavePlan(ctx, m.kv, plan)
 
 	// Create and save tasks
 	task, _ := CreateTask(plan.ID, plan.Slug, 1, "First task")

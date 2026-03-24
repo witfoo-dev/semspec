@@ -40,6 +40,7 @@ type Component struct {
 	// It is used to build a workflow.Manager for each dispatch cycle so that
 	// requirement and scenario data is always read fresh from disk.
 	repoRoot string
+	kvStore  *natsclient.KVStore
 
 	// completedRequirements caches RequirementExecutionCompleteEvent data keyed
 	// by RequirementID. Populated by subscribing to requirement execution
@@ -151,6 +152,14 @@ func (c *Component) Start(ctx context.Context) error {
 	subCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.mu.Unlock()
+
+	// Initialize ENTITY_STATES KV store for workflow Manager operations.
+	if entityBucket, kvErr := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES"); kvErr != nil {
+		c.logger.Warn("ENTITY_STATES bucket not available — workflow state operations will use disk fallback",
+			"error", kvErr)
+	} else {
+		c.kvStore = c.natsClient.NewKVStore(entityBucket)
+	}
 
 	// Push-based consumption — messages arrive via callback, no polling delay.
 	cfg := natsclient.StreamConsumerConfig{
@@ -284,9 +293,11 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 //  3. A requirement is "ready" when all its DependsOn requirements are complete
 //     AND it has at least one non-terminal scenario.
 func (c *Component) dispatchRequirements(ctx context.Context, trigger OrchestratorTrigger) error {
-	manager := workflow.NewManager(c.repoRoot)
-
-	requirements, err := manager.LoadRequirements(ctx, trigger.PlanSlug)
+	if c.kvStore == nil {
+		c.logger.Info("no KV store configured, skipping requirement dispatch", "plan_slug", trigger.PlanSlug)
+		return nil
+	}
+	requirements, err := workflow.LoadRequirements(ctx, c.kvStore, trigger.PlanSlug)
 	if err != nil {
 		return fmt.Errorf("load requirements for %s: %w", trigger.PlanSlug, err)
 	}
@@ -295,7 +306,7 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger Orchestrat
 		return nil
 	}
 
-	allScenarios, err := manager.LoadScenarios(ctx, trigger.PlanSlug)
+	allScenarios, err := workflow.LoadScenarios(ctx, c.kvStore, trigger.PlanSlug)
 	if err != nil {
 		return fmt.Errorf("load scenarios for %s: %w", trigger.PlanSlug, err)
 	}

@@ -158,7 +158,16 @@ func (c *Component) Start(ctx context.Context) error {
 			repoRoot = "."
 		}
 	}
-	workflowManager := workflow.NewManager(repoRoot)
+	// Get ENTITY_STATES KV store for workflow state operations.
+	var kvStore *natsclient.KVStore
+	if entityBucket, kvErr := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES"); kvErr != nil {
+		c.logger.Warn("ENTITY_STATES bucket not available — workflow state operations will use disk fallback",
+			"error", kvErr)
+	} else {
+		kvStore = c.natsClient.NewKVStore(entityBucket)
+	}
+
+	workflowManager := workflow.NewManager(repoRoot, kvStore)
 
 	// Initialize graph querier for step entity queries.
 	var stepQuerier *StepQuerier

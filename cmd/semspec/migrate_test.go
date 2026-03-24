@@ -12,9 +12,9 @@ import (
 func setupMigrateTestPlan(t *testing.T, slug string, tasks []workflow.Task) *workflow.Manager {
 	t.Helper()
 	ctx := context.Background()
-	m := workflow.NewManager(t.TempDir())
+	m := workflow.NewManager(t.TempDir(), nil)
 
-	_, err := m.CreatePlan(ctx, slug, "Test Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -28,7 +28,7 @@ func setupMigrateTestPlan(t *testing.T, slug string, tasks []workflow.Task) *wor
 // ID, title, description, and status for the happy-path scenario.
 func assertHappyPathRequirement(t *testing.T, ctx context.Context, m *workflow.Manager, slug string) {
 	t.Helper()
-	requirements, err := m.LoadRequirements(ctx, slug)
+	requirements, err := workflow.LoadRequirements(ctx, m.KV(), slug)
 	if err != nil {
 		t.Fatalf("LoadRequirements() error = %v", err)
 	}
@@ -54,7 +54,7 @@ func assertHappyPathRequirement(t *testing.T, ctx context.Context, m *workflow.M
 // pending status, single-element Then slice, and correct Given values.
 func assertHappyPathScenarios(t *testing.T, ctx context.Context, m *workflow.Manager, slug string) {
 	t.Helper()
-	scenarios, err := m.LoadScenarios(ctx, slug)
+	scenarios, err := workflow.LoadScenarios(ctx, m.KV(), slug)
 	if err != nil {
 		t.Fatalf("LoadScenarios() error = %v", err)
 	}
@@ -316,8 +316,8 @@ func TestMigrateExtractScenarios_MultipleCriteria(t *testing.T) {
 	}
 
 	// Each task's scenarios reference its own requirement, not the other's.
-	reqs, _ := m.LoadRequirements(ctx, slug)
-	scens, _ := m.LoadScenarios(ctx, slug)
+	reqs, _ := workflow.LoadRequirements(ctx, m.KV(), slug)
+	scens, _ := workflow.LoadScenarios(ctx, m.KV(), slug)
 
 	req1ID := reqs[0].ID
 	req2ID := reqs[1].ID
@@ -357,7 +357,7 @@ func TestMigrateExtractScenarios_TitleTruncation(t *testing.T) {
 		t.Fatalf("migrateExtractScenarios() error = %v", err)
 	}
 
-	reqs, err := m.LoadRequirements(ctx, slug)
+	reqs, err := workflow.LoadRequirements(ctx, m.KV(), slug)
 	if err != nil {
 		t.Fatalf("LoadRequirements() error = %v", err)
 	}
@@ -373,9 +373,9 @@ func TestMigrateExtractScenarios_TitleTruncation(t *testing.T) {
 func TestMigrateExtractScenarios_PreservesExisting(t *testing.T) {
 	slug := "migration-preserve"
 	ctx := context.Background()
-	m := workflow.NewManager(t.TempDir())
+	m := workflow.NewManager(t.TempDir(), nil)
 
-	_, err := m.CreatePlan(ctx, slug, "Preserve Test")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Preserve Test")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -399,10 +399,10 @@ func TestMigrateExtractScenarios_PreservesExisting(t *testing.T) {
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 	}
-	if err := m.SaveRequirements(ctx, []workflow.Requirement{existingReq}, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), []workflow.Requirement{existingReq}, slug); err != nil {
 		t.Fatalf("SaveRequirements() error = %v", err)
 	}
-	if err := m.SaveScenarios(ctx, []workflow.Scenario{existingScenario}, slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, m.KV(), []workflow.Scenario{existingScenario}, slug); err != nil {
 		t.Fatalf("SaveScenarios() error = %v", err)
 	}
 
@@ -431,7 +431,7 @@ func TestMigrateExtractScenarios_PreservesExisting(t *testing.T) {
 		t.Errorf("RequirementsCreated = %d, want 1", result.RequirementsCreated)
 	}
 
-	reqs, _ := m.LoadRequirements(ctx, slug)
+	reqs, _ := workflow.LoadRequirements(ctx, m.KV(), slug)
 	if len(reqs) != 2 {
 		t.Errorf("len(requirements) = %d, want 2 (1 existing + 1 new)", len(reqs))
 	}
@@ -443,7 +443,7 @@ func TestMigrateExtractScenarios_PreservesExisting(t *testing.T) {
 		t.Errorf("new requirement ID = %q, want requirement.migration-preserve.2", reqs[1].ID)
 	}
 
-	scens, _ := m.LoadScenarios(ctx, slug)
+	scens, _ := workflow.LoadScenarios(ctx, m.KV(), slug)
 	if len(scens) != 2 {
 		t.Errorf("len(scenarios) = %d, want 2 (1 existing + 1 new)", len(scens))
 	}
@@ -465,10 +465,10 @@ func TestRunExtractScenarios_EmptyRepo(t *testing.T) {
 func TestRunExtractScenarios_AllPlans(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 
 	for _, slug := range []string{"plan-alpha", "plan-beta"} {
-		_, err := m.CreatePlan(ctx, slug, slug)
+		_, err := workflow.CreatePlan(ctx, m.KV(), slug, slug)
 		if err != nil {
 			t.Fatalf("CreatePlan(%q) error = %v", slug, err)
 		}
@@ -494,7 +494,7 @@ func TestRunExtractScenarios_AllPlans(t *testing.T) {
 	}
 
 	for _, slug := range []string{"plan-alpha", "plan-beta"} {
-		reqs, err := m.LoadRequirements(ctx, slug)
+		reqs, err := workflow.LoadRequirements(ctx, m.KV(), slug)
 		if err != nil {
 			t.Fatalf("LoadRequirements(%q) error = %v", slug, err)
 		}
@@ -502,7 +502,7 @@ func TestRunExtractScenarios_AllPlans(t *testing.T) {
 			t.Errorf("plan %q: len(requirements) = %d, want 1", slug, len(reqs))
 		}
 
-		scens, err := m.LoadScenarios(ctx, slug)
+		scens, err := workflow.LoadScenarios(ctx, m.KV(), slug)
 		if err != nil {
 			t.Fatalf("LoadScenarios(%q) error = %v", slug, err)
 		}

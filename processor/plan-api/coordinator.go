@@ -160,6 +160,7 @@ type coordinator struct {
 	natsClient   *natsclient.Client
 	logger       *slog.Logger
 	tripleWriter *graphutil.TripleWriter
+	kvStore      *natsclient.KVStore
 
 	llmClient     coordinatorLLMCompleter
 	modelRegistry *model.Registry
@@ -257,6 +258,14 @@ func (co *coordinator) Start(ctx context.Context) error {
 	co.mu.RUnlock()
 
 	co.logger.Info("Starting plan-coordinator")
+
+	// Initialize ENTITY_STATES KV store for workflow Manager operations.
+	if entityBucket, kvErr := co.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES"); kvErr != nil {
+		co.logger.Warn("ENTITY_STATES bucket not available — workflow state operations will use disk fallback",
+			"error", kvErr)
+	} else {
+		co.kvStore = co.natsClient.NewKVStore(entityBucket)
+	}
 
 	// Reconcile: recover in-flight coordinations from graph state.
 	co.reconcileFromGraph(ctx)
@@ -444,7 +453,7 @@ func (co *coordinator) StartCoordination(
 	slug, title, description, projectID, traceID, loopID, requestID string,
 	focusAreas []string,
 ) {
-	entityID := fmt.Sprintf("local.semspec.workflow.plan.execution.%s", slug)
+	entityID := fmt.Sprintf("%s.exec.plan.run.%s", workflow.EntityPrefix(), slug)
 
 	exec := &coordinationExecution{
 		EntityID:         entityID,
@@ -514,7 +523,7 @@ func (co *coordinator) reconcileFromGraph(ctx context.Context) {
 	defer cancel()
 
 	entities, err := co.tripleWriter.ReadEntitiesByPrefix(reconcileCtx,
-		"local.semspec.workflow.plan.execution.", 100)
+		workflow.EntityPrefix()+".exec.plan.run.", 100)
 	if err != nil {
 		co.logger.Info("No graph state to reconcile (expected on first start)",
 			"error", err)
@@ -611,7 +620,7 @@ func (co *coordinator) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		gateCancel()
 	}
 
-	entityID := fmt.Sprintf("local.semspec.workflow.plan.execution.%s", trigger.Slug)
+	entityID := fmt.Sprintf("%s.exec.plan.run.%s", workflow.EntityPrefix(), trigger.Slug)
 
 	co.logger.Info("Coordination trigger received",
 		"slug", trigger.Slug,
@@ -864,12 +873,11 @@ func (co *coordinator) finishSynthesisLocked(ctx context.Context, exec *coordina
 
 	// Write synthesized plan content to plan.json (single writer for Goal/Context/Scope).
 	// The coordinator is the authoritative writer for these fields; the planner no longer writes to disk.
-	manager := workflow.NewManager(co.config.RepoPath)
-	if plan, err := manager.LoadPlan(ctx, exec.Slug); err == nil {
+	if plan, err := workflow.LoadPlan(ctx, co.kvStore, exec.Slug); err == nil {
 		plan.Goal = synthesized.Goal
 		plan.Context = synthesized.Context
 		plan.Scope = synthesized.Scope
-		if saveErr := manager.SavePlan(ctx, plan); saveErr != nil {
+		if saveErr := workflow.SavePlan(ctx, co.kvStore, plan); saveErr != nil {
 			co.logger.Warn("Failed to save synthesized plan to disk",
 				"slug", exec.Slug, "error", saveErr)
 		}
@@ -1063,8 +1071,7 @@ func (co *coordinator) dispatchScenarioGeneratorLocked(ctx context.Context, exec
 	co.advancePhase(ctx, exec, phaseGeneratingScenarios)
 
 	// Load requirements from disk to fan out one scenario-generator per requirement.
-	manager := workflow.NewManager(co.config.RepoPath)
-	requirements, err := manager.LoadRequirements(ctx, exec.Slug)
+	requirements, err := workflow.LoadRequirements(ctx, co.kvStore, exec.Slug)
 	if err != nil {
 		co.markErrorLocked(ctx, exec, fmt.Sprintf("load requirements for scenario generation: %v", err))
 		return
@@ -1317,13 +1324,8 @@ func (co *coordinator) handleReviewApprovalLocked(ctx context.Context, exec *coo
 		co.advancePhase(ctx, exec, phaseApproved)
 		co.publishPlanApprovedEvent(ctx, exec, verdict, summary)
 
-		repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-		if repoRoot == "" {
-			repoRoot, _ = os.Getwd()
-		}
-		manager := workflow.NewManager(repoRoot)
-		if plan, err := manager.LoadPlan(ctx, exec.Slug); err == nil {
-			if err := manager.SetPlanStatus(ctx, plan, workflow.StatusReadyForExecution); err != nil {
+		if plan, err := workflow.LoadPlan(ctx, co.kvStore, exec.Slug); err == nil {
+			if err := workflow.SetPlanStatus(ctx, co.kvStore, plan, workflow.StatusReadyForExecution); err != nil {
 				co.logger.Warn("Failed to set plan to ready_for_execution",
 					"slug", exec.Slug, "error", err)
 			} else {

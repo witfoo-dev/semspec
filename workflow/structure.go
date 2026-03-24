@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/c360studio/semstreams/natsclient"
 )
 
 // Directory constants for the .semspec structure.
@@ -26,19 +28,30 @@ const (
 	// Plans within projects live in .semspec/projects/{project-slug}/plans/{plan-slug}/
 )
 
-// Manager provides file operations for the Semspec workflow.
+// Manager provides workflow state operations backed by ENTITY_STATES KV
+// and filesystem operations for config/artifacts.
 type Manager struct {
 	repoRoot string
+	kv       *natsclient.KVStore // ENTITY_STATES bucket for workflow state
 }
 
-// NewManager creates a new workflow manager for the given repository root.
-func NewManager(repoRoot string) *Manager {
-	return &Manager{repoRoot: repoRoot}
+// NewManager creates a new workflow manager.
+// kv is the ENTITY_STATES KV bucket for workflow state (plans, requirements, scenarios).
+// Pass nil for kv only in contexts where state operations are not needed (e.g., artifact-only).
+func NewManager(repoRoot string, kv *natsclient.KVStore) *Manager {
+	return &Manager{repoRoot: repoRoot, kv: kv}
 }
 
 // RootPath returns the full path to .semspec directory.
 func (m *Manager) RootPath() string {
 	return filepath.Join(m.repoRoot, RootDir)
+}
+
+// KV returns the underlying KV store for use with standalone workflow functions.
+// This accessor is provided for transitional compatibility while callers migrate
+// from Manager methods to standalone functions.
+func (m *Manager) KV() *natsclient.KVStore {
+	return m.kv
 }
 
 // ConstitutionPath returns the path to constitution.md.

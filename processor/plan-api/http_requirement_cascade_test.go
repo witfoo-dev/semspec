@@ -32,9 +32,9 @@ func setupCascadeFixture(t *testing.T, slug string) *workflow.Manager {
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
 	ctx := context.Background()
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 
-	if _, err := m.CreatePlan(ctx, slug, "Cascade Test Plan"); err != nil {
+	if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "Cascade Test Plan"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
@@ -45,7 +45,7 @@ func setupCascadeFixture(t *testing.T, slug string) *workflow.Manager {
 		{ID: rid(slug, 3), Title: "Depends on R2 (transitive R1)", Status: workflow.RequirementStatusActive, DependsOn: []string{rid(slug, 2)}, CreatedAt: now, UpdatedAt: now},
 		{ID: rid(slug, 4), Title: "Independent", Status: workflow.RequirementStatusActive, CreatedAt: now, UpdatedAt: now},
 	}
-	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
 
@@ -64,7 +64,7 @@ func setupCascadeFixture(t *testing.T, slug string) *workflow.Manager {
 			})
 		}
 	}
-	if err := m.SaveScenarios(ctx, scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, m.KV(), scenarios, slug); err != nil {
 		t.Fatalf("SaveScenarios: %v", err)
 	}
 
@@ -166,7 +166,7 @@ func TestHandleDeleteRequirement_CascadeRemovesDependents(t *testing.T) {
 	}
 
 	// Only R4 should remain.
-	remaining, err := m.LoadRequirements(ctx, slug)
+	remaining, err := workflow.LoadRequirements(ctx, m.KV(), slug)
 	if err != nil {
 		t.Fatalf("LoadRequirements: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestHandleDeleteRequirement_CascadeRemovesDependents(t *testing.T) {
 	}
 
 	// Only R4's scenarios should remain (2 scenarios).
-	scenarios, err := m.LoadScenarios(ctx, slug)
+	scenarios, err := workflow.LoadScenarios(ctx, m.KV(), slug)
 	if err != nil {
 		t.Fatalf("LoadScenarios: %v", err)
 	}
@@ -208,12 +208,12 @@ func TestHandleDeleteRequirement_LeafDeleteNoCollateral(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNoContent)
 	}
 
-	remaining, _ := m.LoadRequirements(ctx, slug)
+	remaining, _ := workflow.LoadRequirements(ctx, m.KV(), slug)
 	if len(remaining) != 3 {
 		t.Fatalf("expected 3 requirements remaining, got %d", len(remaining))
 	}
 
-	scenarios, _ := m.LoadScenarios(ctx, slug)
+	scenarios, _ := workflow.LoadScenarios(ctx, m.KV(), slug)
 	if len(scenarios) != 6 {
 		t.Fatalf("expected 6 scenarios remaining (R1+R2+R3), got %d", len(scenarios))
 	}
@@ -235,7 +235,7 @@ func TestHandleDeleteRequirement_MiddleNodeCascade(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNoContent)
 	}
 
-	remaining, _ := m.LoadRequirements(ctx, slug)
+	remaining, _ := workflow.LoadRequirements(ctx, m.KV(), slug)
 	if len(remaining) != 2 {
 		t.Fatalf("expected 2 requirements remaining (R1+R4), got %d", len(remaining))
 	}
@@ -248,7 +248,7 @@ func TestHandleDeleteRequirement_MiddleNodeCascade(t *testing.T) {
 		t.Errorf("expected R1 and R4 to survive, got %v", remainingIDs)
 	}
 
-	scenarios, _ := m.LoadScenarios(ctx, slug)
+	scenarios, _ := workflow.LoadScenarios(ctx, m.KV(), slug)
 	if len(scenarios) != 4 {
 		t.Fatalf("expected 4 scenarios remaining (R1+R4), got %d", len(scenarios))
 	}
@@ -275,7 +275,7 @@ func TestHandleDeprecateRequirement_CascadeDeprecatesDependents(t *testing.T) {
 	}
 
 	// All 4 requirements should still exist (soft delete).
-	reqs, _ := m.LoadRequirements(ctx, slug)
+	reqs, _ := workflow.LoadRequirements(ctx, m.KV(), slug)
 	if len(reqs) != 4 {
 		t.Fatalf("expected 4 requirements (soft delete preserves), got %d", len(reqs))
 	}
@@ -296,7 +296,7 @@ func TestHandleDeprecateRequirement_CascadeDeprecatesDependents(t *testing.T) {
 	}
 
 	// Scenarios for R1, R2, R3 should be removed. R4's 2 scenarios remain.
-	scenarios, _ := m.LoadScenarios(ctx, slug)
+	scenarios, _ := workflow.LoadScenarios(ctx, m.KV(), slug)
 	if len(scenarios) != 2 {
 		t.Fatalf("expected 2 scenarios remaining (R4's), got %d", len(scenarios))
 	}
@@ -323,7 +323,7 @@ func TestHandleDeprecateRequirement_LeafNoCollateral(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	reqs, _ := m.LoadRequirements(ctx, slug)
+	reqs, _ := workflow.LoadRequirements(ctx, m.KV(), slug)
 	activeCount := 0
 	for _, r := range reqs {
 		if r.Status == workflow.RequirementStatusActive {
@@ -335,7 +335,7 @@ func TestHandleDeprecateRequirement_LeafNoCollateral(t *testing.T) {
 	}
 
 	// R3's 2 scenarios removed, 6 remain.
-	scenarios, _ := m.LoadScenarios(ctx, slug)
+	scenarios, _ := workflow.LoadScenarios(ctx, m.KV(), slug)
 	if len(scenarios) != 6 {
 		t.Fatalf("expected 6 scenarios remaining, got %d", len(scenarios))
 	}

@@ -76,7 +76,7 @@ func TestSlugify(t *testing.T) {
 
 func TestManager_CreatePlanRecord(t *testing.T) {
 	tempDir := t.TempDir()
-	m := NewManager(tempDir)
+	m := NewManager(tempDir, nil)
 
 	plan, err := m.CreatePlanRecord("Add auth refresh", "testuser")
 	if err != nil {
@@ -113,7 +113,7 @@ func TestManager_CreatePlanRecord(t *testing.T) {
 
 func TestManager_CreatePlanRecord_Duplicate(t *testing.T) {
 	tempDir := t.TempDir()
-	m := NewManager(tempDir)
+	m := NewManager(tempDir, nil)
 
 	_, err := m.CreatePlanRecord("Add auth refresh", "user1")
 	if err != nil {
@@ -128,7 +128,7 @@ func TestManager_CreatePlanRecord_Duplicate(t *testing.T) {
 
 func TestManager_LoadPlanRecord(t *testing.T) {
 	tempDir := t.TempDir()
-	m := NewManager(tempDir)
+	m := NewManager(tempDir, nil)
 
 	created, err := m.CreatePlanRecord("Test plan", "testuser")
 	if err != nil {
@@ -151,7 +151,7 @@ func TestManager_LoadPlanRecord(t *testing.T) {
 
 func TestManager_LoadPlanRecord_NotFound(t *testing.T) {
 	tempDir := t.TempDir()
-	m := NewManager(tempDir)
+	m := NewManager(tempDir, nil)
 
 	_, err := m.LoadPlanRecord("nonexistent")
 	if err == nil {
@@ -161,7 +161,7 @@ func TestManager_LoadPlanRecord_NotFound(t *testing.T) {
 
 func TestManager_ListPlanRecords(t *testing.T) {
 	tempDir := t.TempDir()
-	m := NewManager(tempDir)
+	m := NewManager(tempDir, nil)
 
 	// Create multiple plans
 	_, _ = m.CreatePlanRecord("First plan", "user1")
@@ -179,7 +179,7 @@ func TestManager_ListPlanRecords(t *testing.T) {
 
 func TestManager_WriteAndReadTasks(t *testing.T) {
 	tempDir := t.TempDir()
-	m := NewManager(tempDir)
+	m := NewManager(tempDir, nil)
 
 	plan, _ := m.CreatePlanRecord("Test tasks", "testuser")
 
@@ -239,7 +239,7 @@ func TestStatus_CanTransitionTo(t *testing.T) {
 
 func TestManager_UpdatePlanStatus(t *testing.T) {
 	tempDir := t.TempDir()
-	m := NewManager(tempDir)
+	m := NewManager(tempDir, nil)
 
 	plan, _ := m.CreatePlanRecord("Test status", "testuser")
 
@@ -309,7 +309,7 @@ Rationale: Enables testing and future storage changes.
 
 func TestManager_ArchivePlan(t *testing.T) {
 	tempDir := t.TempDir()
-	m := NewManager(tempDir)
+	m := NewManager(tempDir, nil)
 
 	plan, _ := m.CreatePlanRecord("Test archive", "testuser")
 

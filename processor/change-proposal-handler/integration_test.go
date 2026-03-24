@@ -31,7 +31,7 @@ import (
 func setupIntegrationFixture(t *testing.T, repoRoot, slug string) (*workflow.Manager, string) {
 	t.Helper()
 	ctx := context.Background()
-	m := workflow.NewManager(repoRoot)
+	m := workflow.NewManager(repoRoot, nil)
 
 	if _, err := m.CreatePlan(ctx, slug, "Integration Test Plan"); err != nil {
 		t.Fatalf("CreatePlan(%q): %v", slug, err)
@@ -256,7 +256,7 @@ func TestCascadeRequest_ProposalNotFound(t *testing.T) {
 	slug := "missing-proposal-plan"
 
 	// Create a plan but deliberately save NO proposals.
-	m := workflow.NewManager(repoRoot)
+	m := workflow.NewManager(repoRoot, nil)
 	if _, err := m.CreatePlan(ctx, slug, "Missing Proposal Plan"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}

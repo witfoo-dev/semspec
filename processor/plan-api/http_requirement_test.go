@@ -84,11 +84,11 @@ func TestHandleListRequirements(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "test-plan"
 
 	// Create a plan so the slug validates
-	_, err := m.CreatePlan(ctx, slug, "Test Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -98,7 +98,7 @@ func TestHandleListRequirements(t *testing.T) {
 		{ID: "requirement.test-plan.1", PlanID: "plan.test-plan", Title: "First requirement", Status: workflow.RequirementStatusActive},
 		{ID: "requirement.test-plan.2", PlanID: "plan.test-plan", Title: "Second requirement", Status: workflow.RequirementStatusDeprecated},
 	}
-	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements() error = %v", err)
 	}
 
@@ -131,8 +131,8 @@ func TestHandleListRequirements_Empty(t *testing.T) {
 
 	slug := "empty-plan"
 	// Create plan directory structure by creating the plan
-	m := workflow.NewManager(tmpDir)
-	_, err := m.CreatePlan(context.Background(), slug, "Empty Plan")
+	m := workflow.NewManager(tmpDir, nil)
+	_, err := workflow.CreatePlan(context.Background(), m.KV(), slug, "Empty Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -161,9 +161,9 @@ func TestHandleCreateRequirement(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "create-req-plan"
-	_, err := m.CreatePlan(ctx, slug, "Create Req Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Create Req Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -205,9 +205,9 @@ func TestHandleCreateRequirement_MissingTitle(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "missing-title-plan"
-	_, err := m.CreatePlan(context.Background(), slug, "Missing Title Plan")
+	_, err := workflow.CreatePlan(context.Background(), m.KV(), slug, "Missing Title Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -232,9 +232,9 @@ func TestHandleGetRequirement(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "get-req-plan"
-	_, err := m.CreatePlan(ctx, slug, "Get Req Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Get Req Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -243,7 +243,7 @@ func TestHandleGetRequirement(t *testing.T) {
 	reqs := []workflow.Requirement{
 		{ID: reqID, PlanID: "plan.get-req-plan", Title: "Auth requirement", Status: workflow.RequirementStatusActive},
 	}
-	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements() error = %v", err)
 	}
 
@@ -273,9 +273,9 @@ func TestHandleGetRequirement_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "notfound-req-plan"
-	_, err := m.CreatePlan(ctx, slug, "NotFound Req Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "NotFound Req Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -297,9 +297,9 @@ func TestHandleUpdateRequirement(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "update-req-plan"
-	_, err := m.CreatePlan(ctx, slug, "Update Req Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Update Req Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -308,7 +308,7 @@ func TestHandleUpdateRequirement(t *testing.T) {
 	reqs := []workflow.Requirement{
 		{ID: reqID, PlanID: "plan.update-req-plan", Title: "Old title", Status: workflow.RequirementStatusActive},
 	}
-	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements() error = %v", err)
 	}
 
@@ -342,9 +342,9 @@ func TestHandleDeleteRequirement(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "delete-req-plan"
-	_, err := m.CreatePlan(ctx, slug, "Delete Req Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Delete Req Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -353,7 +353,7 @@ func TestHandleDeleteRequirement(t *testing.T) {
 	reqs := []workflow.Requirement{
 		{ID: reqID, PlanID: "plan.delete-req-plan", Title: "To be deleted", Status: workflow.RequirementStatusActive},
 	}
-	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements() error = %v", err)
 	}
 
@@ -369,7 +369,7 @@ func TestHandleDeleteRequirement(t *testing.T) {
 	}
 
 	// Verify it's gone
-	remaining, err := m.LoadRequirements(ctx, slug)
+	remaining, err := workflow.LoadRequirements(ctx, m.KV(), slug)
 	if err != nil {
 		t.Fatalf("LoadRequirements() error = %v", err)
 	}
@@ -383,9 +383,9 @@ func TestHandleDeprecateRequirement(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "deprecate-req-plan"
-	_, err := m.CreatePlan(ctx, slug, "Deprecate Req Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Deprecate Req Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -394,7 +394,7 @@ func TestHandleDeprecateRequirement(t *testing.T) {
 	reqs := []workflow.Requirement{
 		{ID: reqID, PlanID: "plan.deprecate-req-plan", Title: "To be deprecated", Status: workflow.RequirementStatusActive},
 	}
-	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements() error = %v", err)
 	}
 
@@ -443,7 +443,7 @@ func TestHandleCreateRequirement_DependsOn(t *testing.T) {
 						Status: workflow.RequirementStatusActive,
 					},
 				}
-				if err := m.SaveRequirements(ctx, existing, slug); err != nil {
+				if err := workflow.SaveRequirements(ctx, m.KV(), existing, slug); err != nil {
 					t.Fatalf("SaveRequirements() error = %v", err)
 				}
 			},
@@ -476,8 +476,8 @@ func TestHandleCreateRequirement_DependsOn(t *testing.T) {
 			t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
 			slug := "dep-plan"
-			m := workflow.NewManager(tmpDir)
-			if _, err := m.CreatePlan(ctx, slug, "Dep Plan"); err != nil {
+			m := workflow.NewManager(tmpDir, nil)
+			if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "Dep Plan"); err != nil {
 				t.Fatalf("CreatePlan() error = %v", err)
 			}
 
@@ -532,8 +532,8 @@ func TestHandleCreateRequirement_CycleViaUpdate(t *testing.T) {
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
 	slug := "cycle-plan"
-	m := workflow.NewManager(tmpDir)
-	if _, err := m.CreatePlan(ctx, slug, "Cycle Plan"); err != nil {
+	m := workflow.NewManager(tmpDir, nil)
+	if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "Cycle Plan"); err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
 
@@ -642,11 +642,11 @@ func TestHandleUpdateRequirement_DependsOn(t *testing.T) {
 			t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
 			slug := "upd-dep-plan"
-			m := workflow.NewManager(tmpDir)
-			if _, err := m.CreatePlan(ctx, slug, "Upd Dep Plan"); err != nil {
+			m := workflow.NewManager(tmpDir, nil)
+			if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "Upd Dep Plan"); err != nil {
 				t.Fatalf("CreatePlan() error = %v", err)
 			}
-			if err := m.SaveRequirements(ctx, tt.existingReqs, slug); err != nil {
+			if err := workflow.SaveRequirements(ctx, m.KV(), tt.existingReqs, slug); err != nil {
 				t.Fatalf("SaveRequirements() error = %v", err)
 			}
 
@@ -699,8 +699,8 @@ func TestHandleUpdateRequirement_ClearDependsOn(t *testing.T) {
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
 	slug := "clear-dep-plan"
-	m := workflow.NewManager(tmpDir)
-	if _, err := m.CreatePlan(ctx, slug, "Clear Dep Plan"); err != nil {
+	m := workflow.NewManager(tmpDir, nil)
+	if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "Clear Dep Plan"); err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
 
@@ -715,7 +715,7 @@ func TestHandleUpdateRequirement_ClearDependsOn(t *testing.T) {
 			DependsOn: []string{"requirement.clear-dep-plan.1"},
 		},
 	}
-	if err := m.SaveRequirements(ctx, existing, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), existing, slug); err != nil {
 		t.Fatalf("SaveRequirements() error = %v", err)
 	}
 
@@ -742,7 +742,7 @@ func TestHandleUpdateRequirement_ClearDependsOn(t *testing.T) {
 	}
 
 	// Confirm persistence: reload and verify the field is gone.
-	stored, err := m.LoadRequirements(ctx, slug)
+	stored, err := workflow.LoadRequirements(ctx, m.KV(), slug)
 	if err != nil {
 		t.Fatalf("LoadRequirements() error = %v", err)
 	}
@@ -762,8 +762,8 @@ func TestHandleCreateRequirement_IndependentRequirementsHaveNoDeps(t *testing.T)
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
 	slug := "nodep-plan"
-	m := workflow.NewManager(tmpDir)
-	if _, err := m.CreatePlan(ctx, slug, "NoDep Plan"); err != nil {
+	m := workflow.NewManager(tmpDir, nil)
+	if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "NoDep Plan"); err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
 
@@ -791,7 +791,7 @@ func TestHandleCreateRequirement_IndependentRequirementsHaveNoDeps(t *testing.T)
 	}
 
 	// Confirm storage also shows no deps.
-	stored, err := m.LoadRequirements(ctx, slug)
+	stored, err := workflow.LoadRequirements(ctx, m.KV(), slug)
 	if err != nil {
 		t.Fatalf("LoadRequirements() error = %v", err)
 	}
@@ -810,9 +810,9 @@ func TestHandleDeprecateRequirement_AlreadyDeprecated(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "already-deprecated-plan"
-	_, err := m.CreatePlan(ctx, slug, "Already Deprecated Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Already Deprecated Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -821,7 +821,7 @@ func TestHandleDeprecateRequirement_AlreadyDeprecated(t *testing.T) {
 	reqs := []workflow.Requirement{
 		{ID: reqID, PlanID: "plan.already-deprecated-plan", Title: "Already deprecated", Status: workflow.RequirementStatusDeprecated},
 	}
-	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements() error = %v", err)
 	}
 

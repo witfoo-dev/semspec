@@ -438,18 +438,18 @@ func (c *Component) handleGetWorkflowTrajectory(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Get workflow manager
+	// Get workflow manager KV store
 	c.mu.RLock()
-	manager := c.workflowManager
+	wm := c.workflowManager
 	c.mu.RUnlock()
 
-	if manager == nil {
+	if wm == nil {
 		http.Error(w, "Workflow manager not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
 	// Load plan to get trace IDs
-	plan, err := manager.LoadPlan(r.Context(), slug)
+	plan, err := workflow.LoadPlan(r.Context(), wm.KV(), slug)
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
 			http.Error(w, "Workflow not found", http.StatusNotFound)
@@ -549,15 +549,15 @@ func (c *Component) handleGetContextStats(w http.ResponseWriter, r *http.Request
 		}
 	} else {
 		c.mu.RLock()
-		manager := c.workflowManager
+		wm := c.workflowManager
 		c.mu.RUnlock()
 
-		if manager == nil {
+		if wm == nil {
 			http.Error(w, "Workflow manager not initialized", http.StatusServiceUnavailable)
 			return
 		}
 
-		plan, loadErr := manager.LoadPlan(r.Context(), workflowSlug)
+		plan, loadErr := workflow.LoadPlan(r.Context(), wm.KV(), workflowSlug)
 		if loadErr != nil {
 			if errors.Is(loadErr, workflow.ErrPlanNotFound) {
 				http.Error(w, "Workflow not found", http.StatusNotFound)

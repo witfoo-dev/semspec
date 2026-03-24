@@ -31,6 +31,9 @@ type Component struct {
 	// coordinator is the embedded plan-coordinator pipeline.
 	coordinator *coordinator
 
+	// kvStore is the ENTITY_STATES KV store for workflow state operations.
+	kvStore *natsclient.KVStore
+
 	// Question HTTP handler for Q&A endpoints
 	questionHandler *workflow.QuestionHTTPHandler
 
@@ -147,12 +150,22 @@ func (c *Component) Start(ctx context.Context) error {
 			"error", err)
 	}
 
+	// Get ENTITY_STATES KV store for workflow state operations.
+	var kvStore *natsclient.KVStore
+	if entityBucket, kvErr := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES"); kvErr != nil {
+		c.logger.Warn("ENTITY_STATES bucket not available — workflow state operations will use disk fallback",
+			"error", kvErr)
+	} else {
+		kvStore = c.natsClient.NewKVStore(entityBucket)
+	}
+
 	// Create cancellation context
 	childCtx, cancel := context.WithCancel(ctx)
 
 	// Update state atomically with lock for complex state
 	c.mu.Lock()
 	c.execBucket = execBucket
+	c.kvStore = kvStore
 	c.cancel = cancel
 	c.startTime = time.Now()
 	c.mu.Unlock()

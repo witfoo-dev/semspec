@@ -9,9 +9,9 @@ import (
 func TestSaveLoadChangeProposals_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "test-plan", "Test Plan")
+	plan, err := CreatePlan(ctx, m.kv, "test-plan", "Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
@@ -43,11 +43,11 @@ func TestSaveLoadChangeProposals_RoundTrip(t *testing.T) {
 		},
 	}
 
-	if err := m.SaveChangeProposals(ctx, proposals, plan.Slug); err != nil {
+	if err := SaveChangeProposals(ctx, m.kv, proposals, plan.Slug); err != nil {
 		t.Fatalf("SaveChangeProposals() error: %v", err)
 	}
 
-	got, err := m.LoadChangeProposals(ctx, plan.Slug)
+	got, err := LoadChangeProposals(ctx, m.kv, plan.Slug)
 	if err != nil {
 		t.Fatalf("LoadChangeProposals() error: %v", err)
 	}
@@ -89,14 +89,14 @@ func TestSaveLoadChangeProposals_RoundTrip(t *testing.T) {
 func TestLoadChangeProposals_MissingFile_ReturnsEmpty(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "new-plan", "New Plan")
+	plan, err := CreatePlan(ctx, m.kv, "new-plan", "New Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
 
-	got, err := m.LoadChangeProposals(ctx, plan.Slug)
+	got, err := LoadChangeProposals(ctx, m.kv, plan.Slug)
 	if err != nil {
 		t.Fatalf("LoadChangeProposals() on missing file should not error, got: %v", err)
 	}
@@ -108,9 +108,9 @@ func TestLoadChangeProposals_MissingFile_ReturnsEmpty(t *testing.T) {
 func TestSaveChangeProposals_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	err := m.SaveChangeProposals(ctx, []ChangeProposal{}, "invalid slug!")
+	err := SaveChangeProposals(ctx, m.kv, []ChangeProposal{}, "invalid slug!")
 	if err == nil {
 		t.Error("SaveChangeProposals() with invalid slug should return error")
 	}
@@ -119,9 +119,9 @@ func TestSaveChangeProposals_InvalidSlug(t *testing.T) {
 func TestLoadChangeProposals_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	_, err := m.LoadChangeProposals(ctx, "invalid slug!")
+	_, err := LoadChangeProposals(ctx, m.kv, "invalid slug!")
 	if err == nil {
 		t.Error("LoadChangeProposals() with invalid slug should return error")
 	}

@@ -138,7 +138,7 @@ func (e *DocumentExecutor) readDocument(ctx context.Context, call agentic.ToolCa
 		}, nil
 	}
 
-	manager := workflow.NewManager(e.repoRoot)
+	manager := workflow.NewManager(e.repoRoot, nil)
 
 	var content string
 	var err error
@@ -220,7 +220,7 @@ func (e *DocumentExecutor) writeDocument(ctx context.Context, call agentic.ToolC
 		}, nil
 	}
 
-	manager := workflow.NewManager(e.repoRoot)
+	manager := workflow.NewManager(e.repoRoot, nil)
 
 	// Use project-based path for plan documents
 	planPath := manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug)
@@ -273,7 +273,7 @@ func (e *DocumentExecutor) listDocuments(ctx context.Context, call agentic.ToolC
 		}, nil
 	}
 
-	manager := workflow.NewManager(e.repoRoot)
+	manager := workflow.NewManager(e.repoRoot, nil)
 	planPath := manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug)
 
 	docs := map[string]bool{
@@ -302,9 +302,9 @@ func (e *DocumentExecutor) getPlanStatus(ctx context.Context, call agentic.ToolC
 		}, nil
 	}
 
-	manager := workflow.NewManager(e.repoRoot)
+	manager := workflow.NewManager(e.repoRoot, nil)
 
-	plan, err := manager.LoadPlan(ctx, slug)
+	plan, err := workflow.LoadPlan(ctx, manager.KV(), slug)
 	if err != nil {
 		return agentic.ToolResult{
 			CallID: call.ID,

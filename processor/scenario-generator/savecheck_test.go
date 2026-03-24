@@ -24,15 +24,15 @@ func TestSaveAndCheckCompletion_SequentialCoverage(t *testing.T) {
 
 	// Set up plan + 3 requirements. Advance plan to requirements_generated
 	// so the status transition to scenarios_generated is valid.
-	m := workflow.NewManager(tmpDir)
-	plan, err := m.CreatePlan(ctx, slug, "Coverage Test")
+	m := workflow.NewManager(tmpDir, nil)
+	plan, err := workflow.CreatePlan(ctx, m.KV(), slug, "Coverage Test")
 	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
-	if err := m.ApprovePlan(ctx, plan); err != nil {
+	if err := workflow.ApprovePlan(ctx, m.KV(), plan); err != nil {
 		t.Fatalf("ApprovePlan: %v", err)
 	}
-	if err := m.SetPlanStatus(ctx, plan, workflow.StatusRequirementsGenerated); err != nil {
+	if err := workflow.SetPlanStatus(ctx, m.KV(), plan, workflow.StatusRequirementsGenerated); err != nil {
 		t.Fatalf("SetPlanStatus: %v", err)
 	}
 
@@ -41,7 +41,7 @@ func TestSaveAndCheckCompletion_SequentialCoverage(t *testing.T) {
 		{ID: "requirement." + slug + ".2", Title: "Req 2", Status: "active"},
 		{ID: "requirement." + slug + ".3", Title: "Req 3", Status: "active"},
 	}
-	if saveErr := m.SaveRequirements(ctx, reqs, slug); saveErr != nil {
+	if saveErr := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); saveErr != nil {
 		t.Fatalf("SaveRequirements: %v", saveErr)
 	}
 
@@ -66,7 +66,7 @@ func TestSaveAndCheckCompletion_SequentialCoverage(t *testing.T) {
 	}
 
 	// Verify: 1 scenario on disk.
-	scenarios, _ := m.LoadScenarios(ctx, slug)
+	scenarios, _ := workflow.LoadScenarios(ctx, m.KV(), slug)
 	if len(scenarios) != 1 {
 		t.Fatalf("After req 1: expected 1 scenario, got %d", len(scenarios))
 	}
@@ -82,7 +82,7 @@ func TestSaveAndCheckCompletion_SequentialCoverage(t *testing.T) {
 		t.Fatalf("Save req 2: unexpected error: %v", err)
 	}
 
-	scenarios, _ = m.LoadScenarios(ctx, slug)
+	scenarios, _ = workflow.LoadScenarios(ctx, m.KV(), slug)
 	if len(scenarios) != 2 {
 		t.Fatalf("After req 2: expected 2 scenarios, got %d", len(scenarios))
 	}
@@ -109,13 +109,13 @@ func TestSaveAndCheckCompletion_SequentialCoverage(t *testing.T) {
 	}
 
 	// Verify: 3 scenarios on disk.
-	scenarios, _ = m.LoadScenarios(ctx, slug)
+	scenarios, _ = workflow.LoadScenarios(ctx, m.KV(), slug)
 	if len(scenarios) != 3 {
 		t.Fatalf("After req 3: expected 3 scenarios, got %d", len(scenarios))
 	}
 
 	// Verify the plan status was set to scenarios_generated (happens before publish).
-	plan, _ = m.LoadPlan(ctx, slug)
+	plan, _ = workflow.LoadPlan(ctx, m.KV(), slug)
 	if plan.Status != workflow.StatusScenariosGenerated {
 		t.Fatalf("Plan status = %q, want %q", plan.Status, workflow.StatusScenariosGenerated)
 	}
@@ -132,15 +132,15 @@ func TestSaveAndCheckCompletion_Idempotent(t *testing.T) {
 	ctx := context.Background()
 	slug := "test-idempotent"
 
-	m := workflow.NewManager(tmpDir)
-	if _, err := m.CreatePlan(ctx, slug, "Idempotent Test"); err != nil {
+	m := workflow.NewManager(tmpDir, nil)
+	if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "Idempotent Test"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
 	reqs := []workflow.Requirement{
 		{ID: "requirement." + slug + ".1", Title: "Req 1", Status: "active"},
 	}
-	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
 
@@ -160,7 +160,7 @@ func TestSaveAndCheckCompletion_Idempotent(t *testing.T) {
 	_ = c.saveAndCheckCompletion(ctx, trigger, scenarios)
 	_ = c.saveAndCheckCompletion(ctx, trigger, scenarios)
 
-	saved, _ := m.LoadScenarios(ctx, slug)
+	saved, _ := workflow.LoadScenarios(ctx, m.KV(), slug)
 	if len(saved) != 2 {
 		t.Fatalf("Expected 2 scenarios after double save, got %d", len(saved))
 	}

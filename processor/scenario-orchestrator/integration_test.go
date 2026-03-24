@@ -99,7 +99,7 @@ func TestDispatchScenarios_PublishesMessages(t *testing.T) {
 
 	// Write plan data to disk: two requirements, one pending scenario each.
 	const planSlug = "test-plan"
-	m := workflow.NewManager(repoRoot)
+	m := workflow.NewManager(repoRoot, nil)
 	if _, err := m.CreatePlan(ctx, planSlug, "Test Plan"); err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestDispatchScenarios_BoundedConcurrency(t *testing.T) {
 	const planSlug = "bounded-plan"
 
 	// Write plan data: N independent requirements, one pending scenario each.
-	m := workflow.NewManager(repoRoot)
+	m := workflow.NewManager(repoRoot, nil)
 	if _, err := m.CreatePlan(ctx, planSlug, "Bounded Plan"); err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestDispatchScenarios_EmptyList_Integration(t *testing.T) {
 	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
 
 	// Plan directory exists on disk but has no requirements written.
-	m := workflow.NewManager(repoRoot)
+	m := workflow.NewManager(repoRoot, nil)
 	if _, err := m.CreatePlan(ctx, "empty-plan", "Empty Plan"); err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestDAGGating_RootRequirementsDispatchImmediately(t *testing.T) {
 
 	// Persist plan data: two independent requirements, one scenario each.
 	const planSlug = "dag-root-test"
-	m := workflow.NewManager(repoRoot)
+	m := workflow.NewManager(repoRoot, nil)
 	if _, err := m.CreatePlan(ctx, planSlug, "DAG Root Test"); err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestDAGGating_DependentRequirementBlocked(t *testing.T) {
 
 	// Req-A (root) → Req-B (depends on A).
 	const planSlug = "dag-blocked-test"
-	m := workflow.NewManager(repoRoot)
+	m := workflow.NewManager(repoRoot, nil)
 	if _, err := m.CreatePlan(ctx, planSlug, "DAG Blocked Test"); err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
@@ -527,7 +527,7 @@ func TestDAGGating_FailingScenarioBlocksDownstream(t *testing.T) {
 	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
 
 	const planSlug = "dag-fail-block-test"
-	m := workflow.NewManager(repoRoot)
+	m := workflow.NewManager(repoRoot, nil)
 	if _, err := m.CreatePlan(ctx, planSlug, "DAG Fail Block Test"); err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
@@ -608,7 +608,7 @@ func TestDAGGating_DiamondDependency(t *testing.T) {
 	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
 
 	const planSlug = "dag-diamond-test"
-	m := workflow.NewManager(repoRoot)
+	m := workflow.NewManager(repoRoot, nil)
 	if _, err := m.CreatePlan(ctx, planSlug, "DAG Diamond Test"); err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}

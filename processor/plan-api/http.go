@@ -201,7 +201,10 @@ func (c *Component) getManager(w http.ResponseWriter) *workflow.Manager {
 			return nil
 		}
 	}
-	return workflow.NewManager(repoRoot)
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
+	return workflow.NewManager(repoRoot, kvStore)
 }
 
 // findExecutionBySlug searches for a completed workflow execution with the given slug.
@@ -435,6 +438,8 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		requireMethod(w, r, http.MethodPost, func() { c.handleExportSpecs(w, r, slug) })
 	case "archive":
 		requireMethod(w, r, http.MethodPost, func() { c.handleGenerateArchive(w, r, slug) })
+	case "unarchive":
+		requireMethod(w, r, http.MethodPost, func() { c.handleUnarchivePlan(w, r, slug) })
 	default:
 		if handled := c.handlePhaseCollectionEndpoint(w, r, slug, endpoint); handled {
 			return
@@ -557,10 +562,9 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
 	// Generate slug from description
 	slug := workflow.Slugify(req.Description)
@@ -570,13 +574,13 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 	ctx := natsclient.ContextWithTrace(r.Context(), tc)
 
 	// Return existing plan without re-triggering the workflow
-	if manager.PlanExists(slug) {
-		c.respondWithExistingPlan(ctx, w, manager, slug)
+	if workflow.PlanExists(ctx, kvStore, slug) {
+		c.respondWithExistingPlan(ctx, w, kvStore, slug)
 		return
 	}
 
 	// Create new plan
-	plan, err := manager.CreatePlan(ctx, slug, req.Description)
+	plan, err := workflow.CreatePlan(ctx, kvStore, slug, req.Description)
 	if err != nil {
 		c.logger.Error("Failed to create plan", "slug", slug, "error", err)
 		http.Error(w, fmt.Sprintf("Failed to create plan: %v", err), http.StatusInternalServerError)
@@ -610,8 +614,8 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 // respondWithExistingPlan loads an already-existing plan and writes a 200 JSON response.
 // It is called when the plan slug is already present on disk.
-func (c *Component) respondWithExistingPlan(ctx context.Context, w http.ResponseWriter, manager *workflow.Manager, slug string) {
-	plan, err := manager.LoadPlan(ctx, slug)
+func (c *Component) respondWithExistingPlan(ctx context.Context, w http.ResponseWriter, kvStore *natsclient.KVStore, slug string) {
+	plan, err := workflow.LoadPlan(ctx, kvStore, slug)
 	if err != nil {
 		c.logger.Error("Failed to load existing plan", "slug", slug, "error", err)
 		http.Error(w, "Failed to load existing plan", http.StatusInternalServerError)
@@ -666,12 +670,11 @@ func (c *Component) triggerPlanCoordinator(ctx context.Context, plan *workflow.P
 
 // handleListPlans handles GET /plan-api/plans.
 func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
-	result, err := manager.ListPlans(r.Context())
+	result, err := workflow.ListPlans(r.Context(), kvStore)
 	if err != nil {
 		c.logger.Error("Failed to list plans", "error", err)
 		http.Error(w, "Failed to list plans", http.StatusInternalServerError)
@@ -695,12 +698,11 @@ func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
 
 // handleGetPlan handles GET /plan-api/plans/{slug}.
 func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
-	plan, err := manager.LoadPlan(r.Context(), slug)
+	plan, err := workflow.LoadPlan(r.Context(), kvStore, slug)
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
 			http.Error(w, "Plan not found", http.StatusNotFound)
@@ -726,12 +728,11 @@ func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug s
 // Approves the plan directly (manual approval via REST API).
 // If the plan is already approved, it returns immediately.
 func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, slug string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
-	plan, err := manager.LoadPlan(r.Context(), slug)
+	plan, err := workflow.LoadPlan(r.Context(), kvStore, slug)
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
 			http.Error(w, "Plan not found", http.StatusNotFound)
@@ -744,7 +745,7 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 
 	// Approve the plan if not already approved.
 	if !plan.Approved {
-		if err := manager.ApprovePlan(r.Context(), plan); err != nil {
+		if err := workflow.ApprovePlan(r.Context(), kvStore, plan); err != nil {
 			c.logger.Error("Failed to approve plan", "slug", slug, "error", err)
 			http.Error(w, "Failed to approve plan", http.StatusInternalServerError)
 			return
@@ -768,8 +769,8 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 	// Cancel any active coordination for this slug — the human has taken over.
 	c.coordinator.Cancel(slug, "plan promoted via REST API")
 
-	requirements, _ := manager.LoadRequirements(r.Context(), slug)
-	scenarios, _ := manager.LoadScenarios(r.Context(), slug)
+	requirements, _ := workflow.LoadRequirements(r.Context(), kvStore, slug)
+	scenarios, _ := workflow.LoadScenarios(r.Context(), kvStore, slug)
 
 	switch {
 	case len(requirements) == 0:
@@ -788,7 +789,7 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 	default:
 		// Round 2 — requirements+scenarios exist, mark ready for execution.
 		c.logger.Info("Round 2 human approval: plan ready for execution", "slug", slug)
-		if err := manager.SetPlanStatus(r.Context(), plan, workflow.StatusReadyForExecution); err != nil {
+		if err := workflow.SetPlanStatus(r.Context(), kvStore, plan, workflow.StatusReadyForExecution); err != nil {
 			c.logger.Error("Failed to set plan ready for execution", "slug", slug, "error", err)
 			http.Error(w, "Failed to update plan status", http.StatusInternalServerError)
 			return
@@ -843,16 +844,15 @@ func (c *Component) handleListTasks(w http.ResponseWriter, r *http.Request, slug
 
 // handleExecutePlan handles POST /plan-api/plans/{slug}/execute.
 func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, slug string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
 	// Create trace context early for consistent usage
 	tc := natsclient.NewTraceContext()
 	ctx := natsclient.ContextWithTrace(r.Context(), tc)
 
-	plan, err := manager.LoadPlan(ctx, slug)
+	plan, err := workflow.LoadPlan(ctx, kvStore, slug)
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
 			http.Error(w, "Plan not found", http.StatusNotFound)
@@ -872,7 +872,7 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 	// Transition plan status to implementing before triggering execution.
 	// This must happen before the publish so that subsequent GET requests
 	// see the correct stage (determinePlanStage derives from Status).
-	if err := manager.SetPlanStatus(ctx, plan, workflow.StatusImplementing); err != nil {
+	if err := workflow.SetPlanStatus(ctx, kvStore, plan, workflow.StatusImplementing); err != nil {
 		c.logger.Error("Failed to set plan status to implementing", "slug", slug, "error", err)
 		http.Error(w, "Failed to update plan status", http.StatusInternalServerError)
 		return
@@ -964,10 +964,9 @@ func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 
 // handleUpdatePlan handles PATCH /plans/{slug}.
 func (c *Component) handleUpdatePlan(w http.ResponseWriter, r *http.Request, slug string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
 	// Limit request body size
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
@@ -978,14 +977,14 @@ func (c *Component) handleUpdatePlan(w http.ResponseWriter, r *http.Request, slu
 		return
 	}
 
-	// Convert to Manager request
-	managerReq := workflow.UpdatePlanRequest{
+	// Convert to UpdatePlanRequest
+	updateReq := workflow.UpdatePlanRequest{
 		Title:   req.Title,
 		Goal:    req.Goal,
 		Context: req.Context,
 	}
 
-	plan, err := manager.UpdatePlan(r.Context(), slug, managerReq)
+	plan, err := workflow.UpdatePlan(r.Context(), kvStore, slug, updateReq)
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
 			http.Error(w, "Plan not found", http.StatusNotFound)
@@ -1018,10 +1017,9 @@ func (c *Component) handleUpdatePlan(w http.ResponseWriter, r *http.Request, slu
 // Supports ?archive=true for soft delete (sets status to archived).
 // Without archive param or archive=false: hard delete (removes files).
 func (c *Component) handleDeletePlan(w http.ResponseWriter, r *http.Request, slug string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
 	// Check for archive query parameter
 	archive := r.URL.Query().Get("archive") == "true"
@@ -1029,13 +1027,13 @@ func (c *Component) handleDeletePlan(w http.ResponseWriter, r *http.Request, slu
 	var err error
 	if archive {
 		// Soft delete - set status to archived
-		err = manager.ArchivePlan(r.Context(), slug)
+		err = workflow.ArchivePlan(r.Context(), kvStore, slug)
 		if err == nil {
 			c.logger.Info("Plan archived via REST API", "slug", slug)
 		}
 	} else {
 		// Hard delete - remove files
-		err = manager.DeletePlan(r.Context(), slug)
+		err = workflow.DeletePlan(r.Context(), kvStore, slug)
 		if err == nil {
 			c.logger.Info("Plan deleted via REST API", "slug", slug)
 		}
@@ -1056,4 +1054,36 @@ func (c *Component) handleDeletePlan(w http.ResponseWriter, r *http.Request, slu
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleUnarchivePlan handles POST /plans/{slug}/unarchive.
+// Restores an archived plan to complete status.
+func (c *Component) handleUnarchivePlan(w http.ResponseWriter, r *http.Request, slug string) {
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
+
+	if err := workflow.UnarchivePlan(r.Context(), kvStore, slug); err != nil {
+		if errors.Is(err, workflow.ErrPlanNotFound) {
+			http.Error(w, "Plan not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+
+	c.logger.Info("Plan unarchived", "slug", slug)
+
+	plan, err := workflow.LoadPlan(r.Context(), kvStore, slug)
+	if err != nil {
+		http.Error(w, "Plan unarchived but failed to reload", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(&PlanWithStatus{
+		Plan:  plan,
+		Stage: c.determinePlanStage(plan),
+	})
 }

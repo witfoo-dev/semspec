@@ -52,7 +52,7 @@ func ChangeProposal(ctx context.Context, manager *workflow.Manager, slug string,
 	}
 
 	// Step 1: Find scenarios belonging to affected requirements.
-	allScenarios, err := manager.LoadScenarios(ctx, slug)
+	allScenarios, err := workflow.LoadScenarios(ctx, manager.KV(), slug)
 	if err != nil {
 		return nil, fmt.Errorf("load scenarios: %w", err)
 	}

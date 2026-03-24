@@ -329,14 +329,14 @@ func TestHandleCascadeRequest_ProposalNotFound(t *testing.T) {
 	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
 
 	ctx := context.Background()
-	m := workflow.NewManager(repoRoot)
+	m := workflow.NewManager(repoRoot, nil)
 	slug := "no-proposal-plan"
 
-	if _, err := m.CreatePlan(ctx, slug, "No Proposal Plan"); err != nil {
+	if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "No Proposal Plan"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 	// Save an empty proposals list — proposal "cp-missing" does not exist.
-	if err := m.SaveChangeProposals(ctx, []workflow.ChangeProposal{}, slug); err != nil {
+	if err := workflow.SaveChangeProposals(ctx, m.KV(), []workflow.ChangeProposal{}, slug); err != nil {
 		t.Fatalf("SaveChangeProposals: %v", err)
 	}
 
@@ -365,10 +365,10 @@ func TestHandleCascadeRequest_EmptyAffectedReqIDs(t *testing.T) {
 	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
 
 	ctx := context.Background()
-	m := workflow.NewManager(repoRoot)
+	m := workflow.NewManager(repoRoot, nil)
 	slug := "empty-reqs-plan"
 
-	if _, err := m.CreatePlan(ctx, slug, "Empty Reqs Plan"); err != nil {
+	if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "Empty Reqs Plan"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 	tasks := []workflow.Task{
@@ -381,7 +381,7 @@ func TestHandleCascadeRequest_EmptyAffectedReqIDs(t *testing.T) {
 		ID:             "cp-empty",
 		AffectedReqIDs: []string{}, // nothing affected
 	}
-	if err := m.SaveChangeProposals(ctx, []workflow.ChangeProposal{proposal}, slug); err != nil {
+	if err := workflow.SaveChangeProposals(ctx, m.KV(), []workflow.ChangeProposal{proposal}, slug); err != nil {
 		t.Fatalf("SaveChangeProposals: %v", err)
 	}
 
@@ -421,22 +421,22 @@ func TestHandleCascadeRequest_DirtiesTasksOnFilesystem(t *testing.T) {
 	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
 
 	ctx := context.Background()
-	m := workflow.NewManager(repoRoot)
+	m := workflow.NewManager(repoRoot, nil)
 	slug := "cascade-dirty-plan"
 
-	if _, err := m.CreatePlan(ctx, slug, "Cascade Dirty Plan"); err != nil {
+	if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "Cascade Dirty Plan"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 	reqs := []workflow.Requirement{
 		{ID: "req-d1", PlanID: workflow.PlanEntityID(slug), Title: "R1", Status: workflow.RequirementStatusActive},
 	}
-	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
 	scenarios := []workflow.Scenario{
 		{ID: "sc-d1", RequirementID: "req-d1"},
 	}
-	if err := m.SaveScenarios(ctx, scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, m.KV(), scenarios, slug); err != nil {
 		t.Fatalf("SaveScenarios: %v", err)
 	}
 	tasks := []workflow.Task{
@@ -450,7 +450,7 @@ func TestHandleCascadeRequest_DirtiesTasksOnFilesystem(t *testing.T) {
 		ID:             "cp-dirty",
 		AffectedReqIDs: []string{"req-d1"},
 	}
-	if err := m.SaveChangeProposals(ctx, []workflow.ChangeProposal{proposal}, slug); err != nil {
+	if err := workflow.SaveChangeProposals(ctx, m.KV(), []workflow.ChangeProposal{proposal}, slug); err != nil {
 		t.Fatalf("SaveChangeProposals: %v", err)
 	}
 

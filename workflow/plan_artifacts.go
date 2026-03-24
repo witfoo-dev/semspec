@@ -20,17 +20,17 @@ func (m *Manager) ExportSpecFiles(ctx context.Context, slug string) ([]string, e
 		return nil, err
 	}
 
-	plan, err := m.LoadPlan(ctx, slug)
+	plan, err := LoadPlan(ctx, m.kv, slug)
 	if err != nil {
 		return nil, fmt.Errorf("load plan: %w", err)
 	}
 
-	requirements, err := m.LoadRequirements(ctx, slug)
+	requirements, err := LoadRequirements(ctx, m.kv, slug)
 	if err != nil {
 		return nil, fmt.Errorf("load requirements: %w", err)
 	}
 
-	scenarios, err := m.LoadScenarios(ctx, slug)
+	scenarios, err := LoadScenarios(ctx, m.kv, slug)
 	if err != nil {
 		return nil, fmt.Errorf("load scenarios: %w", err)
 	}
@@ -134,22 +134,22 @@ func (m *Manager) GenerateArchive(ctx context.Context, slug string) (string, err
 		return "", err
 	}
 
-	plan, err := m.LoadPlan(ctx, slug)
+	plan, err := LoadPlan(ctx, m.kv, slug)
 	if err != nil {
 		return "", fmt.Errorf("load plan: %w", err)
 	}
 
-	requirements, err := m.LoadRequirements(ctx, slug)
+	requirements, err := LoadRequirements(ctx, m.kv, slug)
 	if err != nil {
 		return "", fmt.Errorf("load requirements: %w", err)
 	}
 
-	scenarios, err := m.LoadScenarios(ctx, slug)
+	scenarios, err := LoadScenarios(ctx, m.kv, slug)
 	if err != nil {
 		return "", fmt.Errorf("load scenarios: %w", err)
 	}
 
-	changeProposals, err := m.LoadChangeProposals(ctx, slug)
+	changeProposals, err := LoadChangeProposals(ctx, m.kv, slug)
 	if err != nil {
 		return "", fmt.Errorf("load change proposals: %w", err)
 	}

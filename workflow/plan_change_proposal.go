@@ -2,17 +2,17 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+
+	"github.com/c360studio/semstreams/natsclient"
 )
 
 // ChangeProposalsJSONFile is the filename for machine-readable change proposal storage (JSON format).
 const ChangeProposalsJSONFile = "change_proposals.json"
 
-// SaveChangeProposals saves change proposals to .semspec/projects/default/plans/{slug}/change_proposals.json.
-func (m *Manager) SaveChangeProposals(ctx context.Context, proposals []ChangeProposal, slug string) error {
+// SaveChangeProposals saves change proposals to ENTITY_STATES KV bucket.
+// Each proposal is stored as a separate entity keyed by ChangeProposalEntityID.
+func SaveChangeProposals(ctx context.Context, kv *natsclient.KVStore, proposals []ChangeProposal, slug string) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
 	}
@@ -21,27 +21,19 @@ func (m *Manager) SaveChangeProposals(ctx context.Context, proposals []ChangePro
 		return err
 	}
 
-	proposalPath := filepath.Join(m.ProjectPlanPath(DefaultProjectSlug, slug), ChangeProposalsJSONFile)
-
-	dir := filepath.Dir(proposalPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	data, err := json.MarshalIndent(proposals, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal change proposals: %w", err)
-	}
-
-	if err := os.WriteFile(proposalPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write change proposals: %w", err)
+	for _, p := range proposals {
+		entityID := ChangeProposalEntityID(p.ID)
+		triples := ChangeProposalTriples(slug, &p)
+		if err := kvPutEntity(ctx, kv, entityID, ChangeProposalEntityType, triples); err != nil {
+			return fmt.Errorf("save change proposal %s: %w", p.ID, err)
+		}
 	}
 
 	return nil
 }
 
-// LoadChangeProposals loads change proposals from .semspec/projects/default/plans/{slug}/change_proposals.json.
-func (m *Manager) LoadChangeProposals(ctx context.Context, slug string) ([]ChangeProposal, error) {
+// LoadChangeProposals loads change proposals for a plan from ENTITY_STATES KV bucket.
+func LoadChangeProposals(ctx context.Context, kv *natsclient.KVStore, slug string) ([]ChangeProposal, error) {
 	if err := ValidateSlug(slug); err != nil {
 		return nil, err
 	}
@@ -50,19 +42,33 @@ func (m *Manager) LoadChangeProposals(ctx context.Context, slug string) ([]Chang
 		return nil, err
 	}
 
-	proposalPath := filepath.Join(m.ProjectPlanPath(DefaultProjectSlug, slug), ChangeProposalsJSONFile)
-
-	data, err := os.ReadFile(proposalPath)
+	prefix := EntityPrefix() + ".wf.plan.proposal."
+	keys, err := kv.KeysByPrefix(ctx, prefix)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return []ChangeProposal{}, nil
-		}
-		return nil, fmt.Errorf("failed to read change proposals: %w", err)
+		return []ChangeProposal{}, nil
 	}
 
+	planEntityID := PlanEntityID(slug)
 	var proposals []ChangeProposal
-	if err := json.Unmarshal(data, &proposals); err != nil {
-		return nil, fmt.Errorf("failed to parse change proposals: %w", err)
+
+	for _, key := range keys {
+		entity, err := kvGetEntity(ctx, kv, key)
+		if err != nil {
+			continue
+		}
+
+		p, err := ChangeProposalFromEntity(entity)
+		if err != nil {
+			continue
+		}
+
+		if p.PlanID == planEntityID {
+			proposals = append(proposals, *p)
+		}
+	}
+
+	if proposals == nil {
+		proposals = []ChangeProposal{}
 	}
 
 	return proposals, nil

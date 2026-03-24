@@ -74,9 +74,9 @@ type MigrationResult struct {
 
 // runExtractScenarios executes the migration for every plan in the default project.
 func runExtractScenarios(ctx context.Context, repoPath string) error {
-	manager := workflow.NewManager(repoPath)
+	manager := workflow.NewManager(repoPath, nil)
 
-	listResult, err := manager.ListPlans(ctx)
+	listResult, err := workflow.ListPlans(ctx, manager.KV())
 	if err != nil {
 		return fmt.Errorf("list plans: %w", err)
 	}
@@ -144,12 +144,12 @@ func loadMigrationState(ctx context.Context, manager *workflow.Manager, slug str
 	}
 
 	// Load existing requirements and scenarios so we append rather than overwrite.
-	requirements, err := manager.LoadRequirements(ctx, slug)
+	requirements, err := workflow.LoadRequirements(ctx, manager.KV(), slug)
 	if err != nil {
 		return nil, fmt.Errorf("load requirements: %w", err)
 	}
 
-	scenarios, err := manager.LoadScenarios(ctx, slug)
+	scenarios, err := workflow.LoadScenarios(ctx, manager.KV(), slug)
 	if err != nil {
 		return nil, fmt.Errorf("load scenarios: %w", err)
 	}
@@ -219,10 +219,10 @@ func persistMigrationResults(
 	scenarios []workflow.Scenario,
 	tasks []workflow.Task,
 ) error {
-	if err := manager.SaveRequirements(ctx, requirements, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, manager.KV(), requirements, slug); err != nil {
 		return fmt.Errorf("save requirements: %w", err)
 	}
-	if err := manager.SaveScenarios(ctx, scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, manager.KV(), scenarios, slug); err != nil {
 		return fmt.Errorf("save scenarios: %w", err)
 	}
 	if err := manager.SaveTasks(ctx, tasks, slug); err != nil {

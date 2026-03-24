@@ -72,15 +72,18 @@ func (c *Component) handlePhasesRetrospective(w http.ResponseWriter, r *http.Req
 	}
 
 	ctx := r.Context()
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
 	// Verify the plan exists.
-	if !manager.PlanExists(slug) {
+	if !workflow.PlanExists(ctx, kvStore, slug) {
 		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
 	// Load requirements.
-	requirements, err := manager.LoadRequirements(ctx, slug)
+	requirements, err := workflow.LoadRequirements(ctx, kvStore, slug)
 	if err != nil {
 		c.logger.Error("Failed to load requirements for retrospective", "slug", slug, "error", err)
 		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
@@ -88,7 +91,7 @@ func (c *Component) handlePhasesRetrospective(w http.ResponseWriter, r *http.Req
 	}
 
 	// Load scenarios and build a lookup: requirementID → []Scenario.
-	scenarios, err := manager.LoadScenarios(ctx, slug)
+	scenarios, err := workflow.LoadScenarios(ctx, kvStore, slug)
 	if err != nil {
 		c.logger.Error("Failed to load scenarios for retrospective", "slug", slug, "error", err)
 		http.Error(w, "Failed to load scenarios", http.StatusInternalServerError)

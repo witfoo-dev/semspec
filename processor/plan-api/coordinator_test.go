@@ -718,11 +718,12 @@ func TestCoordUnique_EmptyInput(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestParseCoordTaskID_Valid(t *testing.T) {
-	role, entityID := parseCoordTaskID("planner.0::local.semspec.workflow.plan.execution.my-slug")
+	expectedEntityID := workflow.EntityPrefix() + ".exec.plan.run.my-slug"
+	role, entityID := parseCoordTaskID("planner.0::" + expectedEntityID)
 	if role != "planner.0" {
 		t.Errorf("role = %q, want planner.0", role)
 	}
-	if entityID != "local.semspec.workflow.plan.execution.my-slug" {
+	if entityID != expectedEntityID {
 		t.Errorf("entityID = %q unexpected", entityID)
 	}
 }

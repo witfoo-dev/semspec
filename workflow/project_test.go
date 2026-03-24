@@ -32,7 +32,7 @@ func TestProjectEntityID(t *testing.T) {
 
 func TestManager_CreateProject(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	t.Run("creates project successfully", func(t *testing.T) {
@@ -47,8 +47,8 @@ func TestManager_CreateProject(t *testing.T) {
 		if project.Title != "Test Project" {
 			t.Errorf("Title = %q, want %q", project.Title, "Test Project")
 		}
-		if project.ID != "c360.semspec.workflow.project.project.test-project" {
-			t.Errorf("ID = %q, want %q", project.ID, "c360.semspec.workflow.project.project.test-project")
+		if project.ID != "semspec.local.wf.project.project.test-project" {
+			t.Errorf("ID = %q, want %q", project.ID, "semspec.local.wf.project.project.test-project")
 		}
 		if project.Status != ProjectStatusActive {
 			t.Errorf("Status = %q, want %q", project.Status, ProjectStatusActive)
@@ -95,7 +95,7 @@ func TestManager_CreateProject(t *testing.T) {
 
 func TestManager_LoadProject(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	t.Run("loads existing project", func(t *testing.T) {
@@ -127,7 +127,7 @@ func TestManager_LoadProject(t *testing.T) {
 
 func TestManager_GetOrCreateDefaultProject(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	t.Run("creates default project on first call", func(t *testing.T) {
@@ -156,7 +156,7 @@ func TestManager_GetOrCreateDefaultProject(t *testing.T) {
 
 func TestManager_ListProjects(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	// Create some projects
@@ -175,7 +175,7 @@ func TestManager_ListProjects(t *testing.T) {
 
 func TestManager_ArchiveProject(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	_, err := m.CreateProject(ctx, "to-archive", "To Archive")
@@ -203,7 +203,7 @@ func TestManager_ArchiveProject(t *testing.T) {
 
 func TestManager_CreateProjectPlan(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	// Create a project first
@@ -213,7 +213,7 @@ func TestManager_CreateProjectPlan(t *testing.T) {
 	}
 
 	t.Run("creates plan in project", func(t *testing.T) {
-		plan, err := m.CreateProjectPlan(ctx, "my-project", "add-auth", "Add Authentication")
+		plan, err := CreateProjectPlan(ctx, m.kv, "my-project", "add-auth", "Add Authentication")
 		if err != nil {
 			t.Fatalf("CreateProjectPlan() error = %v", err)
 		}
@@ -221,8 +221,8 @@ func TestManager_CreateProjectPlan(t *testing.T) {
 		if plan.Slug != "add-auth" {
 			t.Errorf("Slug = %q, want %q", plan.Slug, "add-auth")
 		}
-		if plan.ProjectID != "c360.semspec.workflow.project.project.my-project" {
-			t.Errorf("ProjectID = %q, want %q", plan.ProjectID, "c360.semspec.workflow.project.project.my-project")
+		if plan.ProjectID != "semspec.local.wf.project.project.my-project" {
+			t.Errorf("ProjectID = %q, want %q", plan.ProjectID, "semspec.local.wf.project.project.my-project")
 		}
 		if plan.Approved {
 			t.Error("new plan should not be approved")
@@ -237,15 +237,15 @@ func TestManager_CreateProjectPlan(t *testing.T) {
 
 	t.Run("creates plan in default project auto-creating it", func(t *testing.T) {
 		tmpDir2 := t.TempDir()
-		m2 := NewManager(tmpDir2)
+		m2 := NewManager(tmpDir2, nil)
 
-		plan, err := m2.CreateProjectPlan(ctx, DefaultProjectSlug, "quick-fix", "Quick Fix")
+		plan, err := CreateProjectPlan(ctx, m2.kv, DefaultProjectSlug, "quick-fix", "Quick Fix")
 		if err != nil {
 			t.Fatalf("CreateProjectPlan() error = %v", err)
 		}
 
-		if plan.ProjectID != "c360.semspec.workflow.project.project.default" {
-			t.Errorf("ProjectID = %q, want %q", plan.ProjectID, "c360.semspec.workflow.project.project.default")
+		if plan.ProjectID != "semspec.local.wf.project.project.default" {
+			t.Errorf("ProjectID = %q, want %q", plan.ProjectID, "semspec.local.wf.project.project.default")
 		}
 
 		// Verify default project was created
@@ -255,7 +255,7 @@ func TestManager_CreateProjectPlan(t *testing.T) {
 	})
 
 	t.Run("rejects plan for non-existent project", func(t *testing.T) {
-		_, err := m.CreateProjectPlan(ctx, "non-existent", "some-plan", "Some Plan")
+		_, err := CreateProjectPlan(ctx, m.kv, "non-existent", "some-plan", "Some Plan")
 		if err == nil {
 			t.Error("expected error for non-existent project")
 		}
@@ -264,14 +264,14 @@ func TestManager_CreateProjectPlan(t *testing.T) {
 
 func TestManager_ListProjectPlans(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	_, _ = m.CreateProject(ctx, "multi-plan", "Multi Plan Project")
-	_, _ = m.CreateProjectPlan(ctx, "multi-plan", "plan-1", "Plan One")
-	_, _ = m.CreateProjectPlan(ctx, "multi-plan", "plan-2", "Plan Two")
+	_, _ = CreateProjectPlan(ctx, m.kv, "multi-plan", "plan-1", "Plan One")
+	_, _ = CreateProjectPlan(ctx, m.kv, "multi-plan", "plan-2", "Plan Two")
 
-	result, err := m.ListProjectPlans(ctx, "multi-plan")
+	result, err := ListProjectPlans(ctx, m.kv, "multi-plan")
 	if err != nil {
 		t.Fatalf("ListProjectPlans() error = %v", err)
 	}
@@ -295,7 +295,7 @@ func TestProject_IsArchived(t *testing.T) {
 
 func TestManager_DeleteProject(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	_, _ = m.CreateProject(ctx, "to-delete", "To Delete")
@@ -312,7 +312,7 @@ func TestManager_DeleteProject(t *testing.T) {
 
 func TestManager_UpdateProject(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	_, _ = m.CreateProject(ctx, "to-update", "Original Title")
@@ -339,7 +339,7 @@ func TestManager_UpdateProject(t *testing.T) {
 
 func TestManager_CreateProject_Concurrent(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	const numGoroutines = 10
@@ -375,7 +375,7 @@ func TestManager_CreateProject_Concurrent(t *testing.T) {
 
 func TestManager_UpdateProject_Concurrent(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	// Create project first
@@ -419,7 +419,7 @@ func TestManager_UpdateProject_Concurrent(t *testing.T) {
 
 func TestManager_CreateProjectPlan_Concurrent(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	// Create project first
@@ -434,7 +434,7 @@ func TestManager_CreateProjectPlan_Concurrent(t *testing.T) {
 	// All goroutines try to create the same plan
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
-			_, err := m.CreateProjectPlan(ctx, "plan-concurrent", "same-plan", "Same Plan")
+			_, err := CreateProjectPlan(ctx, m.kv, "plan-concurrent", "same-plan", "Same Plan")
 			results <- err
 		}()
 	}

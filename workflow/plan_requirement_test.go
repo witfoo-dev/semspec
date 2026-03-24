@@ -10,9 +10,9 @@ import (
 func TestSaveLoadRequirements_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "test-plan", "Test Plan")
+	plan, err := CreatePlan(ctx, m.kv, "test-plan", "Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
@@ -39,11 +39,11 @@ func TestSaveLoadRequirements_RoundTrip(t *testing.T) {
 		},
 	}
 
-	if err := m.SaveRequirements(ctx, requirements, plan.Slug); err != nil {
+	if err := SaveRequirements(ctx, m.kv, requirements, plan.Slug); err != nil {
 		t.Fatalf("SaveRequirements() error: %v", err)
 	}
 
-	got, err := m.LoadRequirements(ctx, plan.Slug)
+	got, err := LoadRequirements(ctx, m.kv, plan.Slug)
 	if err != nil {
 		t.Fatalf("LoadRequirements() error: %v", err)
 	}
@@ -74,14 +74,14 @@ func TestSaveLoadRequirements_RoundTrip(t *testing.T) {
 func TestLoadRequirements_MissingFile_ReturnsEmpty(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "new-plan", "New Plan")
+	plan, err := CreatePlan(ctx, m.kv, "new-plan", "New Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
 
-	got, err := m.LoadRequirements(ctx, plan.Slug)
+	got, err := LoadRequirements(ctx, m.kv, plan.Slug)
 	if err != nil {
 		t.Fatalf("LoadRequirements() on missing file should not error, got: %v", err)
 	}
@@ -93,9 +93,9 @@ func TestLoadRequirements_MissingFile_ReturnsEmpty(t *testing.T) {
 func TestSaveRequirements_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	err := m.SaveRequirements(ctx, []Requirement{}, "invalid slug!")
+	err := SaveRequirements(ctx, m.kv, []Requirement{}, "invalid slug!")
 	if err == nil {
 		t.Error("SaveRequirements() with invalid slug should return error")
 	}
@@ -104,9 +104,9 @@ func TestSaveRequirements_InvalidSlug(t *testing.T) {
 func TestLoadRequirements_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	_, err := m.LoadRequirements(ctx, "invalid slug!")
+	_, err := LoadRequirements(ctx, m.kv, "invalid slug!")
 	if err == nil {
 		t.Error("LoadRequirements() with invalid slug should return error")
 	}
@@ -203,9 +203,9 @@ func TestValidateRequirementDAG(t *testing.T) {
 func TestSaveRequirements_RejectsInvalidDAG(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "dag-test", "DAG Test Plan")
+	plan, err := CreatePlan(ctx, m.kv, "dag-test", "DAG Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestSaveRequirements_RejectsInvalidDAG(t *testing.T) {
 		{ID: "req-b", DependsOn: []string{"req-a"}},
 	}
 
-	if err := m.SaveRequirements(ctx, cyclic, plan.Slug); err == nil {
+	if err := SaveRequirements(ctx, m.kv, cyclic, plan.Slug); err == nil {
 		t.Error("SaveRequirements() with cyclic requirements should return error")
 	}
 }
@@ -223,9 +223,9 @@ func TestSaveRequirements_RejectsInvalidDAG(t *testing.T) {
 func TestSaveRequirements_AcceptsValidDAG(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "dag-valid", "DAG Valid Plan")
+	plan, err := CreatePlan(ctx, m.kv, "dag-valid", "DAG Valid Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestSaveRequirements_AcceptsValidDAG(t *testing.T) {
 		{ID: "req-d", DependsOn: []string{"req-b", "req-c"}},
 	}
 
-	if err := m.SaveRequirements(ctx, diamond, plan.Slug); err != nil {
+	if err := SaveRequirements(ctx, m.kv, diamond, plan.Slug); err != nil {
 		t.Errorf("SaveRequirements() with valid diamond DAG should not error, got: %v", err)
 	}
 }

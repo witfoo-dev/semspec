@@ -84,9 +84,9 @@ func TestHandleListChangeProposals(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "cp-list-plan"
-	_, err := m.CreatePlan(ctx, slug, "CP List Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "CP List Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -101,7 +101,7 @@ func TestHandleListChangeProposals(t *testing.T) {
 			Title: "Second proposal", Status: workflow.ChangeProposalStatusAccepted, ProposedBy: "agent",
 		},
 	}
-	if err := m.SaveChangeProposals(ctx, proposals, slug); err != nil {
+	if err := workflow.SaveChangeProposals(ctx, m.KV(), proposals, slug); err != nil {
 		t.Fatalf("SaveChangeProposals() error = %v", err)
 	}
 
@@ -152,9 +152,9 @@ func TestHandleCreateChangeProposal(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "cp-create-plan"
-	_, err := m.CreatePlan(ctx, slug, "CP Create Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "CP Create Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -166,7 +166,7 @@ func TestHandleCreateChangeProposal(t *testing.T) {
 		Title:  "Auth requirement",
 		Status: workflow.RequirementStatusActive,
 	}
-	if err := m.SaveRequirements(ctx, []workflow.Requirement{seedReq}, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, m.KV(), []workflow.Requirement{seedReq}, slug); err != nil {
 		t.Fatalf("SaveRequirements() error = %v", err)
 	}
 
@@ -212,9 +212,9 @@ func TestHandleCreateChangeProposal_MissingTitle(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "cp-missing-title"
-	_, err := m.CreatePlan(ctx, slug, "CP Missing Title")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "CP Missing Title")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -239,9 +239,9 @@ func TestHandleAcceptChangeProposal(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "cp-accept-plan"
-	_, err := m.CreatePlan(ctx, slug, "CP Accept Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "CP Accept Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -253,7 +253,7 @@ func TestHandleAcceptChangeProposal(t *testing.T) {
 			Title: "Add OAuth", Status: workflow.ChangeProposalStatusUnderReview, ProposedBy: "user",
 		},
 	}
-	if err := m.SaveChangeProposals(ctx, proposals, slug); err != nil {
+	if err := workflow.SaveChangeProposals(ctx, m.KV(), proposals, slug); err != nil {
 		t.Fatalf("SaveChangeProposals() error = %v", err)
 	}
 
@@ -286,9 +286,9 @@ func TestHandleRejectChangeProposal(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "cp-reject-plan"
-	_, err := m.CreatePlan(ctx, slug, "CP Reject Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "CP Reject Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -300,7 +300,7 @@ func TestHandleRejectChangeProposal(t *testing.T) {
 			Title: "Risky change", Status: workflow.ChangeProposalStatusUnderReview, ProposedBy: "agent",
 		},
 	}
-	if err := m.SaveChangeProposals(ctx, proposals, slug); err != nil {
+	if err := workflow.SaveChangeProposals(ctx, m.KV(), proposals, slug); err != nil {
 		t.Fatalf("SaveChangeProposals() error = %v", err)
 	}
 
@@ -333,9 +333,9 @@ func TestHandleAcceptChangeProposal_InvalidTransition(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "cp-invalid-transition"
-	_, err := m.CreatePlan(ctx, slug, "CP Invalid Transition")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "CP Invalid Transition")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -350,7 +350,7 @@ func TestHandleAcceptChangeProposal_InvalidTransition(t *testing.T) {
 			Title: "Already accepted", Status: workflow.ChangeProposalStatusAccepted, ProposedBy: "user",
 		},
 	}
-	if err := m.SaveChangeProposals(ctx, proposals, slug); err != nil {
+	if err := workflow.SaveChangeProposals(ctx, m.KV(), proposals, slug); err != nil {
 		t.Fatalf("SaveChangeProposals() error = %v", err)
 	}
 
@@ -371,9 +371,9 @@ func TestHandleSubmitChangeProposal(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "cp-submit-plan"
-	_, err := m.CreatePlan(ctx, slug, "CP Submit Plan")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "CP Submit Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -385,7 +385,7 @@ func TestHandleSubmitChangeProposal(t *testing.T) {
 			Title: "Pending proposal", Status: workflow.ChangeProposalStatusProposed, ProposedBy: "user",
 		},
 	}
-	if err := m.SaveChangeProposals(ctx, proposals, slug); err != nil {
+	if err := workflow.SaveChangeProposals(ctx, m.KV(), proposals, slug); err != nil {
 		t.Fatalf("SaveChangeProposals() error = %v", err)
 	}
 
@@ -415,9 +415,9 @@ func TestHandleDeleteChangeProposal_NotProposed(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir)
+	m := workflow.NewManager(tmpDir, nil)
 	slug := "cp-delete-guard"
-	_, err := m.CreatePlan(ctx, slug, "CP Delete Guard")
+	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "CP Delete Guard")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -429,7 +429,7 @@ func TestHandleDeleteChangeProposal_NotProposed(t *testing.T) {
 			Title: "Accepted proposal", Status: workflow.ChangeProposalStatusAccepted, ProposedBy: "user",
 		},
 	}
-	if err := m.SaveChangeProposals(ctx, proposals, slug); err != nil {
+	if err := workflow.SaveChangeProposals(ctx, m.KV(), proposals, slug); err != nil {
 		t.Fatalf("SaveChangeProposals() error = %v", err)
 	}
 

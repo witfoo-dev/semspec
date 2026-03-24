@@ -169,9 +169,9 @@ func TestValidateSlug(t *testing.T) {
 func TestManager_CreatePlan(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "test-feature", "Add test feature")
+	plan, err := CreatePlan(ctx, m.kv, "test-feature", "Add test feature")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
@@ -207,19 +207,19 @@ func TestManager_CreatePlan(t *testing.T) {
 func TestManager_CreatePlan_Validation(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	_, err := m.CreatePlan(ctx, "", "Title")
+	_, err := CreatePlan(ctx, m.kv, "", "Title")
 	if !errors.Is(err, ErrSlugRequired) {
 		t.Errorf("expected ErrSlugRequired, got %v", err)
 	}
 
-	_, err = m.CreatePlan(ctx, "slug", "")
+	_, err = CreatePlan(ctx, m.kv, "slug", "")
 	if !errors.Is(err, ErrTitleRequired) {
 		t.Errorf("expected ErrTitleRequired, got %v", err)
 	}
 
-	_, err = m.CreatePlan(ctx, "../path/traversal", "Title")
+	_, err = CreatePlan(ctx, m.kv, "../path/traversal", "Title")
 	if !errors.Is(err, ErrInvalidSlug) {
 		t.Errorf("expected ErrInvalidSlug for path traversal, got %v", err)
 	}
@@ -228,14 +228,14 @@ func TestManager_CreatePlan_Validation(t *testing.T) {
 func TestManager_CreatePlan_AlreadyExists(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	_, err := m.CreatePlan(ctx, "existing", "First plan")
+	_, err := CreatePlan(ctx, m.kv, "existing", "First plan")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
 
-	_, err = m.CreatePlan(ctx, "existing", "Second plan")
+	_, err = CreatePlan(ctx, m.kv, "existing", "Second plan")
 	if !errors.Is(err, ErrPlanExists) {
 		t.Errorf("expected ErrPlanExists, got %v", err)
 	}
@@ -244,16 +244,16 @@ func TestManager_CreatePlan_AlreadyExists(t *testing.T) {
 func TestManager_LoadPlan(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create a plan
-	created, err := m.CreatePlan(ctx, "test-load", "Test load plan")
+	created, err := CreatePlan(ctx, m.kv, "test-load", "Test load plan")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
 
 	// Load it back
-	loaded, err := m.LoadPlan(ctx, "test-load")
+	loaded, err := LoadPlan(ctx, m.kv, "test-load")
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
@@ -269,9 +269,9 @@ func TestManager_LoadPlan(t *testing.T) {
 func TestManager_LoadPlan_NotFound(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	_, err := m.LoadPlan(ctx, "nonexistent")
+	_, err := LoadPlan(ctx, m.kv, "nonexistent")
 	if !errors.Is(err, ErrPlanNotFound) {
 		t.Errorf("expected ErrPlanNotFound, got %v", err)
 	}
@@ -280,9 +280,9 @@ func TestManager_LoadPlan_NotFound(t *testing.T) {
 func TestManager_LoadPlan_PathTraversal(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	_, err := m.LoadPlan(ctx, "../../../etc/passwd")
+	_, err := LoadPlan(ctx, m.kv, "../../../etc/passwd")
 	if !errors.Is(err, ErrInvalidSlug) {
 		t.Errorf("expected ErrInvalidSlug for path traversal, got %v", err)
 	}
@@ -291,14 +291,14 @@ func TestManager_LoadPlan_PathTraversal(t *testing.T) {
 func TestManager_LoadPlan_MalformedJSON(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create directory and write malformed JSON at project-based path
 	planPath := filepath.Join(tmpDir, ".semspec", "projects", "default", "plans", "malformed")
 	os.MkdirAll(planPath, 0755)
 	os.WriteFile(filepath.Join(planPath, "plan.json"), []byte("{invalid json"), 0644)
 
-	_, err := m.LoadPlan(ctx, "malformed")
+	_, err := LoadPlan(ctx, m.kv, "malformed")
 	if err == nil {
 		t.Error("expected error for malformed JSON")
 	}
@@ -311,9 +311,9 @@ func TestManager_LoadPlan_MalformedJSON(t *testing.T) {
 func TestManager_ApprovePlan(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "test-approve", "Approve test")
+	plan, err := CreatePlan(ctx, m.kv, "test-approve", "Approve test")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestManager_ApprovePlan(t *testing.T) {
 	}
 
 	// Approve it
-	err = m.ApprovePlan(ctx, plan)
+	err = ApprovePlan(ctx, m.kv, plan)
 	if err != nil {
 		t.Fatalf("ApprovePlan failed: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestManager_ApprovePlan(t *testing.T) {
 	}
 
 	// Verify persistence
-	loaded, err := m.LoadPlan(ctx, "test-approve")
+	loaded, err := LoadPlan(ctx, m.kv, "test-approve")
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
@@ -351,12 +351,12 @@ func TestManager_ApprovePlan(t *testing.T) {
 func TestManager_ApprovePlan_AlreadyApproved(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, _ := m.CreatePlan(ctx, "already-approved", "Already approved")
-	m.ApprovePlan(ctx, plan)
+	plan, _ := CreatePlan(ctx, m.kv, "already-approved", "Already approved")
+	ApprovePlan(ctx, m.kv, plan)
 
-	err := m.ApprovePlan(ctx, plan)
+	err := ApprovePlan(ctx, m.kv, plan)
 	if !errors.Is(err, ErrAlreadyApproved) {
 		t.Errorf("expected ErrAlreadyApproved, got %v", err)
 	}
@@ -365,14 +365,14 @@ func TestManager_ApprovePlan_AlreadyApproved(t *testing.T) {
 func TestManager_ApprovePlan_SetsStatus(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "test-status", "Status test")
+	plan, err := CreatePlan(ctx, m.kv, "test-status", "Status test")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
 
-	if err := m.ApprovePlan(ctx, plan); err != nil {
+	if err := ApprovePlan(ctx, m.kv, plan); err != nil {
 		t.Fatalf("ApprovePlan failed: %v", err)
 	}
 
@@ -380,7 +380,7 @@ func TestManager_ApprovePlan_SetsStatus(t *testing.T) {
 		t.Errorf("Status = %q, want %q", plan.Status, StatusApproved)
 	}
 
-	loaded, err := m.LoadPlan(ctx, "test-status")
+	loaded, err := LoadPlan(ctx, m.kv, "test-status")
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
@@ -392,20 +392,20 @@ func TestManager_ApprovePlan_SetsStatus(t *testing.T) {
 func TestManager_SetPlanStatus(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "test-set-status", "Set status test")
+	plan, err := CreatePlan(ctx, m.kv, "test-set-status", "Set status test")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
 
 	// Approve plan to get to StatusApproved
-	if err := m.ApprovePlan(ctx, plan); err != nil {
+	if err := ApprovePlan(ctx, m.kv, plan); err != nil {
 		t.Fatalf("ApprovePlan failed: %v", err)
 	}
 
 	// Valid transition: approved → requirements_generated
-	if err := m.SetPlanStatus(ctx, plan, StatusRequirementsGenerated); err != nil {
+	if err := SetPlanStatus(ctx, m.kv, plan, StatusRequirementsGenerated); err != nil {
 		t.Fatalf("SetPlanStatus to requirements_generated failed: %v", err)
 	}
 	if plan.Status != StatusRequirementsGenerated {
@@ -413,7 +413,7 @@ func TestManager_SetPlanStatus(t *testing.T) {
 	}
 
 	// Invalid transition: requirements_generated → implementing (should fail)
-	err = m.SetPlanStatus(ctx, plan, StatusImplementing)
+	err = SetPlanStatus(ctx, m.kv, plan, StatusImplementing)
 	if !errors.Is(err, ErrInvalidTransition) {
 		t.Errorf("expected ErrInvalidTransition, got %v", err)
 	}
@@ -470,19 +470,19 @@ func TestPlan_EffectiveStatus(t *testing.T) {
 func TestManager_PlanExists(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	if m.PlanExists("nonexistent") {
+	if PlanExists(ctx, m.kv, "nonexistent") {
 		t.Error("PlanExists should return false for nonexistent plan")
 	}
 
-	if m.PlanExists("../path/traversal") {
+	if PlanExists(ctx, m.kv, "../path/traversal") {
 		t.Error("PlanExists should return false for invalid slug")
 	}
 
-	m.CreatePlan(ctx, "exists", "Plan exists")
+	CreatePlan(ctx, m.kv, "exists", "Plan exists")
 
-	if !m.PlanExists("exists") {
+	if !PlanExists(ctx, m.kv, "exists") {
 		t.Error("PlanExists should return true for existing plan")
 	}
 }
@@ -490,13 +490,13 @@ func TestManager_PlanExists(t *testing.T) {
 func TestManager_ListPlans(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create some plans
-	m.CreatePlan(ctx, "plan1", "Plan 1")
-	m.CreatePlan(ctx, "plan2", "Plan 2")
+	CreatePlan(ctx, m.kv, "plan1", "Plan 1")
+	CreatePlan(ctx, m.kv, "plan2", "Plan 2")
 
-	result, err := m.ListPlans(ctx)
+	result, err := ListPlans(ctx, m.kv)
 	if err != nil {
 		t.Fatalf("ListPlans failed: %v", err)
 	}
@@ -512,17 +512,17 @@ func TestManager_ListPlans(t *testing.T) {
 func TestManager_ListPlans_PartialErrors(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create a valid plan
-	m.CreatePlan(ctx, "valid", "Valid plan")
+	CreatePlan(ctx, m.kv, "valid", "Valid plan")
 
 	// Create a directory with malformed JSON at project-based path
 	malformedPath := filepath.Join(tmpDir, ".semspec", "projects", "default", "plans", "malformed")
 	os.MkdirAll(malformedPath, 0755)
 	os.WriteFile(filepath.Join(malformedPath, "plan.json"), []byte("{invalid}"), 0644)
 
-	result, err := m.ListPlans(ctx)
+	result, err := ListPlans(ctx, m.kv)
 	if err != nil {
 		t.Fatalf("ListPlans failed: %v", err)
 	}
@@ -537,12 +537,12 @@ func TestManager_ListPlans_PartialErrors(t *testing.T) {
 
 func TestManager_ListPlans_ContextCancellation(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	_, err := m.ListPlans(ctx)
+	_, err := ListPlans(ctx, m.kv)
 	if err == nil {
 		t.Error("expected error for cancelled context")
 	}
@@ -584,10 +584,10 @@ func TestCreateTask_InvalidSlug(t *testing.T) {
 func TestManager_SaveAndLoadTasks(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Ensure the plan directory exists
-	m.CreatePlan(ctx, "test-tasks", "Test tasks")
+	CreatePlan(ctx, m.kv, "test-tasks", "Test tasks")
 
 	task1, _ := CreateTask(PlanEntityID("test-tasks"), "test-tasks", 1, "First task")
 	task2, _ := CreateTask(PlanEntityID("test-tasks"), "test-tasks", 2, "Second task")
@@ -618,7 +618,7 @@ func TestManager_SaveAndLoadTasks(t *testing.T) {
 func TestManager_LoadTasks_Empty(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	tasks, err := m.LoadTasks(ctx, "nonexistent")
 	if err != nil {
@@ -633,7 +633,7 @@ func TestManager_LoadTasks_Empty(t *testing.T) {
 func TestManager_LoadTasks_MalformedJSON(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create directory and write malformed JSON at project-based path
 	planPath := filepath.Join(tmpDir, ".semspec", "projects", "default", "plans", "malformed")
@@ -649,9 +649,9 @@ func TestManager_LoadTasks_MalformedJSON(t *testing.T) {
 func TestManager_UpdateTaskStatus(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	m.CreatePlan(ctx, "test-update", "Test update")
+	CreatePlan(ctx, m.kv, "test-update", "Test update")
 	task, _ := CreateTask(PlanEntityID("test-update"), "test-update", 1, "Task one")
 	m.SaveTasks(ctx, []Task{*task}, "test-update")
 
@@ -684,9 +684,9 @@ func TestManager_UpdateTaskStatus(t *testing.T) {
 func TestManager_UpdateTaskStatus_InvalidTransition(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	m.CreatePlan(ctx, "test-invalid", "Test invalid transition")
+	CreatePlan(ctx, m.kv, "test-invalid", "Test invalid transition")
 	task, _ := CreateTask(PlanEntityID("test-invalid"), "test-invalid", 1, "Task one")
 	m.SaveTasks(ctx, []Task{*task}, "test-invalid")
 
@@ -700,9 +700,9 @@ func TestManager_UpdateTaskStatus_InvalidTransition(t *testing.T) {
 func TestManager_UpdateTaskStatus_NotFound(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	m.CreatePlan(ctx, "test-notfound", "Test not found")
+	CreatePlan(ctx, m.kv, "test-notfound", "Test not found")
 	m.SaveTasks(ctx, []Task{}, "test-notfound")
 
 	err := m.UpdateTaskStatus(ctx, "test-notfound", TaskEntityID("test-notfound", 999), TaskStatusInProgress)
@@ -714,9 +714,9 @@ func TestManager_UpdateTaskStatus_NotFound(t *testing.T) {
 func TestManager_UpdateTaskStatus_Concurrent(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	m.CreatePlan(ctx, "test-concurrent", "Test concurrent updates")
+	CreatePlan(ctx, m.kv, "test-concurrent", "Test concurrent updates")
 
 	// Create multiple tasks
 	var tasks []Task
@@ -761,9 +761,9 @@ func TestManager_UpdateTaskStatus_Concurrent(t *testing.T) {
 func TestManager_GetTask(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	m.CreatePlan(ctx, "test-get", "Test get")
+	CreatePlan(ctx, m.kv, "test-get", "Test get")
 	task1, _ := CreateTask(PlanEntityID("test-get"), "test-get", 1, "First")
 	task2, _ := CreateTask(PlanEntityID("test-get"), "test-get", 2, "Second")
 	m.SaveTasks(ctx, []Task{*task1, *task2}, "test-get")
@@ -781,9 +781,9 @@ func TestManager_GetTask(t *testing.T) {
 func TestManager_GetTask_NotFound(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	m.CreatePlan(ctx, "test-get-nf", "Test get not found")
+	CreatePlan(ctx, m.kv, "test-get-nf", "Test get not found")
 	m.SaveTasks(ctx, []Task{}, "test-get-nf")
 
 	_, err := m.GetTask(ctx, "test-get-nf", TaskEntityID("test-get-nf", 999))
@@ -967,18 +967,18 @@ func TestTask_JSON(t *testing.T) {
 
 func TestContextCancellation(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
 	// All context-aware operations should fail
-	_, err := m.CreatePlan(ctx, "test", "Test")
+	_, err := CreatePlan(ctx, m.kv, "test", "Test")
 	if err == nil {
 		t.Error("CreatePlan should fail with cancelled context")
 	}
 
-	_, err = m.LoadPlan(ctx, "test")
+	_, err = LoadPlan(ctx, m.kv, "test")
 	if err == nil {
 		t.Error("LoadPlan should fail with cancelled context")
 	}
@@ -1007,10 +1007,10 @@ func TestContextCancellation(t *testing.T) {
 func TestManager_SavePlan_Direct(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create plan
-	plan, err := m.CreatePlan(ctx, "test-direct-save", "Test Direct Save")
+	plan, err := CreatePlan(ctx, m.kv, "test-direct-save", "Test Direct Save")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
@@ -1020,13 +1020,13 @@ func TestManager_SavePlan_Direct(t *testing.T) {
 	plan.Context = "Updated context"
 
 	// Save directly
-	err = m.SavePlan(ctx, plan)
+	err = SavePlan(ctx, m.kv, plan)
 	if err != nil {
 		t.Fatalf("SavePlan failed: %v", err)
 	}
 
 	// Reload and verify
-	loaded, err := m.LoadPlan(ctx, "test-direct-save")
+	loaded, err := LoadPlan(ctx, m.kv, "test-direct-save")
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
@@ -1041,7 +1041,7 @@ func TestManager_SavePlan_Direct(t *testing.T) {
 // TestManager_SavePlan_ContextCancellation tests that SavePlan respects context.
 func TestManager_SavePlan_ContextCancellation(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -1052,7 +1052,7 @@ func TestManager_SavePlan_ContextCancellation(t *testing.T) {
 		Title: "Test",
 	}
 
-	err := m.SavePlan(ctx, plan)
+	err := SavePlan(ctx, m.kv, plan)
 	if err == nil {
 		t.Error("SavePlan should fail with cancelled context")
 	}
@@ -1063,10 +1063,10 @@ func TestManager_SavePlan_ContextCancellation(t *testing.T) {
 func TestPlan_FieldMutations(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create plan
-	plan, err := m.CreatePlan(ctx, "mutations", "Mutations Test")
+	plan, err := CreatePlan(ctx, m.kv, "mutations", "Mutations Test")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
@@ -1081,12 +1081,12 @@ func TestPlan_FieldMutations(t *testing.T) {
 	}
 
 	// Save
-	if err := m.SavePlan(ctx, plan); err != nil {
+	if err := SavePlan(ctx, m.kv, plan); err != nil {
 		t.Fatalf("SavePlan failed: %v", err)
 	}
 
 	// Reload
-	loaded, err := m.LoadPlan(ctx, "mutations")
+	loaded, err := LoadPlan(ctx, m.kv, "mutations")
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
@@ -1113,9 +1113,9 @@ func TestPlan_FieldMutations(t *testing.T) {
 func TestScope_Mutations(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "scope-mut", "Scope Mutation")
+	plan, err := CreatePlan(ctx, m.kv, "scope-mut", "Scope Mutation")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
@@ -1131,11 +1131,11 @@ func TestScope_Mutations(t *testing.T) {
 	plan.Scope.DoNotTouch = []string{"config.yaml", ".env", "secrets/"}
 
 	// Save and reload
-	if err := m.SavePlan(ctx, plan); err != nil {
+	if err := SavePlan(ctx, m.kv, plan); err != nil {
 		t.Fatalf("SavePlan failed: %v", err)
 	}
 
-	loaded, err := m.LoadPlan(ctx, "scope-mut")
+	loaded, err := LoadPlan(ctx, m.kv, "scope-mut")
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
@@ -1164,7 +1164,7 @@ func TestScope_Mutations(t *testing.T) {
 // Returns the task slice for use in test assertions.
 func setupTestPlanWithTasks(ctx context.Context, t *testing.T, m *Manager, slug, title string, n int) []Task {
 	t.Helper()
-	if _, err := m.CreatePlan(ctx, slug, title); err != nil {
+	if _, err := CreatePlan(ctx, m.kv, slug, title); err != nil {
 		t.Fatalf("CreatePlan(%s) failed: %v", slug, err)
 	}
 	tasks := make([]Task, 0, n)
@@ -1186,7 +1186,7 @@ func setupTestPlanWithTasks(ctx context.Context, t *testing.T, m *Manager, slug,
 func TestManager_ConcurrentReadWrite(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create separate plans for reading and writing
 	setupTestPlanWithTasks(ctx, t, m, "read-plan", "Read Plan", 5)
@@ -1256,9 +1256,9 @@ func TestManager_ConcurrentReadWrite(t *testing.T) {
 func TestTask_LifecycleSequence(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	m.CreatePlan(ctx, "lifecycle", "Lifecycle Test")
+	CreatePlan(ctx, m.kv, "lifecycle", "Lifecycle Test")
 	task, _ := CreateTask(PlanEntityID("lifecycle"), "lifecycle", 1, "Complete lifecycle")
 	m.SaveTasks(ctx, []Task{*task}, "lifecycle")
 
@@ -1312,9 +1312,9 @@ func TestTask_LifecycleSequence(t *testing.T) {
 func TestTask_FailedLifecycle(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	m.CreatePlan(ctx, "failed-lifecycle", "Failed Lifecycle")
+	CreatePlan(ctx, m.kv, "failed-lifecycle", "Failed Lifecycle")
 	task, _ := CreateTask(PlanEntityID("failed-lifecycle"), "failed-lifecycle", 1, "Will fail")
 	m.SaveTasks(ctx, []Task{*task}, "failed-lifecycle")
 
@@ -1348,9 +1348,9 @@ func TestTask_FailedLifecycle(t *testing.T) {
 func TestTask_DirectToFailed(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	m.CreatePlan(ctx, "direct-fail", "Direct Fail")
+	CreatePlan(ctx, m.kv, "direct-fail", "Direct Fail")
 	task, _ := CreateTask(PlanEntityID("direct-fail"), "direct-fail", 1, "Skip to failed")
 	m.SaveTasks(ctx, []Task{*task}, "direct-fail")
 
@@ -1370,9 +1370,9 @@ func TestTask_DirectToFailed(t *testing.T) {
 func TestTask_AcceptanceCriteriaModification(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	m.CreatePlan(ctx, "criteria", "Criteria Test")
+	CreatePlan(ctx, m.kv, "criteria", "Criteria Test")
 	task, _ := CreateTask(PlanEntityID("criteria"), "criteria", 1, "Task with criteria")
 	m.SaveTasks(ctx, []Task{*task}, "criteria")
 
@@ -1403,9 +1403,9 @@ func TestTask_AcceptanceCriteriaModification(t *testing.T) {
 func TestTask_FilesModification(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	m.CreatePlan(ctx, "files-mod", "Files Modification")
+	CreatePlan(ctx, m.kv, "files-mod", "Files Modification")
 	task, _ := CreateTask(PlanEntityID("files-mod"), "files-mod", 1, "Task with files")
 	m.SaveTasks(ctx, []Task{*task}, "files-mod")
 
@@ -1435,7 +1435,7 @@ func TestTask_FilesModification(t *testing.T) {
 func TestManager_SavePlan_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	plan := &Plan{
 		ID:    PlanEntityID("test"),
@@ -1443,7 +1443,7 @@ func TestManager_SavePlan_InvalidSlug(t *testing.T) {
 		Title: "Test",
 	}
 
-	err := m.SavePlan(ctx, plan)
+	err := SavePlan(ctx, m.kv, plan)
 	if !errors.Is(err, ErrInvalidSlug) {
 		t.Errorf("expected ErrInvalidSlug, got %v", err)
 	}
@@ -1453,7 +1453,7 @@ func TestManager_SavePlan_InvalidSlug(t *testing.T) {
 func TestManager_LoadTasks_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	_, err := m.LoadTasks(ctx, "../invalid")
 	if !errors.Is(err, ErrInvalidSlug) {
@@ -1465,7 +1465,7 @@ func TestManager_LoadTasks_InvalidSlug(t *testing.T) {
 func TestManager_SaveTasks_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	err := m.SaveTasks(ctx, []Task{}, "../invalid")
 	if !errors.Is(err, ErrInvalidSlug) {
@@ -1477,7 +1477,7 @@ func TestManager_SaveTasks_InvalidSlug(t *testing.T) {
 func TestManager_UpdateTaskStatus_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	err := m.UpdateTaskStatus(ctx, "../invalid", TaskEntityID("test", 1), TaskStatusInProgress)
 	if !errors.Is(err, ErrInvalidSlug) {
@@ -1489,7 +1489,7 @@ func TestManager_UpdateTaskStatus_InvalidSlug(t *testing.T) {
 func TestManager_GetTask_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	_, err := m.GetTask(ctx, "../invalid", TaskEntityID("test", 1))
 	if !errors.Is(err, ErrInvalidSlug) {
@@ -1501,9 +1501,9 @@ func TestManager_GetTask_InvalidSlug(t *testing.T) {
 func TestManager_UpdateTaskStatus_InvalidStatus(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	m.CreatePlan(ctx, "inv-status", "Invalid Status")
+	CreatePlan(ctx, m.kv, "inv-status", "Invalid Status")
 	task, _ := CreateTask(PlanEntityID("inv-status"), "inv-status", 1, "Task")
 	m.SaveTasks(ctx, []Task{*task}, "inv-status")
 
@@ -1517,16 +1517,16 @@ func TestManager_UpdateTaskStatus_InvalidStatus(t *testing.T) {
 func TestManager_UpdatePlan(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "test-update", "Original Title")
+	plan, err := CreatePlan(ctx, m.kv, "test-update", "Original Title")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
 
 	plan.Goal = "Original goal"
 	plan.Context = "Original context"
-	if err := m.SavePlan(ctx, plan); err != nil {
+	if err := SavePlan(ctx, m.kv, plan); err != nil {
 		t.Fatalf("SavePlan failed: %v", err)
 	}
 
@@ -1537,7 +1537,7 @@ func TestManager_UpdatePlan(t *testing.T) {
 
 	// Multi-field update
 	title2, goal2, context2 := "Title 2", "Goal 2", "Context 2"
-	updated, err = m.UpdatePlan(ctx, plan.Slug, UpdatePlanRequest{
+	updated, err = UpdatePlan(ctx, m.kv, plan.Slug, UpdatePlanRequest{
 		Title:   &title2,
 		Goal:    &goal2,
 		Context: &context2,
@@ -1557,7 +1557,7 @@ func TestManager_UpdatePlan(t *testing.T) {
 // Returns the updated plan.
 func assertUpdatePlanTitle(t *testing.T, ctx context.Context, m *Manager, slug, newTitle, wantGoal string) *Plan {
 	t.Helper()
-	updated, err := m.UpdatePlan(ctx, slug, UpdatePlanRequest{Title: &newTitle})
+	updated, err := UpdatePlan(ctx, m.kv, slug, UpdatePlanRequest{Title: &newTitle})
 	if err != nil {
 		t.Fatalf("UpdatePlan (title) failed: %v", err)
 	}
@@ -1573,7 +1573,7 @@ func assertUpdatePlanTitle(t *testing.T, ctx context.Context, m *Manager, slug, 
 // assertUpdatePlanGoal updates only the goal and verifies the title is unchanged.
 func assertUpdatePlanGoal(t *testing.T, ctx context.Context, m *Manager, slug, newGoal, wantTitle string) {
 	t.Helper()
-	updated, err := m.UpdatePlan(ctx, slug, UpdatePlanRequest{Goal: &newGoal})
+	updated, err := UpdatePlan(ctx, m.kv, slug, UpdatePlanRequest{Goal: &newGoal})
 	if err != nil {
 		t.Fatalf("UpdatePlan (goal) failed: %v", err)
 	}
@@ -1588,7 +1588,7 @@ func assertUpdatePlanGoal(t *testing.T, ctx context.Context, m *Manager, slug, n
 // assertUpdatePlanContext updates only the context field and verifies the result.
 func assertUpdatePlanContext(t *testing.T, ctx context.Context, m *Manager, slug, newContext string) {
 	t.Helper()
-	updated, err := m.UpdatePlan(ctx, slug, UpdatePlanRequest{Context: &newContext})
+	updated, err := UpdatePlan(ctx, m.kv, slug, UpdatePlanRequest{Context: &newContext})
 	if err != nil {
 		t.Fatalf("UpdatePlan (context) failed: %v", err)
 	}
@@ -1600,7 +1600,7 @@ func assertUpdatePlanContext(t *testing.T, ctx context.Context, m *Manager, slug
 // assertPlanFieldsPersisted loads the plan from disk and verifies the given field values.
 func assertPlanFieldsPersisted(t *testing.T, ctx context.Context, m *Manager, slug, wantTitle, wantGoal, wantContext string) {
 	t.Helper()
-	loaded, err := m.LoadPlan(ctx, slug)
+	loaded, err := LoadPlan(ctx, m.kv, slug)
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
@@ -1619,11 +1619,11 @@ func assertPlanFieldsPersisted(t *testing.T, ctx context.Context, m *Manager, sl
 func TestManager_UpdatePlan_NotFound(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	title := "New Title"
 	req := UpdatePlanRequest{Title: &title}
-	_, err := m.UpdatePlan(ctx, "nonexistent", req)
+	_, err := UpdatePlan(ctx, m.kv, "nonexistent", req)
 	if !errors.Is(err, ErrPlanNotFound) {
 		t.Errorf("expected ErrPlanNotFound, got %v", err)
 	}
@@ -1633,7 +1633,7 @@ func TestManager_UpdatePlan_NotFound(t *testing.T) {
 func TestManager_UpdatePlan_StateGuards(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	tests := []struct {
 		name    string
@@ -1655,13 +1655,13 @@ func TestManager_UpdatePlan_StateGuards(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create plan with specific status
 			slug := "plan-" + strings.ReplaceAll(tt.name, "_", "-")
-			plan, err := m.CreatePlan(ctx, slug, "Test Plan")
+			plan, err := CreatePlan(ctx, m.kv, slug, "Test Plan")
 			if err != nil {
 				t.Fatalf("CreatePlan failed: %v", err)
 			}
 
 			plan.Status = tt.status
-			err = m.SavePlan(ctx, plan)
+			err = SavePlan(ctx, m.kv, plan)
 			if err != nil {
 				t.Fatalf("SavePlan failed: %v", err)
 			}
@@ -1669,7 +1669,7 @@ func TestManager_UpdatePlan_StateGuards(t *testing.T) {
 			// Try to update
 			newTitle := "Updated Title"
 			req := UpdatePlanRequest{Title: &newTitle}
-			_, err = m.UpdatePlan(ctx, plan.Slug, req)
+			_, err = UpdatePlan(ctx, m.kv, plan.Slug, req)
 
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
@@ -1688,10 +1688,10 @@ func TestManager_UpdatePlan_StateGuards(t *testing.T) {
 func TestManager_UpdatePlan_BlockedByTasks(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Test 1: Plan with only pending tasks should be updatable
-	plan1, err := m.CreatePlan(ctx, "task-pending-ok", "Task Pending OK")
+	plan1, err := CreatePlan(ctx, m.kv, "task-pending-ok", "Task Pending OK")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
@@ -1701,13 +1701,13 @@ func TestManager_UpdatePlan_BlockedByTasks(t *testing.T) {
 
 	newTitle := "Updated Title"
 	updateReq := UpdatePlanRequest{Title: &newTitle}
-	_, err = m.UpdatePlan(ctx, plan1.Slug, updateReq)
+	_, err = UpdatePlan(ctx, m.kv, plan1.Slug, updateReq)
 	if err != nil {
 		t.Errorf("should allow update with pending task, got: %v", err)
 	}
 
 	// Test 2: Plan with in_progress task should be blocked
-	plan2, err := m.CreatePlan(ctx, "task-inprogress-blocked", "Task InProgress Blocked")
+	plan2, err := CreatePlan(ctx, m.kv, "task-inprogress-blocked", "Task InProgress Blocked")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
@@ -1717,13 +1717,13 @@ func TestManager_UpdatePlan_BlockedByTasks(t *testing.T) {
 	m.UpdateTaskStatus(ctx, plan2.Slug, task2.ID, TaskStatusInProgress)
 
 	updateReq = UpdatePlanRequest{Title: &newTitle}
-	_, err = m.UpdatePlan(ctx, plan2.Slug, updateReq)
+	_, err = UpdatePlan(ctx, m.kv, plan2.Slug, updateReq)
 	if !errors.Is(err, ErrPlanNotUpdatable) {
 		t.Errorf("expected ErrPlanNotUpdatable with in_progress task, got: %v", err)
 	}
 
 	// Test 3: Plan with completed task should be blocked
-	plan3, err := m.CreatePlan(ctx, "task-completed-blocked", "Task Completed Blocked")
+	plan3, err := CreatePlan(ctx, m.kv, "task-completed-blocked", "Task Completed Blocked")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
@@ -1734,13 +1734,13 @@ func TestManager_UpdatePlan_BlockedByTasks(t *testing.T) {
 	m.UpdateTaskStatus(ctx, plan3.Slug, task3.ID, TaskStatusCompleted)
 
 	updateReq = UpdatePlanRequest{Title: &newTitle}
-	_, err = m.UpdatePlan(ctx, plan3.Slug, updateReq)
+	_, err = UpdatePlan(ctx, m.kv, plan3.Slug, updateReq)
 	if !errors.Is(err, ErrPlanNotUpdatable) {
 		t.Errorf("expected ErrPlanNotUpdatable with completed task, got: %v", err)
 	}
 
 	// Test 4: Plan with failed task should be blocked
-	plan4, err := m.CreatePlan(ctx, "task-failed-blocked", "Task Failed Blocked")
+	plan4, err := CreatePlan(ctx, m.kv, "task-failed-blocked", "Task Failed Blocked")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
@@ -1751,7 +1751,7 @@ func TestManager_UpdatePlan_BlockedByTasks(t *testing.T) {
 	m.UpdateTaskStatus(ctx, plan4.Slug, task4.ID, TaskStatusFailed)
 
 	updateReq = UpdatePlanRequest{Title: &newTitle}
-	_, err = m.UpdatePlan(ctx, plan4.Slug, updateReq)
+	_, err = UpdatePlan(ctx, m.kv, plan4.Slug, updateReq)
 	if !errors.Is(err, ErrPlanNotUpdatable) {
 		t.Errorf("expected ErrPlanNotUpdatable with failed task, got: %v", err)
 	}
@@ -1761,10 +1761,10 @@ func TestManager_UpdatePlan_BlockedByTasks(t *testing.T) {
 func TestManager_DeletePlan(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create plan
-	plan, err := m.CreatePlan(ctx, "test-delete", "Test Delete")
+	plan, err := CreatePlan(ctx, m.kv, "test-delete", "Test Delete")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
@@ -1776,7 +1776,7 @@ func TestManager_DeletePlan(t *testing.T) {
 	}
 
 	// Delete plan
-	err = m.DeletePlan(ctx, plan.Slug)
+	err = DeletePlan(ctx, m.kv, plan.Slug)
 	if err != nil {
 		t.Fatalf("DeletePlan failed: %v", err)
 	}
@@ -1787,7 +1787,7 @@ func TestManager_DeletePlan(t *testing.T) {
 	}
 
 	// Verify LoadPlan returns not found
-	_, err = m.LoadPlan(ctx, plan.Slug)
+	_, err = LoadPlan(ctx, m.kv, plan.Slug)
 	if !errors.Is(err, ErrPlanNotFound) {
 		t.Errorf("expected ErrPlanNotFound after delete, got: %v", err)
 	}
@@ -1797,9 +1797,9 @@ func TestManager_DeletePlan(t *testing.T) {
 func TestManager_DeletePlan_NotFound(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	err := m.DeletePlan(ctx, "nonexistent")
+	err := DeletePlan(ctx, m.kv, "nonexistent")
 	if !errors.Is(err, ErrPlanNotFound) {
 		t.Errorf("expected ErrPlanNotFound, got %v", err)
 	}
@@ -1809,7 +1809,7 @@ func TestManager_DeletePlan_NotFound(t *testing.T) {
 func TestManager_DeletePlan_StateGuards(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	tests := []struct {
 		name    string
@@ -1831,19 +1831,19 @@ func TestManager_DeletePlan_StateGuards(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create plan with specific status
 			slug := "delplan-" + strings.ReplaceAll(tt.name, "_", "-")
-			plan, err := m.CreatePlan(ctx, slug, "Test Plan")
+			plan, err := CreatePlan(ctx, m.kv, slug, "Test Plan")
 			if err != nil {
 				t.Fatalf("CreatePlan failed: %v", err)
 			}
 
 			plan.Status = tt.status
-			err = m.SavePlan(ctx, plan)
+			err = SavePlan(ctx, m.kv, plan)
 			if err != nil {
 				t.Fatalf("SavePlan failed: %v", err)
 			}
 
 			// Try to delete
-			err = m.DeletePlan(ctx, plan.Slug)
+			err = DeletePlan(ctx, m.kv, plan.Slug)
 
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
@@ -1866,9 +1866,9 @@ func TestManager_DeletePlan_StateGuards(t *testing.T) {
 func TestManager_DeletePlan_BlockedByTasks(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "delete-task-blocked", "Delete Task Blocked")
+	plan, err := CreatePlan(ctx, m.kv, "delete-task-blocked", "Delete Task Blocked")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
@@ -1879,7 +1879,7 @@ func TestManager_DeletePlan_BlockedByTasks(t *testing.T) {
 	m.UpdateTaskStatus(ctx, plan.Slug, task.ID, TaskStatusInProgress)
 
 	// Delete should be blocked
-	err = m.DeletePlan(ctx, plan.Slug)
+	err = DeletePlan(ctx, m.kv, plan.Slug)
 	if !errors.Is(err, ErrPlanNotDeletable) {
 		t.Errorf("expected ErrPlanNotDeletable with in_progress task, got: %v", err)
 	}
@@ -1895,22 +1895,22 @@ func TestManager_DeletePlan_BlockedByTasks(t *testing.T) {
 func TestManager_ArchivePlan_StatusUpdate(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
 	// Create plan
-	plan, err := m.CreatePlan(ctx, "test-archive", "Test Archive")
+	plan, err := CreatePlan(ctx, m.kv, "test-archive", "Test Archive")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
 
 	// Archive plan
-	err = m.ArchivePlan(ctx, plan.Slug)
+	err = ArchivePlan(ctx, m.kv, plan.Slug)
 	if err != nil {
 		t.Fatalf("ArchivePlan failed: %v", err)
 	}
 
 	// Verify plan still exists but status is archived
-	loaded, err := m.LoadPlan(ctx, plan.Slug)
+	loaded, err := LoadPlan(ctx, m.kv, plan.Slug)
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
@@ -1930,9 +1930,9 @@ func TestManager_ArchivePlan_StatusUpdate(t *testing.T) {
 func TestManager_ArchivePlan_NotFound(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	err := m.ArchivePlan(ctx, "nonexistent")
+	err := ArchivePlan(ctx, m.kv, "nonexistent")
 	if !errors.Is(err, ErrPlanNotFound) {
 		t.Errorf("expected ErrPlanNotFound, got %v", err)
 	}
@@ -1944,14 +1944,12 @@ func TestExtractProjectSlug(t *testing.T) {
 		projectID string
 		want      string
 	}{
-		{"6-part format", "c360.semspec.workflow.project.project.my-project", "my-project"},
-		{"6-part default", "c360.semspec.workflow.project.project.default", "default"},
-		{"legacy 4-part", "semspec.local.project.my-project", "my-project"},
-		{"legacy default", "semspec.local.project.default", "default"},
+		{"valid", "semspec.local.wf.project.project.my-project", "my-project"},
+		{"default project", "semspec.local.wf.project.project.default", "default"},
 		{"empty string", "", ""},
 		{"malformed", "random.string", ""},
-		{"partial prefix", "semspec.local.project.", ""},
-		{"partial 6-part", "c360.semspec.workflow.project.project.", ""},
+		{"partial prefix", "semspec.local.wf.project.project.", ""},
+		{"wrong format", "c360.semspec.workflow.project.project.old", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

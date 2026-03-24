@@ -42,6 +42,7 @@ type Component struct {
 	logger       *slog.Logger
 	repoRoot     string
 	tripleWriter *graphutil.TripleWriter
+	kvStore      *natsclient.KVStore
 
 	// Lifecycle
 	running   bool
@@ -141,6 +142,14 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
+	// Initialize ENTITY_STATES KV store for workflow Manager operations.
+	if entityBucket, kvErr := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES"); kvErr != nil {
+		c.logger.Warn("ENTITY_STATES bucket not available — workflow state operations will use disk fallback",
+			"error", kvErr)
+	} else {
+		c.kvStore = c.natsClient.NewKVStore(entityBucket)
+	}
+
 	// Push-based consumption — messages arrive via callback, no polling delay.
 	cfg := natsclient.StreamConsumerConfig{
 		StreamName:    c.config.StreamName,
@@ -235,10 +244,10 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 // handleCascadeRequest executes the cascade and publishes the accepted event.
 func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.ChangeProposalCascadeRequest) error {
-	manager := workflow.NewManager(c.repoRoot)
+	manager := workflow.NewManager(c.repoRoot, c.kvStore)
 
 	// Load all proposals for the plan and find the one we need.
-	proposals, err := manager.LoadChangeProposals(ctx, req.Slug)
+	proposals, err := workflow.LoadChangeProposals(ctx, c.kvStore, req.Slug)
 	if err != nil {
 		return fmt.Errorf("load change proposals for slug %q: %w", req.Slug, err)
 	}
@@ -267,7 +276,7 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 		"tasks_dirtied", result.TasksDirtied)
 
 	// Write cascade result to graph as entity triples.
-	entityID := fmt.Sprintf("local.semspec.workflow.cascade.execution.%s-%s", req.Slug, req.ProposalID)
+	entityID := fmt.Sprintf("%s.exec.cascade.run.%s-%s", workflow.EntityPrefix(), req.Slug, req.ProposalID)
 	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, "cascaded"); err != nil {
 		c.logger.Error("Failed to write cascade phase triple", "entity_id", entityID, "error", err)
 	}

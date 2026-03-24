@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,6 +44,7 @@ type Component struct {
 	logger     *slog.Logger
 
 	llmClient llmCompleter
+	kvStore   *natsclient.KVStore
 
 	// Lifecycle
 	running   bool
@@ -186,6 +186,14 @@ func (c *Component) Start(ctx context.Context) error {
 	subCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.mu.Unlock()
+
+	// Initialize ENTITY_STATES KV store for workflow Manager operations.
+	if entityBucket, kvErr := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES"); kvErr != nil {
+		c.logger.Warn("ENTITY_STATES bucket not available — workflow state operations will use disk fallback",
+			"error", kvErr)
+	} else {
+		c.kvStore = c.natsClient.NewKVStore(entityBucket)
+	}
 
 	// Push-based consumption — messages arrive via callback, no polling delay.
 	cfg := natsclient.StreamConsumerConfig{
@@ -347,16 +355,6 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 // It requests planning context from the context-builder (graph-first) before calling
 // the LLM, and retries up to maxFormatRetries times if the response is malformed JSON.
 func (c *Component) generateScenarios(ctx context.Context, trigger *payloads.ScenarioGeneratorRequest) ([]workflow.Scenario, error) {
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		var err error
-		repoRoot, err = os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("get working directory: %w", err)
-		}
-	}
-	manager := workflow.NewManager(repoRoot)
-
 	// Use plan content from trigger payload when available (preferred path — avoids disk read).
 	// Fall back to loading plan.json for backward compatibility with older dispatchers.
 	var plan *workflow.Plan
@@ -369,7 +367,7 @@ func (c *Component) generateScenarios(ctx context.Context, trigger *payloads.Sce
 		}
 	} else {
 		// Fallback: load from disk when trigger doesn't carry plan content.
-		loadedPlan, err := manager.LoadPlan(ctx, trigger.Slug)
+		loadedPlan, err := workflow.LoadPlan(ctx, c.kvStore, trigger.Slug)
 		if err != nil {
 			return nil, fmt.Errorf("load plan: %w", err)
 		}
@@ -377,7 +375,7 @@ func (c *Component) generateScenarios(ctx context.Context, trigger *payloads.Sce
 	}
 
 	// Load and find the specific requirement.
-	requirements, err := manager.LoadRequirements(ctx, trigger.Slug)
+	requirements, err := workflow.LoadRequirements(ctx, c.kvStore, trigger.Slug)
 	if err != nil {
 		return nil, fmt.Errorf("load requirements: %w", err)
 	}
@@ -636,18 +634,8 @@ func (c *Component) saveAndCheckCompletion(ctx context.Context, trigger *payload
 		return fmt.Errorf("context cancelled: %w", err)
 	}
 
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		var err error
-		repoRoot, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("get working directory: %w", err)
-		}
-	}
-	manager := workflow.NewManager(repoRoot)
-
 	// Load existing scenarios so we can append (or replace for this requirement).
-	existing, err := manager.LoadScenarios(ctx, trigger.Slug)
+	existing, err := workflow.LoadScenarios(ctx, c.kvStore, trigger.Slug)
 	if err != nil {
 		return fmt.Errorf("load existing scenarios: %w", err)
 	}
@@ -661,7 +649,7 @@ func (c *Component) saveAndCheckCompletion(ctx context.Context, trigger *payload
 	}
 	merged = append(merged, newScenarios...)
 
-	if err := manager.SaveScenarios(ctx, merged, trigger.Slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, c.kvStore, merged, trigger.Slug); err != nil {
 		return fmt.Errorf("save scenarios: %w", err)
 	}
 
@@ -672,7 +660,7 @@ func (c *Component) saveAndCheckCompletion(ctx context.Context, trigger *payload
 		"total_scenario_count", len(merged))
 
 	// Check whether every requirement now has at least one scenario.
-	requirements, err := manager.LoadRequirements(ctx, trigger.Slug)
+	requirements, err := workflow.LoadRequirements(ctx, c.kvStore, trigger.Slug)
 	if err != nil {
 		return fmt.Errorf("load requirements for coverage check: %w", err)
 	}
@@ -706,12 +694,12 @@ func (c *Component) saveAndCheckCompletion(ctx context.Context, trigger *payload
 		"slug", trigger.Slug,
 		"scenario_count", len(merged))
 
-	plan, err := manager.LoadPlan(ctx, trigger.Slug)
+	plan, err := workflow.LoadPlan(ctx, c.kvStore, trigger.Slug)
 	if err != nil {
 		return fmt.Errorf("load plan for status transition: %w", err)
 	}
 
-	if err := manager.SetPlanStatus(ctx, plan, workflow.StatusScenariosGenerated); err != nil {
+	if err := workflow.SetPlanStatus(ctx, c.kvStore, plan, workflow.StatusScenariosGenerated); err != nil {
 		// Log and continue — event publication is more important than status update.
 		c.logger.Warn("Failed to transition plan status to scenarios_generated",
 			"slug", trigger.Slug, "error", err)

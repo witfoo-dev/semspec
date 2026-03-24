@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/c360studio/semstreams/natsclient"
 )
 
 // PlanFile is the filename for plan metadata within a plan directory.
@@ -47,56 +47,43 @@ func ValidateSlug(slug string) error {
 
 // CreatePlan creates a new plan in draft mode (Approved=false).
 // Plans are created in the default project at .semspec/projects/default/plans/{slug}/.
-func (m *Manager) CreatePlan(ctx context.Context, slug, title string) (*Plan, error) {
-	// Delegate to project-based method with default project
-	return m.CreateProjectPlan(ctx, DefaultProjectSlug, slug, title)
+func CreatePlan(ctx context.Context, kv *natsclient.KVStore, slug, title string) (*Plan, error) {
+	// Delegate to project-based function with default project
+	return CreateProjectPlan(ctx, kv, DefaultProjectSlug, slug, title)
 }
 
-// LoadPlan loads a plan from .semspec/projects/default/plans/{slug}/plan.json.
-func (m *Manager) LoadPlan(ctx context.Context, slug string) (*Plan, error) {
-	// Delegate to project-based method with default project
-	return m.LoadProjectPlan(ctx, DefaultProjectSlug, slug)
+// LoadPlan loads a plan from ENTITY_STATES KV bucket (default project).
+func LoadPlan(ctx context.Context, kv *natsclient.KVStore, slug string) (*Plan, error) {
+	// Delegate to project-based function with default project
+	return LoadProjectPlan(ctx, kv, DefaultProjectSlug, slug)
 }
 
-// SavePlan saves a plan to .semspec/projects/{project}/plans/{slug}/plan.json.
+// SavePlan saves a plan to ENTITY_STATES KV bucket.
 // The project is determined from plan.ProjectID, defaulting to "default" project.
-func (m *Manager) SavePlan(ctx context.Context, plan *Plan) error {
+func SavePlan(ctx context.Context, kv *natsclient.KVStore, plan *Plan) error {
 	// Extract project slug from ProjectID or use default
 	projectSlug := ExtractProjectSlug(plan.ProjectID)
 	if projectSlug == "" {
 		projectSlug = DefaultProjectSlug
 	}
-	return m.SaveProjectPlan(ctx, projectSlug, plan)
+	return SaveProjectPlan(ctx, kv, projectSlug, plan)
 }
 
 // ExtractProjectSlug extracts the project slug from an entity ID.
-// Supports both current 6-part format (c360.semspec.workflow.project.project.{slug})
-// and legacy 4-part format (semspec.local.project.{slug}).
+// Format: {prefix}.wf.project.project.{slug}
 // Returns empty string if the format is invalid.
 func ExtractProjectSlug(projectID string) string {
-	const currentPrefix = "c360.semspec.workflow.project.project."
-	const legacyPrefix = "semspec.local.project."
-	switch {
-	case strings.HasPrefix(projectID, currentPrefix):
-		slug := strings.TrimPrefix(projectID, currentPrefix)
-		if slug == "" {
-			return ""
-		}
-		return slug
-	case strings.HasPrefix(projectID, legacyPrefix):
-		slug := strings.TrimPrefix(projectID, legacyPrefix)
-		if slug == "" {
-			return ""
-		}
-		return slug
-	default:
+	prefix := EntityPrefix() + ".wf.project.project."
+	slug, ok := strings.CutPrefix(projectID, prefix)
+	if !ok || slug == "" {
 		return ""
 	}
+	return slug
 }
 
 // ApprovePlan transitions a plan from draft to approved status.
 // Sets Approved=true, Status=StatusApproved, and records ApprovedAt timestamp.
-func (m *Manager) ApprovePlan(ctx context.Context, plan *Plan) error {
+func ApprovePlan(ctx context.Context, kv *natsclient.KVStore, plan *Plan) error {
 	if plan.Approved {
 		return fmt.Errorf("%w: %s", ErrAlreadyApproved, plan.Slug)
 	}
@@ -106,28 +93,26 @@ func (m *Manager) ApprovePlan(ctx context.Context, plan *Plan) error {
 	plan.ApprovedAt = &now
 	plan.Status = StatusApproved
 
-	return m.SavePlan(ctx, plan)
+	return SavePlan(ctx, kv, plan)
 }
 
 // SetPlanStatus transitions a plan to a new status, validating the transition.
-// This is the low-level method for status changes that don't have dedicated methods.
-func (m *Manager) SetPlanStatus(ctx context.Context, plan *Plan, target Status) error {
+// This is the low-level function for status changes that don't have dedicated functions.
+func SetPlanStatus(ctx context.Context, kv *natsclient.KVStore, plan *Plan, target Status) error {
 	current := plan.EffectiveStatus()
 	if !current.CanTransitionTo(target) {
 		return fmt.Errorf("%w: %s → %s", ErrInvalidTransition, current, target)
 	}
 	plan.Status = target
-	return m.SavePlan(ctx, plan)
+	return SavePlan(ctx, kv, plan)
 }
 
-// PlanExists checks if a plan exists for the given slug in the default project.
-func (m *Manager) PlanExists(slug string) bool {
+// PlanExists checks if a plan exists for the given slug via ENTITY_STATES KV.
+func PlanExists(ctx context.Context, kv *natsclient.KVStore, slug string) bool {
 	if err := ValidateSlug(slug); err != nil {
 		return false
 	}
-	planPath := filepath.Join(m.ProjectPlanPath(DefaultProjectSlug, slug), PlanFile)
-	_, err := os.Stat(planPath)
-	return err == nil
+	return kvEntityExists(ctx, kv, PlanEntityID(slug))
 }
 
 // ListPlansResult contains the results of listing plans, including any
@@ -143,9 +128,9 @@ type ListPlansResult struct {
 
 // ListPlans returns all plans in the default project.
 // Returns partial results along with any errors encountered loading individual plans.
-func (m *Manager) ListPlans(ctx context.Context) (*ListPlansResult, error) {
-	// Delegate to project-based method with default project
-	return m.ListProjectPlans(ctx, DefaultProjectSlug)
+func ListPlans(ctx context.Context, kv *natsclient.KVStore) (*ListPlansResult, error) {
+	// Delegate to project-based function with default project
+	return ListProjectPlans(ctx, kv, DefaultProjectSlug)
 }
 
 // UpdatePlanRequest contains parameters for updating a plan.
@@ -159,9 +144,8 @@ type UpdatePlanRequest struct {
 // UpdatePlan updates plan fields.
 // Can update: Title, Goal, Context
 // State guard: Cannot update if Status >= StatusImplementing
-// State guard: Cannot update if any tasks are in_progress, completed, or failed
 // Returns the updated plan.
-func (m *Manager) UpdatePlan(ctx context.Context, slug string, req UpdatePlanRequest) (*Plan, error) {
+func UpdatePlan(ctx context.Context, kv *natsclient.KVStore, slug string, req UpdatePlanRequest) (*Plan, error) {
 	if err := ValidateSlug(slug); err != nil {
 		return nil, err
 	}
@@ -172,7 +156,7 @@ func (m *Manager) UpdatePlan(ctx context.Context, slug string, req UpdatePlanReq
 	}
 
 	// Load the plan
-	plan, err := m.LoadPlan(ctx, slug)
+	plan, err := LoadPlan(ctx, kv, slug)
 	if err != nil {
 		return nil, err
 	}
@@ -181,18 +165,6 @@ func (m *Manager) UpdatePlan(ctx context.Context, slug string, req UpdatePlanReq
 	effectiveStatus := plan.EffectiveStatus()
 	if effectiveStatus == StatusImplementing || effectiveStatus == StatusComplete || effectiveStatus == StatusArchived {
 		return nil, fmt.Errorf("%w: cannot update plan with status %s", ErrPlanNotUpdatable, effectiveStatus)
-	}
-
-	// State guard: Cannot update if any tasks are in_progress, completed, or failed
-	tasks, err := m.LoadTasks(ctx, slug)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load tasks: %w", err)
-	}
-
-	for _, task := range tasks {
-		if task.Status == TaskStatusInProgress || task.Status == TaskStatusCompleted || task.Status == TaskStatusFailed {
-			return nil, fmt.Errorf("%w: task %s is %s", ErrPlanNotUpdatable, task.ID, task.Status)
-		}
 	}
 
 	// Apply updates
@@ -207,18 +179,16 @@ func (m *Manager) UpdatePlan(ctx context.Context, slug string, req UpdatePlanReq
 	}
 
 	// Save the updated plan
-	if err := m.SavePlan(ctx, plan); err != nil {
+	if err := SavePlan(ctx, kv, plan); err != nil {
 		return nil, err
 	}
 
 	return plan, nil
 }
 
-// DeletePlan permanently deletes a plan.
-// Removes the .semspec/plans/{slug} directory.
+// DeletePlan permanently deletes a plan by removing its entity from KV.
 // State guard: Cannot delete if Status >= StatusImplementing
-// State guard: Cannot delete if any tasks are in_progress, completed, or failed
-func (m *Manager) DeletePlan(ctx context.Context, slug string) error {
+func DeletePlan(ctx context.Context, kv *natsclient.KVStore, slug string) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
 	}
@@ -229,7 +199,7 @@ func (m *Manager) DeletePlan(ctx context.Context, slug string) error {
 	}
 
 	// Verify plan exists
-	plan, err := m.LoadPlan(ctx, slug)
+	plan, err := LoadPlan(ctx, kv, slug)
 	if err != nil {
 		return err
 	}
@@ -240,36 +210,17 @@ func (m *Manager) DeletePlan(ctx context.Context, slug string) error {
 		return fmt.Errorf("%w: cannot delete plan with status %s", ErrPlanNotDeletable, effectiveStatus)
 	}
 
-	// State guard: Cannot delete if any tasks are in_progress, completed, or failed
-	tasks, err := m.LoadTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("failed to load tasks: %w", err)
-	}
-
-	for _, task := range tasks {
-		if task.Status == TaskStatusInProgress || task.Status == TaskStatusCompleted || task.Status == TaskStatusFailed {
-			return fmt.Errorf("%w: task %s is %s", ErrPlanNotDeletable, task.ID, task.Status)
-		}
-	}
-
-	// Delete the plan directory
-	projectSlug := ExtractProjectSlug(plan.ProjectID)
-	if projectSlug == "" {
-		projectSlug = DefaultProjectSlug
-	}
-	planPath := m.ProjectPlanPath(projectSlug, slug)
-
-	if err := os.RemoveAll(planPath); err != nil {
-		return fmt.Errorf("failed to delete plan directory: %w", err)
+	// Delete plan entity from KV
+	if err := kv.Delete(ctx, PlanEntityID(slug)); err != nil && !natsclient.IsKVNotFoundError(err) {
+		return fmt.Errorf("failed to delete plan: %w", err)
 	}
 
 	return nil
 }
 
 // ArchivePlan soft deletes a plan by setting status to archived.
-// Keeps the plan files intact.
-// Note: Unlike DeletePlan, archiving is allowed from any state.
-func (m *Manager) ArchivePlan(ctx context.Context, slug string) error {
+// Note: Unlike DeletePlan, archiving is allowed from any non-terminal state.
+func ArchivePlan(ctx context.Context, kv *natsclient.KVStore, slug string) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
 	}
@@ -280,7 +231,7 @@ func (m *Manager) ArchivePlan(ctx context.Context, slug string) error {
 	}
 
 	// Load the plan
-	plan, err := m.LoadPlan(ctx, slug)
+	plan, err := LoadPlan(ctx, kv, slug)
 	if err != nil {
 		return err
 	}
@@ -291,21 +242,47 @@ func (m *Manager) ArchivePlan(ctx context.Context, slug string) error {
 		return fmt.Errorf("%w: cannot archive plan with status %s", ErrPlanNotDeletable, effectiveStatus)
 	}
 
-	// State guard: Cannot archive if any tasks are in_progress, completed, or failed
-	tasks, err := m.LoadTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("failed to load tasks: %w", err)
-	}
-
-	for _, task := range tasks {
-		if task.Status == TaskStatusInProgress || task.Status == TaskStatusCompleted || task.Status == TaskStatusFailed {
-			return fmt.Errorf("%w: task %s is %s", ErrPlanNotDeletable, task.ID, task.Status)
-		}
-	}
-
 	// Set status to archived
 	plan.Status = StatusArchived
 
 	// Save the updated plan
-	return m.SavePlan(ctx, plan)
+	return SavePlan(ctx, kv, plan)
+}
+
+// UnarchivePlan restores an archived plan to complete status.
+func UnarchivePlan(ctx context.Context, kv *natsclient.KVStore, slug string) error {
+	plan, err := LoadPlan(ctx, kv, slug)
+	if err != nil {
+		return err
+	}
+
+	if plan.EffectiveStatus() != StatusArchived {
+		return fmt.Errorf("plan %q is not archived (status: %s)", slug, plan.EffectiveStatus())
+	}
+
+	plan.Status = StatusComplete
+	return SavePlan(ctx, kv, plan)
+}
+
+// ResetPlan returns a failed/rejected plan to approved status and clears
+// generated artifacts (requirements, scenarios) so the pipeline can retry
+// from scratch. The plan's goal, context, and scope are preserved.
+func ResetPlan(ctx context.Context, kv *natsclient.KVStore, slug string) error {
+	plan, err := LoadPlan(ctx, kv, slug)
+	if err != nil {
+		return err
+	}
+
+	status := plan.EffectiveStatus()
+	if !status.CanTransitionTo(StatusApproved) {
+		return fmt.Errorf("cannot reset plan with status %s", status)
+	}
+
+	// Reset status and review fields.
+	plan.Status = StatusApproved
+	plan.ReviewVerdict = ""
+	plan.ReviewSummary = ""
+	plan.ReviewedAt = nil
+
+	return SavePlan(ctx, kv, plan)
 }

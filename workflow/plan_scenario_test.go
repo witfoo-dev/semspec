@@ -9,9 +9,9 @@ import (
 func TestSaveLoadScenarios_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "test-plan", "Test Plan")
+	plan, err := CreatePlan(ctx, m.kv, "test-plan", "Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
@@ -40,11 +40,11 @@ func TestSaveLoadScenarios_RoundTrip(t *testing.T) {
 		},
 	}
 
-	if err := m.SaveScenarios(ctx, scenarios, plan.Slug); err != nil {
+	if err := SaveScenarios(ctx, m.kv, scenarios, plan.Slug); err != nil {
 		t.Fatalf("SaveScenarios() error: %v", err)
 	}
 
-	got, err := m.LoadScenarios(ctx, plan.Slug)
+	got, err := LoadScenarios(ctx, m.kv, plan.Slug)
 	if err != nil {
 		t.Fatalf("LoadScenarios() error: %v", err)
 	}
@@ -81,14 +81,14 @@ func TestSaveLoadScenarios_RoundTrip(t *testing.T) {
 func TestLoadScenarios_MissingFile_ReturnsEmpty(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	plan, err := m.CreatePlan(ctx, "new-plan", "New Plan")
+	plan, err := CreatePlan(ctx, m.kv, "new-plan", "New Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
 
-	got, err := m.LoadScenarios(ctx, plan.Slug)
+	got, err := LoadScenarios(ctx, m.kv, plan.Slug)
 	if err != nil {
 		t.Fatalf("LoadScenarios() on missing file should not error, got: %v", err)
 	}
@@ -100,9 +100,9 @@ func TestLoadScenarios_MissingFile_ReturnsEmpty(t *testing.T) {
 func TestSaveScenarios_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	err := m.SaveScenarios(ctx, []Scenario{}, "invalid slug!")
+	err := SaveScenarios(ctx, m.kv, []Scenario{}, "invalid slug!")
 	if err == nil {
 		t.Error("SaveScenarios() with invalid slug should return error")
 	}
@@ -111,9 +111,9 @@ func TestSaveScenarios_InvalidSlug(t *testing.T) {
 func TestLoadScenarios_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
+	m := NewManager(tmpDir, nil)
 
-	_, err := m.LoadScenarios(ctx, "invalid slug!")
+	_, err := LoadScenarios(ctx, m.kv, "invalid slug!")
 	if err == nil {
 		t.Error("LoadScenarios() with invalid slug should return error")
 	}

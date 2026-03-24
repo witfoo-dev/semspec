@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/c360studio/semstreams/natsclient"
 )
 
 // DefaultProjectSlug is the slug for the auto-created default project.
@@ -48,20 +50,9 @@ func getProjectLock(slug string) *sync.Mutex {
 	return projectLocks[slug]
 }
 
-// getPlanLock returns a mutex for the given project+plan combination.
-func getPlanLock(projectSlug, planSlug string) *sync.Mutex {
-	key := projectSlug + ":" + planSlug
-	projectLocksMu.Lock()
-	defer projectLocksMu.Unlock()
-	if projectLocks[key] == nil {
-		projectLocks[key] = &sync.Mutex{}
-	}
-	return projectLocks[key]
-}
-
 // Project represents a container for related sources and plans.
 type Project struct {
-	// ID is the entity ID for this project (format: c360.semspec.workflow.project.project.{slug}).
+	// ID is the entity ID for this project (format: {prefix}.wf.project.project.{slug}).
 	ID string `json:"id"`
 
 	// Slug is the unique identifier used in file paths.
@@ -380,44 +371,43 @@ func (m *Manager) DeleteProject(ctx context.Context, slug string) error {
 	return nil
 }
 
-// ListProjectPlans returns all plans for a specific project.
-func (m *Manager) ListProjectPlans(ctx context.Context, projectSlug string) (*ListPlansResult, error) {
+// ListProjectPlans returns all plans for a specific project from ENTITY_STATES KV.
+func ListProjectPlans(ctx context.Context, kv *natsclient.KVStore, projectSlug string) (*ListPlansResult, error) {
 	result := &ListPlansResult{
 		Plans:  []*Plan{},
 		Errors: []error{},
 	}
 
-	if err := ValidateSlug(projectSlug); err != nil {
-		return nil, err
-	}
-
-	plansPath := m.ProjectPlansPath(projectSlug)
-
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	entries, err := os.ReadDir(plansPath)
+	prefix := EntityPrefix() + ".wf.plan.plan."
+	keys, err := kv.KeysByPrefix(ctx, prefix)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return result, nil
-		}
-		return nil, fmt.Errorf("failed to read plans directory: %w", err)
+		return result, nil
 	}
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
+	projectEntityID := ProjectEntityID(projectSlug)
+	for _, key := range keys {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
-		plan, err := m.LoadProjectPlan(ctx, projectSlug, entry.Name())
+		entity, err := kvGetEntity(ctx, kv, key)
 		if err != nil {
-			result.Errors = append(result.Errors,
-				fmt.Errorf("failed to load plan %s: %w", entry.Name(), err))
+			result.Errors = append(result.Errors, fmt.Errorf("failed to load plan %s: %w", key, err))
+			continue
+		}
+
+		plan, err := PlanFromEntity(entity)
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("failed to unmarshal plan %s: %w", key, err))
+			continue
+		}
+
+		// Filter by project
+		if projectSlug != "" && plan.ProjectID != "" && plan.ProjectID != projectEntityID {
 			continue
 		}
 
@@ -428,8 +418,8 @@ func (m *Manager) ListProjectPlans(ctx context.Context, projectSlug string) (*Li
 }
 
 // CreateProjectPlan creates a new plan within a project.
-// Uses per-plan locking and atomic directory creation to prevent races.
-func (m *Manager) CreateProjectPlan(ctx context.Context, projectSlug, planSlug, title string) (*Plan, error) {
+// Uses KV existence check (fails if entity already exists).
+func CreateProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug, planSlug, title string) (*Plan, error) {
 	if err := ValidateSlug(projectSlug); err != nil {
 		return nil, err
 	}
@@ -440,40 +430,19 @@ func (m *Manager) CreateProjectPlan(ctx context.Context, projectSlug, planSlug, 
 		return nil, ErrTitleRequired
 	}
 
-	// Ensure project exists (create default if needed)
-	if projectSlug == DefaultProjectSlug {
-		if _, err := m.GetOrCreateDefaultProject(ctx); err != nil {
-			return nil, err
-		}
-	} else if !m.ProjectExists(projectSlug) {
-		return nil, fmt.Errorf("%w: %s", ErrProjectNotFound, projectSlug)
-	}
-
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	// Acquire per-plan lock to prevent concurrent plan creation
-	lock := getPlanLock(projectSlug, planSlug)
-	lock.Lock()
-	defer lock.Unlock()
-
-	planPath := m.ProjectPlanPath(projectSlug, planSlug)
-	planFile := filepath.Join(planPath, PlanFile)
-
-	// Check if plan already exists (under lock, so this is safe)
-	if _, err := os.Stat(planFile); err == nil {
+	// Check if plan already exists via KV
+	entityID := PlanEntityID(planSlug)
+	if kvEntityExists(ctx, kv, entityID) {
 		return nil, fmt.Errorf("%w: %s", ErrPlanExists, planSlug)
-	}
-
-	// Create plan directory if it doesn't exist
-	if err := os.MkdirAll(planPath, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create plan directory: %w", err)
 	}
 
 	now := time.Now()
 	plan := &Plan{
-		ID:        PlanEntityID(planSlug),
+		ID:        entityID,
 		Slug:      planSlug,
 		Title:     title,
 		ProjectID: ProjectEntityID(projectSlug),
@@ -486,19 +455,15 @@ func (m *Manager) CreateProjectPlan(ctx context.Context, projectSlug, planSlug, 
 		},
 	}
 
-	if err := m.SaveProjectPlan(ctx, projectSlug, plan); err != nil {
-		os.RemoveAll(planPath)
+	if err := SaveProjectPlan(ctx, kv, projectSlug, plan); err != nil {
 		return nil, err
 	}
 
 	return plan, nil
 }
 
-// LoadProjectPlan loads a plan from .semspec/projects/{project}/plans/{plan}/plan.json.
-func (m *Manager) LoadProjectPlan(ctx context.Context, projectSlug, planSlug string) (*Plan, error) {
-	if err := ValidateSlug(projectSlug); err != nil {
-		return nil, err
-	}
+// LoadProjectPlan loads a plan from ENTITY_STATES KV bucket.
+func LoadProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug, planSlug string) (*Plan, error) {
 	if err := ValidateSlug(planSlug); err != nil {
 		return nil, err
 	}
@@ -507,29 +472,16 @@ func (m *Manager) LoadProjectPlan(ctx context.Context, projectSlug, planSlug str
 		return nil, err
 	}
 
-	planPath := filepath.Join(m.ProjectPlanPath(projectSlug, planSlug), PlanFile)
-
-	data, err := os.ReadFile(planPath)
+	entity, err := kvGetEntity(ctx, kv, PlanEntityID(planSlug))
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%w: %s", ErrPlanNotFound, planSlug)
-		}
-		return nil, fmt.Errorf("failed to read plan: %w", err)
+		return nil, fmt.Errorf("%w: %s", ErrPlanNotFound, planSlug)
 	}
 
-	var plan Plan
-	if err := json.Unmarshal(data, &plan); err != nil {
-		return nil, fmt.Errorf("failed to parse plan: %w", err)
-	}
-
-	return &plan, nil
+	return PlanFromEntity(entity)
 }
 
-// SaveProjectPlan saves a plan to .semspec/projects/{project}/plans/{plan}/plan.json.
-func (m *Manager) SaveProjectPlan(ctx context.Context, projectSlug string, plan *Plan) error {
-	if err := ValidateSlug(projectSlug); err != nil {
-		return err
-	}
+// SaveProjectPlan saves a plan to ENTITY_STATES KV bucket.
+func SaveProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug string, plan *Plan) error {
 	if err := ValidateSlug(plan.Slug); err != nil {
 		return err
 	}
@@ -538,22 +490,5 @@ func (m *Manager) SaveProjectPlan(ctx context.Context, projectSlug string, plan 
 		return err
 	}
 
-	planPath := filepath.Join(m.ProjectPlanPath(projectSlug, plan.Slug), PlanFile)
-
-	// Ensure directory exists
-	dir := filepath.Dir(planPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	data, err := json.MarshalIndent(plan, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal plan: %w", err)
-	}
-
-	if err := os.WriteFile(planPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write plan: %w", err)
-	}
-
-	return nil
+	return kvPutEntity(ctx, kv, PlanEntityID(plan.Slug), EntityType, PlanTriples(plan))
 }

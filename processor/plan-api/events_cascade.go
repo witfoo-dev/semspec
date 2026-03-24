@@ -96,24 +96,21 @@ func (c *Component) handleRequirementsGeneratedEvent(ctx context.Context, event 
 		return
 	}
 
-	manager := c.newManager()
-	if manager == nil {
-		return
-	}
+	kvStore := c.kvStore
 
 	// Load plan to update status and carry Goal/Context into scenario generation.
 	var planGoal, planContext string
-	if plan, err := manager.LoadPlan(ctx, event.Slug); err == nil {
+	if plan, err := workflow.LoadPlan(ctx, kvStore, event.Slug); err == nil {
 		planGoal = plan.Goal
 		planContext = plan.Context
-		if err := manager.SetPlanStatus(ctx, plan, workflow.StatusRequirementsGenerated); err != nil {
+		if err := workflow.SetPlanStatus(ctx, kvStore, plan, workflow.StatusRequirementsGenerated); err != nil {
 			c.logger.Debug("Failed to transition plan to requirements_generated",
 				"slug", event.Slug, "error", err)
 		}
 	}
 
 	// Load requirements and dispatch scenario generation for each.
-	requirements, err := manager.LoadRequirements(ctx, event.Slug)
+	requirements, err := workflow.LoadRequirements(ctx, kvStore, event.Slug)
 	if err != nil {
 		c.logger.Error("Failed to load requirements for scenario generation",
 			"slug", event.Slug, "error", err)
@@ -143,14 +140,11 @@ func (c *Component) handleScenariosGeneratedEvent(ctx context.Context, event *wo
 		return
 	}
 
-	manager := c.newManager()
-	if manager == nil {
-		return
-	}
+	kvStore := c.kvStore
 
 	// Update plan.json status so HTTP API reflects the transition.
-	if plan, err := manager.LoadPlan(ctx, event.Slug); err == nil {
-		if err := manager.SetPlanStatus(ctx, plan, workflow.StatusScenariosGenerated); err != nil {
+	if plan, err := workflow.LoadPlan(ctx, kvStore, event.Slug); err == nil {
+		if err := workflow.SetPlanStatus(ctx, kvStore, plan, workflow.StatusScenariosGenerated); err != nil {
 			c.logger.Debug("Failed to transition plan to scenarios_generated",
 				"slug", event.Slug, "error", err)
 		}

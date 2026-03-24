@@ -96,12 +96,11 @@ func (c *Component) handleListScenariosByRequirement(w http.ResponseWriter, r *h
 		return
 	}
 
-	manager := c.getManager(w)
-	if manager == nil {
-		return
-	}
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
-	scenarios, err := manager.LoadScenarios(r.Context(), slug)
+	scenarios, err := workflow.LoadScenarios(r.Context(), kvStore, slug)
 	if err != nil {
 		c.logger.Error("Failed to load scenarios", "slug", slug, "error", err)
 		http.Error(w, "Failed to load scenarios", http.StatusInternalServerError)
@@ -124,12 +123,11 @@ func (c *Component) handleListScenariosByRequirement(w http.ResponseWriter, r *h
 // handleListScenarios handles GET /plans/{slug}/scenarios.
 // Supports optional ?requirement_id= query param to filter by requirement.
 func (c *Component) handleListScenarios(w http.ResponseWriter, r *http.Request, slug string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return
-	}
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
-	scenarios, err := manager.LoadScenarios(r.Context(), slug)
+	scenarios, err := workflow.LoadScenarios(r.Context(), kvStore, slug)
 	if err != nil {
 		c.logger.Error("Failed to load scenarios", "slug", slug, "error", err)
 		http.Error(w, "Failed to load scenarios", http.StatusInternalServerError)
@@ -155,12 +153,11 @@ func (c *Component) handleListScenarios(w http.ResponseWriter, r *http.Request, 
 
 // handleGetScenario handles GET /plans/{slug}/scenarios/{scenarioId}.
 func (c *Component) handleGetScenario(w http.ResponseWriter, r *http.Request, slug, scenarioID string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return
-	}
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
-	scenarios, err := manager.LoadScenarios(r.Context(), slug)
+	scenarios, err := workflow.LoadScenarios(r.Context(), kvStore, slug)
 	if err != nil {
 		c.logger.Error("Failed to load scenarios", "slug", slug, "error", err)
 		http.Error(w, "Failed to load scenarios", http.StatusInternalServerError)
@@ -182,10 +179,9 @@ func (c *Component) handleGetScenario(w http.ResponseWriter, r *http.Request, sl
 
 // handleCreateScenario handles POST /plans/{slug}/scenarios.
 func (c *Component) handleCreateScenario(w http.ResponseWriter, r *http.Request, slug string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return
-	}
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
@@ -212,7 +208,7 @@ func (c *Component) handleCreateScenario(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	scenarios, err := manager.LoadScenarios(r.Context(), slug)
+	scenarios, err := workflow.LoadScenarios(r.Context(), kvStore, slug)
 	if err != nil {
 		c.logger.Error("Failed to load scenarios", "slug", slug, "error", err)
 		http.Error(w, "Failed to load scenarios", http.StatusInternalServerError)
@@ -243,7 +239,7 @@ func (c *Component) handleCreateScenario(w http.ResponseWriter, r *http.Request,
 
 	scenarios = append(scenarios, newScenario)
 
-	if err := manager.SaveScenarios(r.Context(), scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(r.Context(), kvStore, scenarios, slug); err != nil {
 		c.logger.Error("Failed to save scenarios", "slug", slug, "error", err)
 		http.Error(w, "Failed to save scenario", http.StatusInternalServerError)
 		return
@@ -265,10 +261,9 @@ func (c *Component) handleCreateScenario(w http.ResponseWriter, r *http.Request,
 
 // handleUpdateScenario handles PATCH /plans/{slug}/scenarios/{scenarioId}.
 func (c *Component) handleUpdateScenario(w http.ResponseWriter, r *http.Request, slug, scenarioID string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return
-	}
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
@@ -278,7 +273,7 @@ func (c *Component) handleUpdateScenario(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	scenarios, err := manager.LoadScenarios(r.Context(), slug)
+	scenarios, err := workflow.LoadScenarios(r.Context(), kvStore, slug)
 	if err != nil {
 		c.logger.Error("Failed to load scenarios", "slug", slug, "error", err)
 		http.Error(w, "Failed to load scenarios", http.StatusInternalServerError)
@@ -320,7 +315,7 @@ func (c *Component) handleUpdateScenario(w http.ResponseWriter, r *http.Request,
 	}
 	scenarios[idx].UpdatedAt = time.Now()
 
-	if err := manager.SaveScenarios(r.Context(), scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(r.Context(), kvStore, scenarios, slug); err != nil {
 		c.logger.Error("Failed to save scenarios", "slug", slug, "error", err)
 		http.Error(w, "Failed to save scenario", http.StatusInternalServerError)
 		return
@@ -339,12 +334,11 @@ func (c *Component) handleUpdateScenario(w http.ResponseWriter, r *http.Request,
 
 // handleDeleteScenario handles DELETE /plans/{slug}/scenarios/{scenarioId}.
 func (c *Component) handleDeleteScenario(w http.ResponseWriter, r *http.Request, slug, scenarioID string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return
-	}
+	c.mu.RLock()
+	kvStore := c.kvStore
+	c.mu.RUnlock()
 
-	scenarios, err := manager.LoadScenarios(r.Context(), slug)
+	scenarios, err := workflow.LoadScenarios(r.Context(), kvStore, slug)
 	if err != nil {
 		c.logger.Error("Failed to load scenarios", "slug", slug, "error", err)
 		http.Error(w, "Failed to load scenarios", http.StatusInternalServerError)
@@ -365,7 +359,7 @@ func (c *Component) handleDeleteScenario(w http.ResponseWriter, r *http.Request,
 
 	scenarios = append(scenarios[:idx], scenarios[idx+1:]...)
 
-	if err := manager.SaveScenarios(r.Context(), scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(r.Context(), kvStore, scenarios, slug); err != nil {
 		c.logger.Error("Failed to save scenarios", "slug", slug, "error", err)
 		http.Error(w, "Failed to delete scenario", http.StatusInternalServerError)
 		return
