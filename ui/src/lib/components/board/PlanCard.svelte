@@ -5,7 +5,7 @@
 	import AgentBadge from './AgentBadge.svelte';
 	import { derivePlanPipeline, getStageLabel, type PlanWithStatus } from '$lib/types/plan';
 	import { questionsStore } from '$lib/stores/questions.svelte';
-	import { promotePlan, executePlan } from '$lib/actions/plans';
+	import { executePlan } from '$lib/actions/plans';
 	import type { Task } from '$lib/types/task';
 
 	interface Props {
@@ -39,12 +39,6 @@
 	const dirtyTaskCount = $derived(
 		tasks.filter((t) => t.status === 'dirty').length
 	);
-
-	async function handlePromote(e: Event) {
-		e.preventDefault();
-		e.stopPropagation();
-		await promotePlan(plan.slug);
-	}
 
 	async function handleExecute(e: Event) {
 		e.preventDefault();
@@ -92,10 +86,10 @@
 
 	{#if plan.stage === 'scenarios_generated'}
 		<div class="action-row">
-			<button class="promote-btn" onclick={handlePromote}>
-				<Icon name="check-circle" size={14} />
-				Approve
-			</button>
+			<span class="review-btn">
+				<Icon name="eye" size={14} />
+				Review
+			</span>
 		</div>
 	{:else if plan.stage === 'ready_for_execution'}
 		<div class="action-row">
@@ -224,7 +218,7 @@
 		margin-bottom: var(--space-2);
 	}
 
-	.promote-btn,
+	.review-btn,
 	.execute-btn {
 		display: inline-flex;
 		align-items: center;
@@ -235,12 +229,14 @@
 		font-size: var(--font-size-xs);
 		font-weight: var(--font-weight-medium);
 		cursor: pointer;
+		text-decoration: none;
 		transition: opacity var(--transition-fast);
 	}
 
-	.promote-btn {
-		background: var(--color-accent);
-		color: white;
+	.review-btn {
+		background: var(--color-accent-muted);
+		color: var(--color-accent);
+		border: 1px solid var(--color-accent);
 	}
 
 	.execute-btn {
@@ -248,7 +244,7 @@
 		color: white;
 	}
 
-	.promote-btn:hover,
+	.review-btn:hover,
 	.execute-btn:hover {
 		opacity: 0.9;
 	}
