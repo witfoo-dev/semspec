@@ -7,7 +7,7 @@ test.describe('@mock board', () => {
 		await page.goto('/');
 		await waitForHydration(page);
 
-		await expect(page.getByTestId('panel-center').getByRole('heading', { name: 'Plans' })).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Plans', level: 1 })).toBeVisible();
 		await expect(page.getByRole('button', { name: /New Plan/i })).toBeVisible();
 	});
 

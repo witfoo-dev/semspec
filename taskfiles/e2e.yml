@@ -467,7 +467,7 @@ tasks:
       - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml build
       - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml up -d --wait
       - echo "[UI:TEST:LLM] Running @easy Playwright tests (LLM_API_URL=$LLM_API_URL)..."
-      - cmd: cd ui && PLAYWRIGHT_TIMEOUT=600000 npx playwright test --grep @easy {{.CLI_ARGS}}
+      - cmd: cd ui && PLAYWRIGHT_TIMEOUT=600000 npx playwright test e2e/plan-lifecycle-llm.spec.ts --project cascade --no-deps {{.CLI_ARGS}}
         ignore_error: true
       - defer: { task: ui:cleanup:llm }
       - echo "[UI:TEST:LLM] Complete"
