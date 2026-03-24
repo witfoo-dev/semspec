@@ -16,79 +16,68 @@
     }
   },
   "model_registry": {
-    "capabilities": {
-      "planning": {
-        "description": "High-level reasoning, architecture decisions",
-        "preferred": [
-          "qwen3"
-        ],
-        "fallback": [
-          "qwen-coder"
-        ]
-      },
-      "writing": {
-        "description": "Documentation, plans, specifications",
-        "preferred": [
-          "qwen3"
-        ],
-        "fallback": [
-          "qwen-coder"
-        ]
-      },
-      "coding": {
-        "description": "Code generation, implementation",
-        "preferred": [
-          "qwen-coder"
-        ],
-        "fallback": [
-          "qwen3"
-        ]
-      },
-      "reviewing": {
-        "description": "Code review, quality analysis",
-        "preferred": [
-          "qwen3"
-        ],
-        "fallback": [
-          "qwen-coder"
-        ]
-      },
-      "fast": {
-        "description": "Quick responses, simple tasks",
-        "preferred": [
-          "qwen3-fast"
-        ],
-        "fallback": [
-          "qwen3"
-        ]
-      }
-    },
     "endpoints": {
       "qwen-coder": {
         "provider": "ollama",
-        "url": "http://host.docker.internal:11434/v1",
-        "model": "qwen3-coder:30b",
-        "max_tokens": 131072,
+        "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
+        "model": "qwen2.5-coder:7b",
+        "max_tokens": 32768,
         "supports_tools": true,
-        "tool_format": "openai"
+        "stream": true
       },
       "qwen3": {
         "provider": "ollama",
-        "url": "http://host.docker.internal:11434/v1",
+        "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
         "model": "qwen3:14b",
-        "max_tokens": 32768,
-        "supports_tools": false
+        "max_tokens": 40960,
+        "supports_tools": false,
+        "stream": true,
+        "options": {
+          "enable_thinking": false
+        }
+      }
+    },
+    "capabilities": {
+      "planning": {
+        "description": "Plan generation and architecture",
+        "preferred": ["qwen-coder"],
+        "fallback": ["qwen3"]
       },
-      "qwen3-fast": {
-        "provider": "ollama",
-        "url": "http://host.docker.internal:11434/v1",
-        "model": "qwen3:1.7b",
-        "max_tokens": 32768,
-        "supports_tools": false
+      "writing": {
+        "description": "Documentation, plans, specifications",
+        "preferred": ["qwen-coder"]
+      },
+      "coding": {
+        "description": "Code generation, implementation",
+        "preferred": ["qwen-coder"]
+      },
+      "reviewing": {
+        "description": "Code review, quality analysis",
+        "preferred": ["qwen-coder"]
+      },
+      "task_generation": {
+        "description": "Task decomposition",
+        "preferred": ["qwen-coder"]
+      },
+      "task_reviewing": {
+        "description": "Task review",
+        "preferred": ["qwen-coder"]
+      },
+      "requirement_generation": {
+        "description": "Requirement decomposition",
+        "preferred": ["qwen-coder"]
+      },
+      "scenario_generation": {
+        "description": "BDD scenario generation",
+        "preferred": ["qwen-coder"]
+      },
+      "fast": {
+        "description": "Quick responses, classification",
+        "preferred": ["qwen-coder"]
       }
     },
     "defaults": {
-      "model": "qwen3"
+      "model": "qwen-coder"
     }
   },
   "services": {
