@@ -22,7 +22,7 @@ import (
 // publish within the same stream.
 var workflowStreamSubjects = []string{
 	"scenario.orchestrate.*",
-	"workflow.trigger.scenario-execution-loop",
+	"workflow.trigger.requirement-execution-loop",
 }
 
 // TestComponentStartStop verifies the component lifecycle against a real NATS
@@ -72,9 +72,13 @@ func TestComponentStartStop(t *testing.T) {
 }
 
 // TestDispatchScenarios_PublishesMessages verifies that an OrchestratorTrigger
-// with two scenarios results in exactly two ScenarioExecutionRequest messages
-// being published to workflow.trigger.scenario-execution-loop.
+// for a plan with two requirements (each having a pending scenario) results in
+// exactly two RequirementExecutionRequest messages being published to
+// workflow.trigger.requirement-execution-loop.
 func TestDispatchScenarios_PublishesMessages(t *testing.T) {
+	repoRoot := t.TempDir()
+	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
+
 	tc := natsclient.NewTestClient(t,
 		natsclient.WithJetStream(),
 		natsclient.WithStreams(natsclient.TestStreamConfig{
@@ -93,30 +97,40 @@ func TestDispatchScenarios_PublishesMessages(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
 
+	// Write plan data to disk: two requirements, one pending scenario each.
+	const planSlug = "test-plan"
+	m := workflow.NewManager(repoRoot)
+	if _, err := m.CreatePlan(ctx, planSlug, "Test Plan"); err != nil {
+		t.Fatalf("CreatePlan() error: %v", err)
+	}
+
+	requirements := []workflow.Requirement{
+		makeReq("req-alpha"),
+		makeReq("req-beta"),
+	}
+	if err := m.SaveRequirements(ctx, requirements, planSlug); err != nil {
+		t.Fatalf("SaveRequirements() error: %v", err)
+	}
+
+	scenarios := []workflow.Scenario{
+		makeScenario("sc-alpha-1", "req-alpha", workflow.ScenarioStatusPending),
+		makeScenario("sc-beta-1", "req-beta", workflow.ScenarioStatusPending),
+	}
+	if err := m.SaveScenarios(ctx, scenarios, planSlug); err != nil {
+		t.Fatalf("SaveScenarios() error: %v", err)
+	}
+
 	// Subscribe to the execution-loop subject before publishing the trigger so
 	// no messages are missed.
 	received := make(chan []byte, 10)
-	nativeConn := tc.GetNativeConnection()
-	sub, err := nativeConn.Subscribe("workflow.trigger.scenario-execution-loop", func(msg *nats.Msg) {
-		data := make([]byte, len(msg.Data))
-		copy(data, msg.Data)
-		received <- data
-	})
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
+	sub := subscribeExecLoop(t, tc, received)
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 
-	// Publish the orchestration trigger with two distinct scenarios.
 	trigger := OrchestratorTrigger{
-		PlanSlug: "test-plan",
+		PlanSlug: planSlug,
 		TraceID:  "trace-integration-001",
-		Scenarios: []ScenarioRef{
-			{ScenarioID: "sc-alpha", Prompt: "Scenario alpha", Role: "developer", Model: "gpt-4"},
-			{ScenarioID: "sc-beta", Prompt: "Scenario beta"},
-		},
 	}
-	publishTrigger(t, tc, ctx, "scenario.orchestrate.test-plan", trigger)
+	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, trigger)
 
 	// Wait for both execution requests to arrive.
 	collectedMsgs := collectMessages(ctx, t, received, 2, 20*time.Second)
@@ -125,47 +139,50 @@ func TestDispatchScenarios_PublishesMessages(t *testing.T) {
 		t.Fatalf("received %d execution requests, want 2", len(collectedMsgs))
 	}
 
-	// Parse and verify each received ScenarioExecutionRequest.
+	// Parse and verify each received RequirementExecutionRequest.
 	seenIDs := make(map[string]bool)
 	for _, raw := range collectedMsgs {
-		req, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest](raw)
+		req, err := payloads.ParseReactivePayload[payloads.RequirementExecutionRequest](raw)
 		if err != nil {
 			t.Fatalf("ParseReactivePayload() error = %v", err)
 		}
 
-		if req.Slug != "test-plan" {
-			t.Errorf("req.Slug = %q, want %q", req.Slug, "test-plan")
+		if req.Slug != planSlug {
+			t.Errorf("req.Slug = %q, want %q", req.Slug, planSlug)
 		}
 		if req.TraceID != "trace-integration-001" {
 			t.Errorf("req.TraceID = %q, want %q", req.TraceID, "trace-integration-001")
 		}
-		if req.ScenarioID == "" {
-			t.Error("req.ScenarioID should not be empty")
+		if req.RequirementID == "" {
+			t.Error("req.RequirementID should not be empty")
 		}
-		seenIDs[req.ScenarioID] = true
+		seenIDs[req.RequirementID] = true
 	}
 
-	if !seenIDs["sc-alpha"] {
-		t.Error("sc-alpha was not dispatched")
+	if !seenIDs["req-alpha"] {
+		t.Error("req-alpha was not dispatched")
 	}
-	if !seenIDs["sc-beta"] {
-		t.Error("sc-beta was not dispatched")
+	if !seenIDs["req-beta"] {
+		t.Error("req-beta was not dispatched")
 	}
 
 	// Verify metrics were updated.
 	waitForCondition(t, ctx, 5*time.Second, func() bool {
-		return comp.scenariosTriggered.Load() == 2
-	}, "scenariosTriggered should reach 2")
+		return comp.requirementsTriggered.Load() == 2
+	}, "requirementsTriggered should reach 2")
 
 	waitForCondition(t, ctx, 5*time.Second, func() bool {
 		return comp.triggersProcessed.Load() >= 1
 	}, "triggersProcessed should reach 1")
 }
 
-// TestDispatchScenarios_BoundedConcurrency verifies that a trigger with more
-// scenarios than MaxConcurrent eventually dispatches all of them, respecting
-// the concurrency limit without deadlocking.
+// TestDispatchScenarios_BoundedConcurrency verifies that a trigger for a plan
+// with more requirements than MaxConcurrent eventually dispatches all of them,
+// respecting the concurrency limit without deadlocking.
 func TestDispatchScenarios_BoundedConcurrency(t *testing.T) {
+	repoRoot := t.TempDir()
+	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
+
 	tc := natsclient.NewTestClient(t,
 		natsclient.WithJetStream(),
 		natsclient.WithStreams(natsclient.TestStreamConfig{
@@ -177,7 +194,7 @@ func TestDispatchScenarios_BoundedConcurrency(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// Use MaxConcurrent=2 with 5 scenarios to verify bounded dispatch works.
+	// Use MaxConcurrent=2 with 5 requirements to verify bounded dispatch works.
 	cfg := DefaultConfig()
 	cfg.MaxConcurrent = 2
 	rawCfg, err := json.Marshal(cfg)
@@ -197,64 +214,73 @@ func TestDispatchScenarios_BoundedConcurrency(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
 
-	const scenarioCount = 5
-	scenarios := make([]ScenarioRef, scenarioCount)
-	for i := range scenarios {
-		scenarios[i] = ScenarioRef{
-			ScenarioID: scenarioID(i),
-			Prompt:     promptFor(i),
-		}
+	const requirementCount = 5
+	const planSlug = "bounded-plan"
+
+	// Write plan data: N independent requirements, one pending scenario each.
+	m := workflow.NewManager(repoRoot)
+	if _, err := m.CreatePlan(ctx, planSlug, "Bounded Plan"); err != nil {
+		t.Fatalf("CreatePlan() error: %v", err)
 	}
 
-	received := make(chan []byte, scenarioCount+2)
-	nativeConn := tc.GetNativeConnection()
-	sub, err := nativeConn.Subscribe("workflow.trigger.scenario-execution-loop", func(msg *nats.Msg) {
-		data := make([]byte, len(msg.Data))
-		copy(data, msg.Data)
-		received <- data
-	})
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
+	requirements := make([]workflow.Requirement, requirementCount)
+	scenarios := make([]workflow.Scenario, requirementCount)
+	for i := range requirements {
+		reqID := requirementID(i)
+		requirements[i] = makeReq(reqID)
+		scenarios[i] = makeScenario(scenarioID(i), reqID, workflow.ScenarioStatusPending)
 	}
+
+	if err := m.SaveRequirements(ctx, requirements, planSlug); err != nil {
+		t.Fatalf("SaveRequirements() error: %v", err)
+	}
+	if err := m.SaveScenarios(ctx, scenarios, planSlug); err != nil {
+		t.Fatalf("SaveScenarios() error: %v", err)
+	}
+
+	received := make(chan []byte, requirementCount+2)
+	sub := subscribeExecLoop(t, tc, received)
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 
 	trigger := OrchestratorTrigger{
-		PlanSlug:  "bounded-plan",
-		Scenarios: scenarios,
+		PlanSlug: planSlug,
 	}
-	publishTrigger(t, tc, ctx, "scenario.orchestrate.bounded-plan", trigger)
+	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, trigger)
 
-	collectedMsgs := collectMessages(ctx, t, received, scenarioCount, 30*time.Second)
+	collectedMsgs := collectMessages(ctx, t, received, requirementCount, 30*time.Second)
 
-	if len(collectedMsgs) != scenarioCount {
-		t.Fatalf("received %d execution requests, want %d", len(collectedMsgs), scenarioCount)
+	if len(collectedMsgs) != requirementCount {
+		t.Fatalf("received %d execution requests, want %d", len(collectedMsgs), requirementCount)
 	}
 
-	// Verify all scenario IDs were dispatched (no duplicates, no misses).
-	seenIDs := make(map[string]bool, scenarioCount)
+	// Verify all requirement IDs were dispatched (no duplicates, no misses).
+	seenIDs := make(map[string]bool, requirementCount)
 	for _, raw := range collectedMsgs {
-		req, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest](raw)
+		req, err := payloads.ParseReactivePayload[payloads.RequirementExecutionRequest](raw)
 		if err != nil {
 			t.Fatalf("ParseReactivePayload() error = %v", err)
 		}
-		if seenIDs[req.ScenarioID] {
-			t.Errorf("scenario %q dispatched more than once", req.ScenarioID)
+		if seenIDs[req.RequirementID] {
+			t.Errorf("requirement %q dispatched more than once", req.RequirementID)
 		}
-		seenIDs[req.ScenarioID] = true
+		seenIDs[req.RequirementID] = true
 	}
 
-	for i := 0; i < scenarioCount; i++ {
-		id := scenarioID(i)
+	for i := 0; i < requirementCount; i++ {
+		id := requirementID(i)
 		if !seenIDs[id] {
-			t.Errorf("scenario %q was never dispatched", id)
+			t.Errorf("requirement %q was never dispatched", id)
 		}
 	}
 }
 
 // TestDispatchScenarios_EmptyList_Integration verifies that an
-// OrchestratorTrigger with an empty scenarios list is ACK'd immediately
+// OrchestratorTrigger for a plan with no requirements is ACK'd immediately
 // without publishing any execution requests.
 func TestDispatchScenarios_EmptyList_Integration(t *testing.T) {
+	repoRoot := t.TempDir()
+	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
+
 	tc := natsclient.NewTestClient(t,
 		natsclient.WithJetStream(),
 		natsclient.WithStreams(natsclient.TestStreamConfig{
@@ -272,21 +298,18 @@ func TestDispatchScenarios_EmptyList_Integration(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
 
-	received := make(chan []byte, 5)
-	nativeConn := tc.GetNativeConnection()
-	sub, err := nativeConn.Subscribe("workflow.trigger.scenario-execution-loop", func(msg *nats.Msg) {
-		data := make([]byte, len(msg.Data))
-		copy(data, msg.Data)
-		received <- data
-	})
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
+	// Plan directory exists on disk but has no requirements written.
+	m := workflow.NewManager(repoRoot)
+	if _, err := m.CreatePlan(ctx, "empty-plan", "Empty Plan"); err != nil {
+		t.Fatalf("CreatePlan() error: %v", err)
 	}
+
+	received := make(chan []byte, 5)
+	sub := subscribeExecLoop(t, tc, received)
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 
 	trigger := OrchestratorTrigger{
-		PlanSlug:  "empty-plan",
-		Scenarios: []ScenarioRef{},
+		PlanSlug: "empty-plan",
 	}
 	publishTrigger(t, tc, ctx, "scenario.orchestrate.empty-plan", trigger)
 
@@ -296,9 +319,9 @@ func TestDispatchScenarios_EmptyList_Integration(t *testing.T) {
 
 	select {
 	case <-received:
-		t.Error("received unexpected execution request for empty scenarios list")
+		t.Error("received unexpected execution request for plan with no requirements")
 	case <-shortCtx.Done():
-		// Correct: no messages published for empty scenarios.
+		// Correct: no messages published for empty requirements.
 	}
 
 	// The trigger counter should still increment even for an empty list.
@@ -365,25 +388,21 @@ func TestDAGGating_RootRequirementsDispatchImmediately(t *testing.T) {
 	trigger := OrchestratorTrigger{
 		PlanSlug: planSlug,
 		TraceID:  "trace-dag-root-001",
-		Scenarios: []ScenarioRef{
-			makeRef("sc-alpha-1"),
-			makeRef("sc-beta-1"),
-		},
 	}
 	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, trigger)
 
-	// Both root scenarios must be dispatched.
+	// Both root requirements must be dispatched.
 	msgs := collectMessages(ctx, t, received, 2, 20*time.Second)
 	if len(msgs) != 2 {
-		t.Fatalf("got %d dispatched scenarios, want 2", len(msgs))
+		t.Fatalf("got %d dispatched requirements, want 2", len(msgs))
 	}
 
-	seenIDs := parsedScenarioIDs(t, msgs)
-	if !seenIDs["sc-alpha-1"] {
-		t.Error("sc-alpha-1 was not dispatched")
+	seenIDs := parsedRequirementIDs(t, msgs)
+	if !seenIDs["req-alpha"] {
+		t.Error("req-alpha was not dispatched")
 	}
-	if !seenIDs["sc-beta-1"] {
-		t.Error("sc-beta-1 was not dispatched")
+	if !seenIDs["req-beta"] {
+		t.Error("req-beta was not dispatched")
 	}
 }
 
@@ -442,24 +461,20 @@ func TestDAGGating_DependentRequirementBlocked(t *testing.T) {
 	trigger := OrchestratorTrigger{
 		PlanSlug: planSlug,
 		TraceID:  "trace-dag-blocked-001",
-		Scenarios: []ScenarioRef{
-			makeRef("sc-a-1"),
-			makeRef("sc-b-1"),
-		},
 	}
 	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, trigger)
 
-	// Only req-a's scenario should be dispatched.
+	// Only req-a should be dispatched.
 	msgs := collectMessages(ctx, t, received, 1, 10*time.Second)
 	if len(msgs) != 1 {
-		t.Fatalf("phase 1: got %d dispatched scenarios, want 1", len(msgs))
+		t.Fatalf("phase 1: got %d dispatched requirements, want 1", len(msgs))
 	}
-	seenIDs := parsedScenarioIDs(t, msgs)
-	if !seenIDs["sc-a-1"] {
-		t.Errorf("phase 1: expected sc-a-1 dispatched, got %v", seenIDs)
+	seenIDs := parsedRequirementIDs(t, msgs)
+	if !seenIDs["req-a"] {
+		t.Errorf("phase 1: expected req-a dispatched, got %v", seenIDs)
 	}
-	if seenIDs["sc-b-1"] {
-		t.Error("phase 1: sc-b-1 should be blocked but was dispatched")
+	if seenIDs["req-b"] {
+		t.Error("phase 1: req-b should be blocked but was dispatched")
 	}
 
 	// Drain the channel before the second trigger.
@@ -474,20 +489,17 @@ func TestDAGGating_DependentRequirementBlocked(t *testing.T) {
 	trigger2 := OrchestratorTrigger{
 		PlanSlug: planSlug,
 		TraceID:  "trace-dag-blocked-002",
-		Scenarios: []ScenarioRef{
-			makeRef("sc-b-1"),
-		},
 	}
 	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, trigger2)
 
-	// Now req-b's scenario should be dispatched.
+	// Now req-b should be dispatched.
 	msgs2 := collectMessages(ctx, t, received, 1, 20*time.Second)
 	if len(msgs2) != 1 {
-		t.Fatalf("phase 2: got %d dispatched scenarios, want 1", len(msgs2))
+		t.Fatalf("phase 2: got %d dispatched requirements, want 1", len(msgs2))
 	}
-	seenIDs2 := parsedScenarioIDs(t, msgs2)
-	if !seenIDs2["sc-b-1"] {
-		t.Errorf("phase 2: expected sc-b-1 dispatched after req-a complete, got %v", seenIDs2)
+	seenIDs2 := parsedRequirementIDs(t, msgs2)
+	if !seenIDs2["req-b"] {
+		t.Errorf("phase 2: expected req-b dispatched after req-a complete, got %v", seenIDs2)
 	}
 }
 
@@ -544,15 +556,22 @@ func TestDAGGating_FailingScenarioBlocksDownstream(t *testing.T) {
 	trigger := OrchestratorTrigger{
 		PlanSlug: planSlug,
 		TraceID:  "trace-dag-fail-001",
-		Scenarios: []ScenarioRef{
-			makeRef("sc-b-1"),
-		},
 	}
 	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, trigger)
 
-	// No scenarios should be dispatched: req-a is failing so req-b stays blocked.
-	assertNoMessages(t, ctx, received, 3*time.Second,
-		"no scenarios should be dispatched when upstream requirement is failing")
+	// req-a should be dispatched (it has a failing scenario — needs retry).
+	// req-b should NOT be dispatched (blocked by incomplete req-a).
+	msgs := collectMessages(ctx, t, received, 1, 10*time.Second)
+	if len(msgs) != 1 {
+		t.Fatalf("got %d dispatched requirements, want 1 (only req-a)", len(msgs))
+	}
+	seenIDs := parsedRequirementIDs(t, msgs)
+	if !seenIDs["req-a"] {
+		t.Errorf("expected req-a dispatched for retry, got %v", seenIDs)
+	}
+	if seenIDs["req-b"] {
+		t.Error("req-b should be blocked by failing req-a")
+	}
 
 	// The trigger should still be counted as processed.
 	waitForCondition(t, ctx, 5*time.Second, func() bool {
@@ -617,25 +636,17 @@ func TestDAGGating_DiamondDependency(t *testing.T) {
 	sub := subscribeExecLoop(t, tc, received)
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 
-	allRefs := []ScenarioRef{
-		makeRef("sc-a-1"),
-		makeRef("sc-b-1"),
-		makeRef("sc-c-1"),
-		makeRef("sc-d-1"),
-	}
-
 	// --- Step 1: all pending, only A should dispatch. ---
 	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, OrchestratorTrigger{
-		PlanSlug:  planSlug,
-		TraceID:   "trace-diamond-step1",
-		Scenarios: allRefs,
+		PlanSlug: planSlug,
+		TraceID:  "trace-diamond-step1",
 	})
 	msgs := collectMessages(ctx, t, received, 1, 15*time.Second)
 	if len(msgs) != 1 {
 		t.Fatalf("step 1: got %d dispatched, want 1 (only A)", len(msgs))
 	}
-	if ids := parsedScenarioIDs(t, msgs); !ids["sc-a-1"] {
-		t.Errorf("step 1: expected sc-a-1, got %v", ids)
+	if ids := parsedRequirementIDs(t, msgs); !ids["req-a"] {
+		t.Errorf("step 1: expected req-a, got %v", ids)
 	}
 	drainChannel(received)
 
@@ -644,37 +655,45 @@ func TestDAGGating_DiamondDependency(t *testing.T) {
 	saveScenariosHelper(t, ctx, m, scenarios, planSlug)
 
 	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, OrchestratorTrigger{
-		PlanSlug:  planSlug,
-		TraceID:   "trace-diamond-step2",
-		Scenarios: allRefs[1:], // B, C, D still pending as candidates
+		PlanSlug: planSlug,
+		TraceID:  "trace-diamond-step2",
 	})
 	msgs = collectMessages(ctx, t, received, 2, 20*time.Second)
 	if len(msgs) != 2 {
 		t.Fatalf("step 2: got %d dispatched, want 2 (B and C)", len(msgs))
 	}
-	ids := parsedScenarioIDs(t, msgs)
-	if !ids["sc-b-1"] {
-		t.Errorf("step 2: sc-b-1 not dispatched after A passed, got %v", ids)
+	ids := parsedRequirementIDs(t, msgs)
+	if !ids["req-b"] {
+		t.Errorf("step 2: req-b not dispatched after A passed, got %v", ids)
 	}
-	if !ids["sc-c-1"] {
-		t.Errorf("step 2: sc-c-1 not dispatched after A passed, got %v", ids)
+	if !ids["req-c"] {
+		t.Errorf("step 2: req-c not dispatched after A passed, got %v", ids)
 	}
-	if ids["sc-d-1"] {
-		t.Error("step 2: sc-d-1 should still be blocked (C not yet passing)")
+	if ids["req-d"] {
+		t.Error("step 2: req-d should still be blocked (req-c not yet passing)")
 	}
 	drainChannel(received)
 
-	// --- Step 3: mark B passing only — D still blocked because C is pending. ---
+	// --- Step 3: mark B passing only — D still blocked because C is pending.
+	// C should be re-dispatched (still pending, deps satisfied).
 	scenarios[1].Status = workflow.ScenarioStatusPassing
 	saveScenariosHelper(t, ctx, m, scenarios, planSlug)
 
 	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, OrchestratorTrigger{
-		PlanSlug:  planSlug,
-		TraceID:   "trace-diamond-step3",
-		Scenarios: []ScenarioRef{makeRef("sc-d-1")},
+		PlanSlug: planSlug,
+		TraceID:  "trace-diamond-step3",
 	})
-	assertNoMessages(t, ctx, received, 3*time.Second,
-		"step 3: sc-d-1 should remain blocked until C also passes")
+	msgs = collectMessages(ctx, t, received, 1, 10*time.Second)
+	if len(msgs) != 1 {
+		t.Fatalf("step 3: got %d dispatched, want 1 (only C re-dispatched)", len(msgs))
+	}
+	ids = parsedRequirementIDs(t, msgs)
+	if !ids["req-c"] {
+		t.Errorf("step 3: expected req-c re-dispatched, got %v", ids)
+	}
+	if ids["req-d"] {
+		t.Error("step 3: req-d should remain blocked until req-c also passes")
+	}
 	drainChannel(received)
 
 	// --- Step 4: mark C passing — D should now dispatch. ---
@@ -682,16 +701,15 @@ func TestDAGGating_DiamondDependency(t *testing.T) {
 	saveScenariosHelper(t, ctx, m, scenarios, planSlug)
 
 	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, OrchestratorTrigger{
-		PlanSlug:  planSlug,
-		TraceID:   "trace-diamond-step4",
-		Scenarios: []ScenarioRef{makeRef("sc-d-1")},
+		PlanSlug: planSlug,
+		TraceID:  "trace-diamond-step4",
 	})
 	msgs = collectMessages(ctx, t, received, 1, 20*time.Second)
 	if len(msgs) != 1 {
 		t.Fatalf("step 4: got %d dispatched, want 1 (only D)", len(msgs))
 	}
-	if ids := parsedScenarioIDs(t, msgs); !ids["sc-d-1"] {
-		t.Errorf("step 4: expected sc-d-1 dispatched after B and C passed, got %v", ids)
+	if ids := parsedRequirementIDs(t, msgs); !ids["req-d"] {
+		t.Errorf("step 4: expected req-d dispatched after B and C passed, got %v", ids)
 	}
 }
 
@@ -718,12 +736,12 @@ func newIntegrationComponentWithRoot(t *testing.T, tc *natsclient.TestClient) *C
 	return compI.(*Component)
 }
 
-// subscribeExecLoop registers a Core NATS subscription on the scenario
+// subscribeExecLoop registers a Core NATS subscription on the requirement
 // execution-loop subject, forwarding raw message bytes into ch.
 func subscribeExecLoop(t *testing.T, tc *natsclient.TestClient, ch chan<- []byte) *nats.Subscription {
 	t.Helper()
 	sub, err := tc.GetNativeConnection().Subscribe(
-		"workflow.trigger.scenario-execution-loop",
+		"workflow.trigger.requirement-execution-loop",
 		func(msg *nats.Msg) {
 			data := make([]byte, len(msg.Data))
 			copy(data, msg.Data)
@@ -736,17 +754,17 @@ func subscribeExecLoop(t *testing.T, tc *natsclient.TestClient, ch chan<- []byte
 	return sub
 }
 
-// parsedScenarioIDs parses a slice of raw BaseMessage bytes and returns the
-// set of ScenarioIDs contained in the ScenarioExecutionRequest payloads.
-func parsedScenarioIDs(t *testing.T, msgs [][]byte) map[string]bool {
+// parsedRequirementIDs parses a slice of raw BaseMessage bytes and returns the
+// set of RequirementIDs contained in the RequirementExecutionRequest payloads.
+func parsedRequirementIDs(t *testing.T, msgs [][]byte) map[string]bool {
 	t.Helper()
 	ids := make(map[string]bool, len(msgs))
 	for _, raw := range msgs {
-		req, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest](raw)
+		req, err := payloads.ParseReactivePayload[payloads.RequirementExecutionRequest](raw)
 		if err != nil {
 			t.Fatalf("ParseReactivePayload() error: %v", err)
 		}
-		ids[req.ScenarioID] = true
+		ids[req.RequirementID] = true
 	}
 	return ids
 }
@@ -816,14 +834,6 @@ func publishTrigger(t *testing.T, tc *natsclient.TestClient, ctx context.Context
 		PlanSlug: trigger.PlanSlug,
 		TraceID:  trigger.TraceID,
 	}
-	for _, s := range trigger.Scenarios {
-		typed.Scenarios = append(typed.Scenarios, payloads.ScenarioOrchestrationRef{
-			ScenarioID: s.ScenarioID,
-			Prompt:     s.Prompt,
-			Role:       s.Role,
-			Model:      s.Model,
-		})
-	}
 
 	baseMsg := message.NewBaseMessage(typed.Schema(), typed, "test")
 	data, err := json.Marshal(baseMsg)
@@ -879,6 +889,15 @@ func waitForCondition(t *testing.T, ctx context.Context, timeout time.Duration, 
 		}
 	}
 	t.Fatalf("waitForCondition: timed out: %s", msg)
+}
+
+// requirementID generates a deterministic requirement ID from an index.
+func requirementID(i int) string {
+	ids := []string{"req-0", "req-1", "req-2", "req-3", "req-4", "req-5", "req-6", "req-7", "req-8", "req-9"}
+	if i < len(ids) {
+		return ids[i]
+	}
+	return "req-unknown"
 }
 
 // scenarioID generates a deterministic scenario ID from an index.

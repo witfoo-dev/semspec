@@ -10,13 +10,29 @@ import (
 
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
 // TestComponentStartStop verifies that a Component backed by a real NATS
 // connection can start and stop cleanly without errors.
 func TestComponentStartStop(t *testing.T) {
-	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
+	tc := natsclient.NewTestClient(t,
+		natsclient.WithStreams(
+			natsclient.TestStreamConfig{
+				Name:     "WORKFLOW",
+				Subjects: []string{"workflow.trigger.requirement-execution-loop", "workflow.async.>", "workflow.events.>"},
+			},
+			natsclient.TestStreamConfig{
+				Name:     "AGENT",
+				Subjects: []string{"agentic.loop_completed.v1", "agent.complete.>", "agent.task.>"},
+			},
+			natsclient.TestStreamConfig{
+				Name:     "GRAPH",
+				Subjects: []string{"graph.mutation.triple.add"},
+			},
+		),
+	)
 
 	raw, _ := json.Marshal(DefaultConfig())
 	comp, err := NewComponent(raw, component.Dependencies{
@@ -72,7 +88,22 @@ func TestComponentStartStop(t *testing.T) {
 // TestComponentStartStop_IdempotentStart verifies that calling Start() twice
 // does not produce an error and the component remains running.
 func TestComponentStartStop_IdempotentStart(t *testing.T) {
-	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
+	tc := natsclient.NewTestClient(t,
+		natsclient.WithStreams(
+			natsclient.TestStreamConfig{
+				Name:     "WORKFLOW",
+				Subjects: []string{"workflow.trigger.requirement-execution-loop", "workflow.async.>", "workflow.events.>"},
+			},
+			natsclient.TestStreamConfig{
+				Name:     "AGENT",
+				Subjects: []string{"agentic.loop_completed.v1", "agent.complete.>", "agent.task.>"},
+			},
+			natsclient.TestStreamConfig{
+				Name:     "GRAPH",
+				Subjects: []string{"graph.mutation.triple.add"},
+			},
+		),
+	)
 
 	raw, _ := json.Marshal(DefaultConfig())
 	comp, err := NewComponent(raw, component.Dependencies{
@@ -105,7 +136,22 @@ func TestComponentStartStop_IdempotentStart(t *testing.T) {
 // TestComponentStartStop_IdempotentStop verifies that calling Stop() twice
 // returns nil on the second call.
 func TestComponentStartStop_IdempotentStop(t *testing.T) {
-	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
+	tc := natsclient.NewTestClient(t,
+		natsclient.WithStreams(
+			natsclient.TestStreamConfig{
+				Name:     "WORKFLOW",
+				Subjects: []string{"workflow.trigger.requirement-execution-loop", "workflow.async.>", "workflow.events.>"},
+			},
+			natsclient.TestStreamConfig{
+				Name:     "AGENT",
+				Subjects: []string{"agentic.loop_completed.v1", "agent.complete.>", "agent.task.>"},
+			},
+			natsclient.TestStreamConfig{
+				Name:     "GRAPH",
+				Subjects: []string{"graph.mutation.triple.add"},
+			},
+		),
+	)
 
 	raw, _ := json.Marshal(DefaultConfig())
 	comp, err := NewComponent(raw, component.Dependencies{
@@ -139,7 +185,22 @@ func TestComponentStartStop_IdempotentStop(t *testing.T) {
 // consumer) and the publish will silently be queued. We only assert the
 // trigger counter advances.
 func TestTriggerReceived(t *testing.T) {
-	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
+	tc := natsclient.NewTestClient(t,
+		natsclient.WithStreams(
+			natsclient.TestStreamConfig{
+				Name:     "WORKFLOW",
+				Subjects: []string{"workflow.trigger.requirement-execution-loop", "workflow.async.>", "workflow.events.>"},
+			},
+			natsclient.TestStreamConfig{
+				Name:     "AGENT",
+				Subjects: []string{"agentic.loop_completed.v1", "agent.complete.>", "agent.task.>"},
+			},
+			natsclient.TestStreamConfig{
+				Name:     "GRAPH",
+				Subjects: []string{"graph.mutation.triple.add"},
+			},
+		),
+	)
 
 	raw, _ := json.Marshal(DefaultConfig())
 	comp, err := NewComponent(raw, component.Dependencies{
@@ -158,21 +219,25 @@ func TestTriggerReceived(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = c.Stop(5 * time.Second) })
 
-	// Build and publish a valid RequirementExecutionRequest directly to NATS.
-	req := payloads.RequirementExecutionRequest{
+	// Build and publish a valid RequirementExecutionRequest via JetStream.
+	req := &payloads.RequirementExecutionRequest{
 		RequirementID: "integ-req-001",
 		Slug:          "integ-plan",
 		Title:         "Integration test requirement",
 		Model:         "default",
 	}
-	reqBytes, _ := json.Marshal(req)
-	envelope := map[string]json.RawMessage{
-		"payload": reqBytes,
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "integration-test")
+	data, err2 := json.Marshal(baseMsg)
+	if err2 != nil {
+		t.Fatalf("marshal BaseMessage: %v", err2)
 	}
-	data, _ := json.Marshal(envelope)
 
-	if err := tc.Client.Publish(ctx, subjectRequirementTrigger, data); err != nil {
-		t.Fatalf("Publish() error = %v", err)
+	js, err2 := tc.Client.JetStream()
+	if err2 != nil {
+		t.Fatalf("JetStream() error = %v", err2)
+	}
+	if _, err2 := js.Publish(ctx, subjectRequirementTrigger, data); err2 != nil {
+		t.Fatalf("JetStream Publish() error = %v", err2)
 	}
 
 	// Wait for the component to process the trigger (up to 5 seconds).
