@@ -16,22 +16,25 @@
 
 	let selectedTab = $state<RightTab>('trajectory');
 
-	// Use global loops (from layout) — plan.active_loops is often null
-	const activeLoops = $derived(
-		loops.filter((l) => ['pending', 'executing'].includes(l.state))
+	// Filter loops to the active plan (by workflow_slug)
+	const planLoops = $derived(
+		plan ? loops.filter((l) => l.workflow_slug === plan.slug) : []
 	);
-	const hasLoops = $derived(activeLoops.length > 0);
+	const activePlanLoops = $derived(
+		planLoops.filter((l) => ['pending', 'executing'].includes(l.state))
+	);
+	const hasLoops = $derived(activePlanLoops.length > 0);
 
-	// Auto-select most recent active loop
+	// Auto-select most recent active loop for this plan
 	const effectiveLoopId = $derived(
-		hasLoops ? activeLoops[0].loop_id : null
+		hasLoops ? activePlanLoops[0].loop_id : planLoops.length > 0 ? planLoops[0].loop_id : null
 	);
 
 	const tabs = $derived.by(() => {
 		const t: { id: RightTab; label: string; icon: string }[] = [];
 
-		// Show Trajectory when loops exist (active or completed)
-		if (loops.length > 0) {
+		// Show Trajectory when this plan has loops
+		if (planLoops.length > 0) {
 			t.push({ id: 'trajectory', label: 'Trajectory', icon: 'git-branch' });
 		}
 
@@ -71,8 +74,8 @@
 	{/if}
 
 	<div class="tab-content">
-		{#if activeTab === 'trajectory' && (effectiveLoopId || loops.length > 0)}
-			<TrajectoryPanel loopId={effectiveLoopId ?? loops[0]?.loop_id} compact />
+		{#if activeTab === 'trajectory' && effectiveLoopId}
+			<TrajectoryPanel loopId={effectiveLoopId} compact />
 		{:else if activeTab === 'reviews' && plan}
 			<div class="review-wrapper">
 				<ReviewDashboard slug={plan.slug} />
@@ -81,7 +84,7 @@
 			<div class="agents-wrapper">
 				<div class="empty-tab">
 					<Icon name="users" size={24} />
-					<span>{activeLoops.length} agent{activeLoops.length !== 1 ? 's' : ''} active</span>
+					<span>{activePlanLoops.length} agent{activePlanLoops.length !== 1 ? 's' : ''} active</span>
 				</div>
 			</div>
 		{:else if activeTab === 'files'}

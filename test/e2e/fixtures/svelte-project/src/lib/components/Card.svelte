@@ -1,15 +1,16 @@
 <script lang="ts">
 	import Button from './Button.svelte';
 	import Icon from './Icon.svelte';
-	import { onMount } from 'svelte';
+	import type { Snippet } from 'svelte';
 
 	interface Props {
 		title: string;
 		subtitle?: string;
 		onAction?: () => Promise<void>;
+		children?: Snippet;
 	}
 
-	let { title, subtitle = '', onAction }: Props = $props();
+	let { title, subtitle = '', onAction, children }: Props = $props();
 
 	let isLoading = $state(false);
 	let hasError = $state(false);
@@ -47,7 +48,9 @@
 	</div>
 
 	<div class="content">
-		<slot />
+		{#if children}
+			{@render children()}
+		{/if}
 	</div>
 
 	{#if onAction}
