@@ -407,20 +407,20 @@ func (s *ExecutionPhaseScenario) stageVerifyMockStats(ctx context.Context, resul
 		}
 	}
 
-	// Execution phase: mock-coder handles decomposer + TDD pipeline stages.
-	// With 9 scenarios x 1 decomposer call + TDD iterations, expect 50+ calls.
+	// Execution phase: mock-decomposer decomposes per-requirement, mock-coder
+	// handles TDD pipeline stages. With ~3 requirements × 4 coder calls, expect ≥10.
 	if coderCalls, ok := stats["mock-coder"]; ok {
 		result.SetDetail("mock_coder_calls", coderCalls)
-		if coderCalls < 10 {
-			result.AddWarning(fmt.Sprintf("expected mock-coder to be called at least 10 times, got %d", coderCalls))
+		if coderCalls < 6 {
+			result.AddWarning(fmt.Sprintf("expected mock-coder to be called at least 6 times, got %d", coderCalls))
 		}
 	} else {
 		result.AddWarning("mock-coder was not called — execution phase may not have progressed to task execution")
 	}
 
-	// Total calls should be well above plan-phase-only (17 calls).
-	if mockStats.TotalCalls < 30 {
-		result.AddWarning(fmt.Sprintf("expected at least 30 total mock calls (plan + execution), got %d", mockStats.TotalCalls))
+	// Total calls: planning (~7) + execution (~19) = ~26 with requirement-level dispatch.
+	if mockStats.TotalCalls < 20 {
+		result.AddWarning(fmt.Sprintf("expected at least 20 total mock calls (plan + execution), got %d", mockStats.TotalCalls))
 	}
 
 	var summary []string
