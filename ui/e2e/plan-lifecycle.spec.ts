@@ -78,8 +78,7 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 		expect(['implementing', 'executing', 'reviewing_rollup', 'complete']).toContain(plan.stage);
 	});
 
-	// TODO: Execution stalls at reviewing_rollup — rollup review mock fixture needed
-	test.skip('execution reaches complete', async ({ page }) => {
+	test('execution reaches complete', async ({ page }) => {
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
@@ -91,7 +90,7 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 		expect(plan.stage).toBe('complete');
 	});
 
-	test.skip('completed plan shows in Done filter', async ({ page }) => {
+	test('completed plan shows in Done filter', async ({ page }) => {
 		await page.goto('/');
 		await waitForHydration(page);
 
