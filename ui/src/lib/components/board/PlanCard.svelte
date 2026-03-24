@@ -3,7 +3,7 @@
 	import PipelineIndicator from './PipelineIndicator.svelte';
 	import ModeIndicator from './ModeIndicator.svelte';
 	import AgentBadge from './AgentBadge.svelte';
-	import { derivePlanPipeline, type PlanWithStatus } from '$lib/types/plan';
+	import { derivePlanPipeline, getStageLabel, type PlanWithStatus } from '$lib/types/plan';
 	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { promotePlan, executePlan } from '$lib/actions/plans';
 	import type { Task } from '$lib/types/task';
@@ -78,53 +78,30 @@
 		<ModeIndicator approved={plan.approved} busy={isBusy} compact />
 	</div>
 
-	{#if plan.approved}
-		<div class="pipeline-row">
+	<div class="stage-row">
+		<span class="stage-label" data-stage={plan.stage}>{getStageLabel(plan.stage)}</span>
+		{#if plan.approved}
 			<PipelineIndicator
 				plan={pipeline.plan}
 				requirements={pipeline.requirements}
 				execute={pipeline.execute}
+				compact
 			/>
-			{#if plan.task_stats}
-				<span class="task-count">
-					{plan.task_stats.completed}/{plan.task_stats.total} tasks
-				</span>
-			{/if}
-		</div>
-	{:else}
-		<div class="draft-row">
-			<span class="draft-label">Pending approval...</span>
-		</div>
-	{/if}
+		{/if}
+	</div>
 
-	{#if (plan.active_loops ?? []).length > 0}
-		<div class="agents-row">
-			{#each plan.active_loops ?? [] as loop}
-				<AgentBadge
-					role={loop.role}
-					model={loop.model}
-					state={loop.state}
-					iterations={loop.iterations}
-					maxIterations={loop.max_iterations}
-				/>
-			{/each}
-		</div>
-	{/if}
-
-	{#if isDraft && plan.goal}
+	{#if plan.stage === 'scenarios_generated'}
 		<div class="action-row">
 			<button class="promote-btn" onclick={handlePromote}>
-				<Icon name="check" size={14} />
-				Approve Plan
+				<Icon name="check-circle" size={14} />
+				Approve & Continue
 			</button>
 		</div>
-	{/if}
-
-	{#if plan.stage === 'tasks_approved' && plan.task_stats && plan.task_stats.total > 0}
+	{:else if plan.stage === 'ready_for_execution'}
 		<div class="action-row">
 			<button class="execute-btn" onclick={handleExecute}>
 				<Icon name="play" size={14} />
-				Start Execution
+				Run
 			</button>
 		</div>
 	{/if}
@@ -218,33 +195,29 @@
 		font-weight: var(--font-weight-semibold);
 	}
 
-	.pipeline-row {
+	.stage-row {
 		display: flex;
 		align-items: center;
-		gap: var(--space-4);
+		gap: var(--space-3);
 		margin-bottom: var(--space-3);
 	}
 
-	.draft-row {
-		margin-bottom: var(--space-3);
-	}
-
-	.draft-label {
-		font-size: var(--font-size-sm);
-		color: var(--color-text-muted);
-		font-style: italic;
-	}
-
-	.task-count {
-		font-size: var(--font-size-sm);
+	.stage-label {
+		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
 	}
 
-	.agents-row {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-2);
-		margin-bottom: var(--space-3);
+	.stage-label[data-stage='implementing'],
+	.stage-label[data-stage='executing'] {
+		color: var(--color-accent);
+	}
+
+	.stage-label[data-stage='complete'] {
+		color: var(--color-success);
+	}
+
+	.stage-label[data-stage='failed'] {
+		color: var(--color-error);
 	}
 
 	.action-row {
