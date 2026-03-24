@@ -21,16 +21,13 @@ test.describe('@mock board', () => {
 		}
 	});
 
-	test('Failed and Archived chips are off by default', async ({ page }) => {
+	test('Failed chip is off by default', async ({ page }) => {
 		await page.goto('/');
 		await waitForHydration(page);
 
 		const failedChip = page.getByRole('button', { name: /^Failed/ }).first();
-		const archivedChip = page.getByRole('button', { name: /^Archived/ }).first();
-
 		await expect(failedChip).toBeVisible();
 		await expect(failedChip).toHaveAttribute('aria-pressed', 'false');
-		await expect(archivedChip).toHaveAttribute('aria-pressed', 'false');
 	});
 
 	test('toggling a chip hides/shows its column', async ({ page }) => {

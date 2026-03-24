@@ -30,8 +30,7 @@
 		{ id: 'ready', label: 'Ready', stages: ['ready_for_execution'], defaultOn: true },
 		{ id: 'executing', label: 'Running', stages: ['implementing', 'executing', 'reviewing_rollup'], defaultOn: true },
 		{ id: 'complete', label: 'Complete', stages: ['complete'], defaultOn: true },
-		{ id: 'failed', label: 'Failed', stages: ['failed'], defaultOn: false },
-		{ id: 'archived', label: 'Archived', stages: ['archived'], defaultOn: false }
+		{ id: 'failed', label: 'Failed', stages: ['failed'], defaultOn: false }
 	];
 
 	// Load persisted column visibility
