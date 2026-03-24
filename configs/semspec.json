@@ -307,17 +307,7 @@
         "default_capability": "planning"
       }
     },
-    "plan-coordinator": {
-      "name": "plan-coordinator",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "max_concurrent_planners": 3,
-        "timeout_seconds": 1800,
-        "model": "default",
-        "default_capability": "planning"
-      }
-    },
+
     "plan-reviewer": {
       "name": "plan-reviewer",
       "type": "processor",
@@ -358,7 +348,11 @@
       "enabled": true,
       "config": {
         "execution_bucket_name": "WORKFLOW_EXECUTIONS",
-        "sandbox_url": "${SANDBOX_URL:-}"
+        "sandbox_url": "${SANDBOX_URL:-}",
+        "max_concurrent_planners": 3,
+        "timeout_seconds": 1800,
+        "model": "default",
+        "default_capability": "planning"
       }
     },
     "trajectory-api": {

@@ -32,7 +32,6 @@ import (
 	"github.com/c360studio/semspec/graph"
 	executionorchestrator "github.com/c360studio/semspec/processor/execution-orchestrator"
 	planapi "github.com/c360studio/semspec/processor/plan-api"
-	plancoordinator "github.com/c360studio/semspec/processor/plan-coordinator"
 	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semspec/processor/planner"
 	projectapi "github.com/c360studio/semspec/processor/project-api"
@@ -239,7 +238,6 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return planner.Register(componentRegistry) },
 		func() error { return planapi.Register(componentRegistry) },
 		func() error { return trajectoryapi.Register(componentRegistry) },
-		func() error { return plancoordinator.Register(componentRegistry) },
 		func() error { return planreviewer.Register(componentRegistry) },
 		func() error { return projectapi.Register(componentRegistry) },
 		func() error { return structuralvalidator.Register(componentRegistry) },

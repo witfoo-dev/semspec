@@ -1,4 +1,4 @@
-package plancoordinator
+package planapi
 
 import (
 	"encoding/json"
@@ -121,7 +121,17 @@ type timeoutHandle struct {
 }
 
 // PlannerResultPayload is the parsed result from a planner agent's loop completion.
+// The planner publishes Result{Content: &PlanContent{Goal, Context, Scope}},
+// so the Goal/Context/Scope are nested under "content".
 type PlannerResultPayload struct {
+	Content *plannerContentPayload `json:"content"`
+	// Legacy: top-level fields for backward compatibility with older planner versions.
+	Goal    string   `json:"goal"`
+	Context string   `json:"context"`
+	Scope   scopeRaw `json:"scope"`
+}
+
+type plannerContentPayload struct {
 	Goal    string   `json:"goal"`
 	Context string   `json:"context"`
 	Scope   scopeRaw `json:"scope"`

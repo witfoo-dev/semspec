@@ -5,10 +5,9 @@ package planner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -217,18 +216,10 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	if err := c.savePlan(ctx, trigger, planContent); err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to save plan",
-			"request_id", trigger.RequestID, "slug", trigger.Slug, "error", err)
-		c.handlePlanFailure(ctx, msg, trigger, err)
-		return
-	}
-
 	if err := c.publishResult(ctx, trigger, planContent, llmRequestIDs); err != nil {
 		c.logger.Warn("Failed to publish result notification",
 			"request_id", trigger.RequestID, "slug", trigger.Slug, "error", err)
-		// Don't fail — plan was saved successfully.
+		// Don't fail — plan content was generated successfully.
 	}
 
 	c.plansGenerated.Add(1)
@@ -281,6 +272,18 @@ func (c *Component) buildLLMContext(ctx context.Context, trigger *payloads.Plann
 // handlePlanFailure updates the workflow state with the error and transitions
 // to the generator_failed phase. For non-workflow requests, NAKs the message.
 func (c *Component) handlePlanFailure(ctx context.Context, msg jetstream.Msg, trigger *payloads.PlannerRequest, cause error) {
+	// Plan not found — non-recoverable. ACK to discard the stale trigger.
+	if errors.Is(cause, workflow.ErrPlanNotFound) {
+		c.logger.Warn("Plan not found, discarding stale planner trigger",
+			"slug", trigger.Slug,
+			"request_id", trigger.RequestID,
+			"reason", cause.Error())
+		if ackErr := msg.Ack(); ackErr != nil {
+			c.logger.Warn("Failed to ACK stale message", "error", ackErr)
+		}
+		return
+	}
+
 	// Check if this is a workflow-dispatched request
 	if trigger.ExecutionID != "" {
 		if err := c.transitionToFailure(ctx, trigger.ExecutionID, cause.Error()); err != nil {
@@ -323,16 +326,18 @@ type PlanContent struct {
 func (c *Component) generatePlan(ctx context.Context, trigger *payloads.PlannerRequest) (*PlanContent, []string, error) {
 	isRevision := trigger.Revision
 
-	// On revision, load the current plan directly for the user prompt.
+	// On revision, use PreviousPlanJSON from the trigger payload (preferred).
+	// The coordinator populates this field before dispatching, eliminating the
+	// disk read that was previously required here.
 	var currentPlanJSON string
-	if isRevision && trigger.Slug != "" {
-		if planJSON, err := c.loadCurrentPlanJSON(trigger.Slug); err != nil {
-			c.logger.Warn("Could not load current plan for revision context",
-				"slug", trigger.Slug, "error", err)
+	if isRevision {
+		if trigger.PreviousPlanJSON != "" {
+			currentPlanJSON = trigger.PreviousPlanJSON
+			c.logger.Info("Using previous plan JSON from trigger payload for revision",
+				"slug", trigger.Slug, "plan_json_length", len(currentPlanJSON))
 		} else {
-			currentPlanJSON = planJSON
-			c.logger.Info("Loaded current plan for revision prompt",
-				"slug", trigger.Slug, "plan_json_length", len(planJSON))
+			c.logger.Warn("Revision trigger missing PreviousPlanJSON — proceeding without previous plan context",
+				"slug", trigger.Slug)
 		}
 	}
 
@@ -489,117 +494,6 @@ func formatCorrectionPrompt(err error) string {
 	)
 }
 
-// savePlan saves the generated plan content to the plan.json file.
-func (c *Component) savePlan(ctx context.Context, trigger *payloads.PlannerRequest, planContent *PlanContent) error {
-	// Check context cancellation before filesystem operations
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("context cancelled: %w", err)
-	}
-
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		var err error
-		repoRoot, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("get working directory: %w", err)
-		}
-	}
-
-	manager := workflow.NewManager(repoRoot)
-
-	// Load existing plan
-	plan, err := manager.LoadPlan(ctx, trigger.Slug)
-	if err != nil {
-		return fmt.Errorf("load plan: %w", err)
-	}
-
-	// Update with LLM-generated content
-	plan.Goal = planContent.Goal
-	plan.Context = planContent.Context
-	plan.Scope = workflow.Scope{
-		Include:    planContent.Scope.Include,
-		Exclude:    planContent.Scope.Exclude,
-		DoNotTouch: planContent.Scope.DoNotTouch,
-	}
-
-	// Record trace ID for trajectory tracking
-	if trigger.TraceID != "" && !slices.Contains(plan.ExecutionTraceIDs, trigger.TraceID) {
-		plan.ExecutionTraceIDs = append(plan.ExecutionTraceIDs, trigger.TraceID)
-	}
-
-	// Debug logging for plan save (helps diagnose JSON corruption issues)
-	c.logger.Debug("saving plan",
-		"slug", trigger.Slug,
-		"goal_length", len(planContent.Goal),
-		"scope_include_count", len(planContent.Scope.Include),
-		"revision", trigger.Revision)
-
-	// Save the updated plan
-	if err := manager.SavePlan(ctx, plan); err != nil {
-		c.logger.Error("failed to save plan",
-			"slug", trigger.Slug,
-			"error", err)
-		return err
-	}
-
-	c.logger.Debug("plan saved successfully", "slug", trigger.Slug)
-	return nil
-}
-
-// loadCurrentPlanJSON reads the current plan.json from disk and returns its
-// Goal/Context/Scope fields as a JSON string. Used during revision to provide
-// the LLM with the plan it needs to fix, routed through the context-builder
-// for token budget management.
-func (c *Component) loadCurrentPlanJSON(slug string) (string, error) {
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		var err error
-		repoRoot, err = os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("get working directory: %w", err)
-		}
-	}
-
-	manager := workflow.NewManager(repoRoot)
-	plan, err := manager.LoadPlan(context.Background(), slug)
-	if err != nil {
-		c.logger.Error("failed to load plan for revision",
-			"slug", slug,
-			"error", err)
-		return "", fmt.Errorf("load plan: %w", err)
-	}
-
-	// Extract only the LLM-relevant fields to keep the payload focused
-	planSnapshot := struct {
-		Goal    string         `json:"goal"`
-		Context string         `json:"context"`
-		Scope   workflow.Scope `json:"scope"`
-	}{
-		Goal:    plan.Goal,
-		Context: plan.Context,
-		Scope:   plan.Scope,
-	}
-
-	data, err := json.MarshalIndent(planSnapshot, "", "  ")
-	if err != nil {
-		c.logger.Error("failed to marshal plan snapshot",
-			"slug", slug,
-			"error", err)
-		return "", fmt.Errorf("marshal plan: %w", err)
-	}
-
-	// Debug logging for plan load (helps diagnose JSON corruption issues)
-	goalPreview := plan.Goal
-	if len(goalPreview) > 50 {
-		goalPreview = goalPreview[:50] + "..."
-	}
-	c.logger.Debug("loaded plan for revision",
-		"slug", slug,
-		"data_length", len(data),
-		"goal_preview", goalPreview)
-
-	return string(data), nil
-}
 
 // PlannerResultType is the message type for planner results.
 var PlannerResultType = message.Type{Domain: "workflow", Category: "planner-result", Version: "v1"}

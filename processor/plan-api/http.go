@@ -590,13 +590,9 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		c.logger.Warn("Failed to publish plan entity", "slug", plan.Slug, "error", pubErr)
 	}
 
-	// Trigger plan-coordinator for the full plan phase pipeline:
-	// plan → requirements → scenarios → review → approve/escalate.
-	requestID, err := c.triggerPlanCoordinator(ctx, plan, tc.TraceID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	// Start coordination pipeline directly (in-process, no NATS round-trip).
+	requestID := uuid.New().String()
+	c.coordinator.StartCoordination(ctx, plan.Slug, plan.Title, plan.Title, plan.ProjectID, tc.TraceID, "", requestID, nil)
 
 	resp := &CreatePlanResponse{
 		Slug:      plan.Slug,
@@ -769,6 +765,9 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 	// Round 1: no requirements yet → trigger requirement/scenario generation.
 	// Round 2: requirements+scenarios exist → plan is ready for execution.
 	// This runs regardless of Approved flag since promote serves both rounds.
+	// Cancel any active coordination for this slug — the human has taken over.
+	c.coordinator.Cancel(slug, "plan promoted via REST API")
+
 	requirements, _ := manager.LoadRequirements(r.Context(), slug)
 	scenarios, _ := manager.LoadScenarios(r.Context(), slug)
 

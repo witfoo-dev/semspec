@@ -1,11 +1,10 @@
-package plancoordinator
+package planapi
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,14 +18,14 @@ import (
 // Local mock LLM — captures calls for assertion, returns sequential responses
 // ---------------------------------------------------------------------------
 
-type mockLLM struct {
+type mockCoordLLM struct {
 	responses []*llm.Response
 	errs      []error
 	calls     []llm.Request
 	idx       int
 }
 
-func (m *mockLLM) Complete(_ context.Context, req llm.Request) (*llm.Response, error) {
+func (m *mockCoordLLM) Complete(_ context.Context, req llm.Request) (*llm.Response, error) {
 	m.calls = append(m.calls, req)
 	i := m.idx
 	m.idx++
@@ -37,251 +36,66 @@ func (m *mockLLM) Complete(_ context.Context, req llm.Request) (*llm.Response, e
 	if i < len(m.responses) {
 		return m.responses[i], nil
 	}
-	return nil, fmt.Errorf("mockLLM: no response configured for call %d", i)
+	return nil, fmt.Errorf("mockCoordLLM: no response configured for call %d", i)
 }
 
-func newComponent(mock *mockLLM) *Component {
-	return &Component{
-		llmClient: mock,
-		logger:    slog.Default(),
-		config: Config{
+func newTestCoord(mock *mockCoordLLM) *coordinator {
+	co := &coordinator{
+		config: CoordinatorConfig{
 			DefaultCapability:     "planning",
 			MaxConcurrentPlanners: 3,
 			TimeoutSeconds:        1800,
 		},
+		logger:    slog.Default(),
+		llmClient: mock,
 	}
+	return co
 }
 
 // ---------------------------------------------------------------------------
-// Config validation tests
+// CoordinatorConfig validation and helpers
 // ---------------------------------------------------------------------------
 
-func TestConfig_Validate_Valid(t *testing.T) {
-	cfg := DefaultConfig()
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("DefaultConfig() should be valid, got: %v", err)
+func TestCoordinatorConfig_IsAutoApprove_Nil(t *testing.T) {
+	cfg := CoordinatorConfig{}
+	if !cfg.IsAutoApprove() {
+		t.Error("nil AutoApprove should default to true")
 	}
 }
 
-func TestConfig_Validate_MaxConcurrentPlanners_TooLow(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.MaxConcurrentPlanners = 0
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("expected error for MaxConcurrentPlanners = 0")
-	}
-	if !strings.Contains(err.Error(), "max_concurrent_planners") {
-		t.Errorf("error %q should mention max_concurrent_planners", err.Error())
+func TestCoordinatorConfig_IsAutoApprove_False(t *testing.T) {
+	f := false
+	cfg := CoordinatorConfig{AutoApprove: &f}
+	if cfg.IsAutoApprove() {
+		t.Error("explicit false should return false")
 	}
 }
 
-func TestConfig_Validate_MaxConcurrentPlanners_TooHigh(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.MaxConcurrentPlanners = 11
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("expected error for MaxConcurrentPlanners = 11")
-	}
-	if !strings.Contains(err.Error(), "max_concurrent_planners") {
-		t.Errorf("error %q should mention max_concurrent_planners", err.Error())
-	}
-}
-
-func TestConfig_Validate_MaxConcurrentPlanners_Boundaries(t *testing.T) {
-	for _, valid := range []int{1, 5, 10} {
-		cfg := DefaultConfig()
-		cfg.MaxConcurrentPlanners = valid
-		if err := cfg.Validate(); err != nil {
-			t.Errorf("MaxConcurrentPlanners=%d should be valid, got: %v", valid, err)
-		}
-	}
-}
-
-func TestConfig_Validate_BadTimeout(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.TimeoutSeconds = 0
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected error for zero timeout")
-	}
-}
-
-
-func TestConfig_GetTimeout(t *testing.T) {
-	cfg := Config{TimeoutSeconds: 60}
-	if got := cfg.GetTimeout(); got != 60*time.Second {
-		t.Errorf("GetTimeout() = %v, want 60s", got)
-	}
-}
-
-func TestConfig_GetTimeout_Default(t *testing.T) {
-	cfg := Config{}
+func TestCoordinatorConfig_GetTimeout_Default(t *testing.T) {
+	cfg := CoordinatorConfig{}
 	if got := cfg.GetTimeout(); got != 30*time.Minute {
 		t.Errorf("GetTimeout() default = %v, want 30m", got)
 	}
 }
 
-func TestDefaultConfig_HasExpectedDefaults(t *testing.T) {
-	cfg := DefaultConfig()
-
-	if cfg.MaxConcurrentPlanners != 3 {
-		t.Errorf("MaxConcurrentPlanners = %d, want 3", cfg.MaxConcurrentPlanners)
-	}
-	if cfg.DefaultCapability != "planning" {
-		t.Errorf("DefaultCapability = %q, want planning", cfg.DefaultCapability)
-	}
-	if cfg.TimeoutSeconds != 1800 {
-		t.Errorf("TimeoutSeconds = %d, want 1800", cfg.TimeoutSeconds)
-	}
-	if cfg.Model != "default" {
-		t.Errorf("Model = %q, want default", cfg.Model)
+func TestCoordinatorConfig_GetTimeout_Set(t *testing.T) {
+	cfg := CoordinatorConfig{TimeoutSeconds: 60}
+	if got := cfg.GetTimeout(); got != 60*time.Second {
+		t.Errorf("GetTimeout() = %v, want 60s", got)
 	}
 }
 
-func TestConfig_WithDefaults(t *testing.T) {
-	cfg := Config{MaxConcurrentPlanners: 5}
-	got := cfg.withDefaults()
-	if got.MaxConcurrentPlanners != 5 {
-		t.Errorf("withDefaults should preserve MaxConcurrentPlanners=5, got %d", got.MaxConcurrentPlanners)
-	}
-	if got.TimeoutSeconds != 1800 {
-		t.Errorf("withDefaults should set TimeoutSeconds=1800, got %d", got.TimeoutSeconds)
-	}
-	if got.Model != "default" {
-		t.Errorf("withDefaults should set Model=default, got %q", got.Model)
+func TestCoordinatorConfig_GetSemsourceReadinessBudget_Default(t *testing.T) {
+	cfg := CoordinatorConfig{}
+	if got := cfg.GetSemsourceReadinessBudget(); got != 2*time.Second {
+		t.Errorf("GetSemsourceReadinessBudget() default = %v, want 2s", got)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// PromptsConfig helper
-// ---------------------------------------------------------------------------
-
-func TestPromptsConfig_GetCoordinatorSystem_Nil(t *testing.T) {
-	var p *PromptsConfig
-	if got := p.GetCoordinatorSystem(); got != "" {
-		t.Errorf("nil PromptsConfig.GetCoordinatorSystem() = %q, want empty", got)
-	}
-}
-
-func TestPromptsConfig_GetCoordinatorSystem_Value(t *testing.T) {
-	p := &PromptsConfig{CoordinatorSystem: "/path/to/prompt.txt"}
-	if got := p.GetCoordinatorSystem(); got != "/path/to/prompt.txt" {
-		t.Errorf("GetCoordinatorSystem() = %q, want /path/to/prompt.txt", got)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Component metadata and lifecycle
-// ---------------------------------------------------------------------------
-
-func TestComponent_Meta(t *testing.T) {
-	c := &Component{config: DefaultConfig()}
-	meta := c.Meta()
-
-	if meta.Name != "plan-coordinator" {
-		t.Errorf("Meta.Name = %q, want plan-coordinator", meta.Name)
-	}
-	if meta.Type != "processor" {
-		t.Errorf("Meta.Type = %q, want processor", meta.Type)
-	}
-	if meta.Version == "" {
-		t.Error("Meta.Version should not be empty")
-	}
-	if meta.Description == "" {
-		t.Error("Meta.Description should not be empty")
-	}
-}
-
-func TestComponent_Initialize_Succeeds(t *testing.T) {
-	c := &Component{
-		config: DefaultConfig(),
-		logger: slog.Default(),
-	}
-	if err := c.Initialize(); err != nil {
-		t.Errorf("Initialize() error = %v, want nil", err)
-	}
-}
-
-func TestComponent_Stop_WhenNotRunning(t *testing.T) {
-	c := &Component{
-		config: DefaultConfig(),
-		logger: slog.Default(),
-	}
-	if err := c.Stop(5 * time.Second); err != nil {
-		t.Errorf("Stop() on non-running component error = %v, want nil", err)
-	}
-}
-
-func TestComponent_Health_WhenStopped(t *testing.T) {
-	c := &Component{
-		config: DefaultConfig(),
-		logger: slog.Default(),
-	}
-	h := c.Health()
-	if h.Healthy {
-		t.Error("Health().Healthy should be false when stopped")
-	}
-	if h.Status != "stopped" {
-		t.Errorf("Health().Status = %q, want stopped", h.Status)
-	}
-}
-
-func TestComponent_Health_ErrorCountTracksFailures(t *testing.T) {
-	c := &Component{
-		config: DefaultConfig(),
-		logger: slog.Default(),
-	}
-	// Must set running=true for Health() to include ErrorCount.
-	c.running = true
-	c.errors.Add(3)
-	h := c.Health()
-	if h.ErrorCount != 3 {
-		t.Errorf("Health().ErrorCount = %d, want 3", h.ErrorCount)
-	}
-}
-
-func TestComponent_DataFlow_LastActivity(t *testing.T) {
-	c := &Component{
-		config: DefaultConfig(),
-		logger: slog.Default(),
-	}
-	before := time.Now()
-	c.updateLastActivity()
-	after := time.Now()
-
-	flow := c.DataFlow()
-	if flow.LastActivity.Before(before) || flow.LastActivity.After(after) {
-		t.Errorf("DataFlow().LastActivity not in expected range: %v", flow.LastActivity)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Port configuration
-// ---------------------------------------------------------------------------
-
-func TestDefaultConfig_InputPorts(t *testing.T) {
-	cfg := DefaultConfig()
-	if cfg.Ports == nil {
-		t.Fatal("DefaultConfig Ports should not be nil")
-	}
-	if len(cfg.Ports.Inputs) != 4 {
-		t.Fatalf("DefaultConfig should have 4 input ports, got %d", len(cfg.Ports.Inputs))
-	}
-
-	names := make(map[string]bool)
-	for _, p := range cfg.Ports.Inputs {
-		names[p.Name] = true
-	}
-	for _, want := range []string{"coordination-trigger", "loop-completions", "requirements-generated", "scenarios-generated"} {
-		if !names[want] {
-			t.Errorf("missing input port %q", want)
-		}
-	}
-}
-
-func TestDefaultConfig_OutputPorts(t *testing.T) {
-	cfg := DefaultConfig()
-	if len(cfg.Ports.Outputs) < 2 {
-		t.Fatalf("DefaultConfig should have at least 2 output ports, got %d", len(cfg.Ports.Outputs))
+func TestCoordinatorConfig_GetSemsourceReadinessBudget_Set(t *testing.T) {
+	cfg := CoordinatorConfig{SemsourceReadinessBudget: "5s"}
+	if got := cfg.GetSemsourceReadinessBudget(); got != 5*time.Second {
+		t.Errorf("GetSemsourceReadinessBudget() = %v, want 5s", got)
 	}
 }
 
@@ -289,8 +103,8 @@ func TestDefaultConfig_OutputPorts(t *testing.T) {
 // parseFocusAreas — extracts focus areas from LLM JSON response
 // ---------------------------------------------------------------------------
 
-func TestParseFocusAreas_Valid(t *testing.T) {
-	c := newComponent(&mockLLM{})
+func TestCoord_ParseFocusAreas_Valid(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
 
 	content := `{
   "focus_areas": [
@@ -298,7 +112,7 @@ func TestParseFocusAreas_Valid(t *testing.T) {
     {"area": "data", "description": "Database models", "hints": ["models/", "store/"]}
   ]
 }`
-	focuses, err := c.parseFocusAreas(content)
+	focuses, err := co.parseFocusAreas(content)
 	if err != nil {
 		t.Fatalf("parseFocusAreas() error = %v", err)
 	}
@@ -316,8 +130,8 @@ func TestParseFocusAreas_Valid(t *testing.T) {
 	}
 }
 
-func TestParseFocusAreas_InCodeBlock(t *testing.T) {
-	c := newComponent(&mockLLM{})
+func TestCoord_ParseFocusAreas_InCodeBlock(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
 
 	content := "Here are the focus areas:\n```json\n" + `{
   "focus_areas": [
@@ -325,7 +139,7 @@ func TestParseFocusAreas_InCodeBlock(t *testing.T) {
   ]
 }` + "\n```\nThose are my recommendations."
 
-	focuses, err := c.parseFocusAreas(content)
+	focuses, err := co.parseFocusAreas(content)
 	if err != nil {
 		t.Fatalf("parseFocusAreas() error = %v", err)
 	}
@@ -337,26 +151,26 @@ func TestParseFocusAreas_InCodeBlock(t *testing.T) {
 	}
 }
 
-func TestParseFocusAreas_NoJSON(t *testing.T) {
-	c := newComponent(&mockLLM{})
-	_, err := c.parseFocusAreas("just text, no JSON here")
+func TestCoord_ParseFocusAreas_NoJSON(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
+	_, err := co.parseFocusAreas("just text, no JSON here")
 	if err == nil {
 		t.Fatal("expected error for response with no JSON")
 	}
 }
 
-func TestParseFocusAreas_EmptyFocusAreas(t *testing.T) {
-	c := newComponent(&mockLLM{})
-	_, err := c.parseFocusAreas(`{"focus_areas": []}`)
+func TestCoord_ParseFocusAreas_EmptyFocusAreas(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
+	_, err := co.parseFocusAreas(`{"focus_areas": []}`)
 	if err == nil {
 		t.Fatal("expected error for empty focus_areas array")
 	}
 }
 
-func TestParseFocusAreas_HintsOptional(t *testing.T) {
-	c := newComponent(&mockLLM{})
+func TestCoord_ParseFocusAreas_HintsOptional(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
 	content := `{"focus_areas": [{"area": "general", "description": "General analysis"}]}`
-	focuses, err := c.parseFocusAreas(content)
+	focuses, err := co.parseFocusAreas(content)
 	if err != nil {
 		t.Fatalf("parseFocusAreas() error = %v", err)
 	}
@@ -369,11 +183,11 @@ func TestParseFocusAreas_HintsOptional(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// parsePlannerResult — extracts planner result from loop completion event
+// parsePlannerResult
 // ---------------------------------------------------------------------------
 
-func TestParsePlannerResult_Valid(t *testing.T) {
-	c := newComponent(&mockLLM{})
+func TestCoord_ParsePlannerResult_Valid(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
 
 	content := `{
   "goal": "Implement authentication module",
@@ -383,7 +197,7 @@ func TestParsePlannerResult_Valid(t *testing.T) {
     "exclude": ["api/public/"]
   }
 }`
-	result, llmIDs := c.parsePlannerResult(content, "planner-123")
+	result, llmIDs := co.parsePlannerResult(content, "planner-123")
 	if result == nil {
 		t.Fatal("parsePlannerResult() returned nil")
 	}
@@ -407,9 +221,9 @@ func TestParsePlannerResult_Valid(t *testing.T) {
 	}
 }
 
-func TestParsePlannerResult_InvalidJSON_FallsBackToRaw(t *testing.T) {
-	c := newComponent(&mockLLM{})
-	result, _ := c.parsePlannerResult("I couldn't create a plan for this.", "p-1")
+func TestCoord_ParsePlannerResult_InvalidJSON_FallsBackToRaw(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
+	result, _ := co.parsePlannerResult("I couldn't create a plan for this.", "p-1")
 	if result == nil {
 		t.Fatal("parsePlannerResult() should return fallback result")
 	}
@@ -418,8 +232,8 @@ func TestParsePlannerResult_InvalidJSON_FallsBackToRaw(t *testing.T) {
 	}
 }
 
-func TestParsePlannerResult_DoNotTouchScope(t *testing.T) {
-	c := newComponent(&mockLLM{})
+func TestCoord_ParsePlannerResult_DoNotTouchScope(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
 	content := `{
   "goal": "Refactor safely",
   "context": "Careful approach",
@@ -428,7 +242,7 @@ func TestParsePlannerResult_DoNotTouchScope(t *testing.T) {
     "do_not_touch": ["legacy/critical.go"]
   }
 }`
-	result, _ := c.parsePlannerResult(content, "p-1")
+	result, _ := co.parsePlannerResult(content, "p-1")
 	if result == nil {
 		t.Fatal("parsePlannerResult() returned nil")
 	}
@@ -441,11 +255,11 @@ func TestParsePlannerResult_DoNotTouchScope(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// parseSynthesizedPlan — extracts synthesized plan from LLM response
+// parseSynthesizedPlan
 // ---------------------------------------------------------------------------
 
-func TestParseSynthesizedPlan_Valid(t *testing.T) {
-	c := newComponent(&mockLLM{})
+func TestCoord_ParseSynthesizedPlan_Valid(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
 	content := `{
   "goal": "Build a complete auth system with JWT tokens and refresh logic",
   "context": "The system needs both access and refresh tokens",
@@ -454,7 +268,7 @@ func TestParseSynthesizedPlan_Valid(t *testing.T) {
     "exclude": ["api/public/"]
   }
 }`
-	plan, err := c.parseSynthesizedPlan(content)
+	plan, err := co.parseSynthesizedPlan(content)
 	if err != nil {
 		t.Fatalf("parseSynthesizedPlan() error = %v", err)
 	}
@@ -469,17 +283,17 @@ func TestParseSynthesizedPlan_Valid(t *testing.T) {
 	}
 }
 
-func TestParseSynthesizedPlan_NoJSON(t *testing.T) {
-	c := newComponent(&mockLLM{})
-	_, err := c.parseSynthesizedPlan("The synthesized plan is not available in JSON format.")
+func TestCoord_ParseSynthesizedPlan_NoJSON(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
+	_, err := co.parseSynthesizedPlan("The synthesized plan is not available in JSON format.")
 	if err == nil {
 		t.Fatal("expected error for no JSON")
 	}
 }
 
-func TestParseSynthesizedPlan_EmptyGoalAllowed(t *testing.T) {
-	c := newComponent(&mockLLM{})
-	plan, err := c.parseSynthesizedPlan(`{"goal": "", "context": "ctx", "scope": {}}`)
+func TestCoord_ParseSynthesizedPlan_EmptyGoalAllowed(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
+	plan, err := co.parseSynthesizedPlan(`{"goal": "", "context": "ctx", "scope": {}}`)
 	if err != nil {
 		t.Fatalf("parseSynthesizedPlan() error = %v", err)
 	}
@@ -489,11 +303,11 @@ func TestParseSynthesizedPlan_EmptyGoalAllowed(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// simpleMerge — deterministic fallback when LLM synthesis fails
+// simpleMerge
 // ---------------------------------------------------------------------------
 
-func TestSimpleMerge_SingleResult(t *testing.T) {
-	c := newComponent(&mockLLM{})
+func TestCoord_SimpleMerge_SingleResult(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
 	results := []workflow.PlannerResult{
 		{
 			PlannerID: "p1",
@@ -507,7 +321,7 @@ func TestSimpleMerge_SingleResult(t *testing.T) {
 		},
 	}
 
-	plan := c.simpleMerge(results)
+	plan := co.simpleMerge(results)
 	if !strings.Contains(plan.Goal, "Build the API layer") {
 		t.Errorf("Goal = %q should contain original goal", plan.Goal)
 	}
@@ -516,8 +330,8 @@ func TestSimpleMerge_SingleResult(t *testing.T) {
 	}
 }
 
-func TestSimpleMerge_MultipleResults_MergesScope(t *testing.T) {
-	c := newComponent(&mockLLM{})
+func TestCoord_SimpleMerge_MultipleResults_MergesScope(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
 	results := []workflow.PlannerResult{
 		{
 			PlannerID: "p1",
@@ -540,7 +354,7 @@ func TestSimpleMerge_MultipleResults_MergesScope(t *testing.T) {
 		},
 	}
 
-	plan := c.simpleMerge(results)
+	plan := co.simpleMerge(results)
 
 	if !strings.Contains(plan.Goal, "[api]") {
 		t.Error("merged Goal should contain [api] tag")
@@ -548,7 +362,7 @@ func TestSimpleMerge_MultipleResults_MergesScope(t *testing.T) {
 	if !strings.Contains(plan.Goal, "[data]") {
 		t.Error("merged Goal should contain [data] tag")
 	}
-	if !containsAll(plan.Scope.Include, "api/", "handlers/", "models/", "store/") {
+	if !coordContainsAll(plan.Scope.Include, "api/", "handlers/", "models/", "store/") {
 		t.Errorf("Scope.Include = %v, should contain all merged paths", plan.Scope.Include)
 	}
 
@@ -561,19 +375,19 @@ func TestSimpleMerge_MultipleResults_MergesScope(t *testing.T) {
 	if vendorCount != 1 {
 		t.Errorf("vendor/ appears %d times in Exclude, want exactly 1 (deduplication)", vendorCount)
 	}
-	if !containsAll(plan.Scope.DoNotTouch, "legacy/") {
+	if !coordContainsAll(plan.Scope.DoNotTouch, "legacy/") {
 		t.Errorf("Scope.DoNotTouch = %v, should contain legacy/", plan.Scope.DoNotTouch)
 	}
 }
 
-func TestSimpleMerge_EmptyContext_Omitted(t *testing.T) {
-	c := newComponent(&mockLLM{})
+func TestCoord_SimpleMerge_EmptyContext_Omitted(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
 	results := []workflow.PlannerResult{
 		{FocusArea: "api", Goal: "Build API", Context: ""},
 		{FocusArea: "data", Goal: "Model data", Context: "Database design"},
 	}
 
-	plan := c.simpleMerge(results)
+	plan := co.simpleMerge(results)
 
 	if strings.Contains(plan.Context, "[api]") {
 		t.Errorf("Context = %q should not include empty [api] section", plan.Context)
@@ -584,12 +398,12 @@ func TestSimpleMerge_EmptyContext_Omitted(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// synthesizeResults — single-result path bypasses LLM
+// synthesizeResults
 // ---------------------------------------------------------------------------
 
-func TestSynthesizeResults_SingleResult_NoLLMCall(t *testing.T) {
-	mock := &mockLLM{}
-	c := newComponent(mock)
+func TestCoord_SynthesizeResults_SingleResult_NoLLMCall(t *testing.T) {
+	mock := &mockCoordLLM{}
+	co := newTestCoord(mock)
 
 	results := []workflow.PlannerResult{
 		{
@@ -601,7 +415,7 @@ func TestSynthesizeResults_SingleResult_NoLLMCall(t *testing.T) {
 		},
 	}
 
-	plan, requestID, err := c.synthesizeResults(context.Background(), results)
+	plan, requestID, err := co.synthesizeResults(context.Background(), results)
 	if err != nil {
 		t.Fatalf("synthesizeResults() error = %v", err)
 	}
@@ -616,7 +430,7 @@ func TestSynthesizeResults_SingleResult_NoLLMCall(t *testing.T) {
 	}
 }
 
-func TestSynthesizeResults_MultipleResults_CallsLLM(t *testing.T) {
+func TestCoord_SynthesizeResults_MultipleResults_CallsLLM(t *testing.T) {
 	synthesisResponse := `{
   "goal": "Build a comprehensive system",
   "context": "Merged context from all planners",
@@ -624,19 +438,19 @@ func TestSynthesizeResults_MultipleResults_CallsLLM(t *testing.T) {
     "include": ["api/", "models/"]
   }
 }`
-	mock := &mockLLM{
+	mock := &mockCoordLLM{
 		responses: []*llm.Response{
 			{Content: synthesisResponse, Model: "test-model"},
 		},
 	}
-	c := newComponent(mock)
+	co := newTestCoord(mock)
 
 	results := []workflow.PlannerResult{
 		{PlannerID: "p1", FocusArea: "api", Goal: "API layer", Scope: workflow.Scope{Include: []string{"api/"}}},
 		{PlannerID: "p2", FocusArea: "data", Goal: "Data layer", Scope: workflow.Scope{Include: []string{"models/"}}},
 	}
 
-	plan, _, err := c.synthesizeResults(context.Background(), results)
+	plan, _, err := co.synthesizeResults(context.Background(), results)
 	if err != nil {
 		t.Fatalf("synthesizeResults() error = %v", err)
 	}
@@ -648,18 +462,18 @@ func TestSynthesizeResults_MultipleResults_CallsLLM(t *testing.T) {
 	}
 }
 
-func TestSynthesizeResults_LLMFailure_FallsBackToSimpleMerge(t *testing.T) {
-	mock := &mockLLM{
+func TestCoord_SynthesizeResults_LLMFailure_FallsBackToSimpleMerge(t *testing.T) {
+	mock := &mockCoordLLM{
 		errs: []error{fmt.Errorf("LLM unavailable")},
 	}
-	c := newComponent(mock)
+	co := newTestCoord(mock)
 
 	results := []workflow.PlannerResult{
 		{PlannerID: "p1", FocusArea: "api", Goal: "API goal"},
 		{PlannerID: "p2", FocusArea: "data", Goal: "Data goal"},
 	}
 
-	plan, requestID, err := c.synthesizeResults(context.Background(), results)
+	plan, requestID, err := co.synthesizeResults(context.Background(), results)
 	if err != nil {
 		t.Fatalf("synthesizeResults() should not error on LLM failure (uses simpleMerge), got: %v", err)
 	}
@@ -671,20 +485,20 @@ func TestSynthesizeResults_LLMFailure_FallsBackToSimpleMerge(t *testing.T) {
 	}
 }
 
-func TestSynthesizeResults_EmptyGoalFromLLM_FallsBackToSimpleMerge(t *testing.T) {
-	mock := &mockLLM{
+func TestCoord_SynthesizeResults_EmptyGoalFromLLM_FallsBackToSimpleMerge(t *testing.T) {
+	mock := &mockCoordLLM{
 		responses: []*llm.Response{
 			{Content: `{"goal": "", "context": "some context", "scope": {}}`, Model: "test-model"},
 		},
 	}
-	c := newComponent(mock)
+	co := newTestCoord(mock)
 
 	results := []workflow.PlannerResult{
 		{PlannerID: "p1", FocusArea: "api", Goal: "API goal"},
 		{PlannerID: "p2", FocusArea: "data", Goal: "Data goal"},
 	}
 
-	plan, _, err := c.synthesizeResults(context.Background(), results)
+	plan, _, err := co.synthesizeResults(context.Background(), results)
 	if err != nil {
 		t.Fatalf("synthesizeResults() error = %v", err)
 	}
@@ -694,12 +508,12 @@ func TestSynthesizeResults_EmptyGoalFromLLM_FallsBackToSimpleMerge(t *testing.T)
 }
 
 // ---------------------------------------------------------------------------
-// determineFocusAreas — explicit focus areas bypass LLM
+// determineFocusAreas
 // ---------------------------------------------------------------------------
 
-func TestDetermineFocusAreas_ExplicitFocuses_BypassLLM(t *testing.T) {
-	mock := &mockLLM{}
-	c := newComponent(mock)
+func TestCoord_DetermineFocusAreas_ExplicitFocuses_BypassLLM(t *testing.T) {
+	mock := &mockCoordLLM{}
+	co := newTestCoord(mock)
 
 	trigger := &payloads.PlanCoordinatorRequest{
 		Slug:       "test-plan",
@@ -707,7 +521,7 @@ func TestDetermineFocusAreas_ExplicitFocuses_BypassLLM(t *testing.T) {
 		FocusAreas: []string{"api", "data", "auth"},
 	}
 
-	focuses, err := c.determineFocusAreas(context.Background(), trigger)
+	focuses, err := co.determineFocusAreas(context.Background(), trigger)
 	if err != nil {
 		t.Fatalf("determineFocusAreas() error = %v", err)
 	}
@@ -729,15 +543,15 @@ func TestDetermineFocusAreas_ExplicitFocuses_BypassLLM(t *testing.T) {
 	}
 }
 
-func TestDetermineFocusAreas_ExplicitFocuses_SetsDescription(t *testing.T) {
-	c := newComponent(&mockLLM{})
+func TestCoord_DetermineFocusAreas_ExplicitFocuses_SetsDescription(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
 
 	trigger := &payloads.PlanCoordinatorRequest{
 		Slug:       "test-plan",
 		FocusAreas: []string{"auth"},
 	}
 
-	focuses, err := c.determineFocusAreas(context.Background(), trigger)
+	focuses, err := co.determineFocusAreas(context.Background(), trigger)
 	if err != nil {
 		t.Fatalf("determineFocusAreas() error = %v", err)
 	}
@@ -753,7 +567,7 @@ func TestDetermineFocusAreas_ExplicitFocuses_SetsDescription(t *testing.T) {
 // coordinationExecution state helpers
 // ---------------------------------------------------------------------------
 
-func TestCoordinationExecution_AllPlannersComplete(t *testing.T) {
+func TestCoord_CoordinationExecution_AllPlannersComplete(t *testing.T) {
 	exec := &coordinationExecution{
 		ExpectedPlanners: 2,
 		CompletedResults: map[string]*workflow.PlannerResult{
@@ -769,7 +583,7 @@ func TestCoordinationExecution_AllPlannersComplete(t *testing.T) {
 	}
 }
 
-func TestCoordinationExecution_CollectResults(t *testing.T) {
+func TestCoord_CoordinationExecution_CollectResults(t *testing.T) {
 	exec := &coordinationExecution{
 		CompletedResults: map[string]*workflow.PlannerResult{
 			"t1": {Goal: "g1"},
@@ -782,7 +596,7 @@ func TestCoordinationExecution_CollectResults(t *testing.T) {
 	}
 }
 
-func TestFocusAreasJSON(t *testing.T) {
+func TestCoord_FocusAreasJSON(t *testing.T) {
 	areas := []*FocusArea{{Area: "api"}, {Area: "data"}}
 	got := focusAreasJSON(areas)
 	var names []string
@@ -795,67 +609,10 @@ func TestFocusAreasJSON(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// loadPrompt — custom prompt file loading
+// CoordinatorResult payload
 // ---------------------------------------------------------------------------
 
-func TestLoadPrompt_EmptyPath_ReturnsDefault(t *testing.T) {
-	c := &Component{logger: slog.Default()}
-	got := c.loadPrompt("", "default system prompt")
-	if got != "default system prompt" {
-		t.Errorf("loadPrompt with empty path = %q, want default", got)
-	}
-}
-
-func TestLoadPrompt_NonExistentFile_ReturnsDefault(t *testing.T) {
-	c := &Component{logger: slog.Default()}
-	got := c.loadPrompt("/nonexistent/path/prompt.txt", "fallback prompt")
-	if got != "fallback prompt" {
-		t.Errorf("loadPrompt with bad path = %q, want fallback", got)
-	}
-}
-
-func TestLoadPrompt_ValidFile_ReturnsFileContent(t *testing.T) {
-	c := &Component{logger: slog.Default()}
-
-	dir := t.TempDir()
-	promptPath := dir + "/custom-prompt.txt"
-	if err := os.WriteFile(promptPath, []byte("You are a custom coordinator."), 0o600); err != nil {
-		t.Fatalf("failed to create test file: %v", err)
-	}
-
-	got := c.loadPrompt(promptPath, "default")
-	if got != "You are a custom coordinator." {
-		t.Errorf("loadPrompt = %q, want file content", got)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Helper functions
-// ---------------------------------------------------------------------------
-
-func TestUnique_DeduplicatesPreservingOrder(t *testing.T) {
-	input := []string{"api/", "models/", "api/", "store/", "models/"}
-	got := unique(input)
-	if len(got) != 3 {
-		t.Fatalf("unique() len = %d, want 3", len(got))
-	}
-	if got[0] != "api/" || got[1] != "models/" || got[2] != "store/" {
-		t.Errorf("unique() = %v, want [api/ models/ store/]", got)
-	}
-}
-
-func TestUnique_EmptyInput(t *testing.T) {
-	got := unique(nil)
-	if len(got) != 0 {
-		t.Errorf("unique(nil) = %v, want empty", got)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// CoordinatorResult payload — schema and JSON round-trip
-// ---------------------------------------------------------------------------
-
-func TestCoordinatorResult_Schema(t *testing.T) {
+func TestCoord_CoordinatorResult_Schema(t *testing.T) {
 	r := &CoordinatorResult{}
 	schema := r.Schema()
 	if schema.Domain == "" || schema.Category == "" || schema.Version == "" {
@@ -863,7 +620,7 @@ func TestCoordinatorResult_Schema(t *testing.T) {
 	}
 }
 
-func TestCoordinatorResult_JSONRoundTrip(t *testing.T) {
+func TestCoord_CoordinatorResult_JSONRoundTrip(t *testing.T) {
 	original := &CoordinatorResult{
 		RequestID:     "req-123",
 		TraceID:       "trace-abc",
@@ -895,16 +652,16 @@ func TestCoordinatorResult_JSONRoundTrip(t *testing.T) {
 // callLLM
 // ---------------------------------------------------------------------------
 
-func TestCallLLM_UsesDefaultCapability(t *testing.T) {
-	mock := &mockLLM{
+func TestCoord_CallLLM_UsesDefaultCapability(t *testing.T) {
+	mock := &mockCoordLLM{
 		responses: []*llm.Response{
 			{Content: "response content", Model: "test-model", RequestID: "req-abc"},
 		},
 	}
-	c := newComponent(mock)
-	c.config.DefaultCapability = "planning"
+	co := newTestCoord(mock)
+	co.config.DefaultCapability = "planning"
 
-	content, requestID, err := c.callLLM(context.Background(), "system prompt", "user prompt")
+	content, requestID, err := co.callLLM(context.Background(), "system prompt", "user prompt")
 	if err != nil {
 		t.Fatalf("callLLM() error = %v", err)
 	}
@@ -919,13 +676,13 @@ func TestCallLLM_UsesDefaultCapability(t *testing.T) {
 	}
 }
 
-func TestCallLLM_ErrorPropagates(t *testing.T) {
-	mock := &mockLLM{
+func TestCoord_CallLLM_ErrorPropagates(t *testing.T) {
+	mock := &mockCoordLLM{
 		errs: []error{fmt.Errorf("connection timeout")},
 	}
-	c := newComponent(mock)
+	co := newTestCoord(mock)
 
-	_, _, err := c.callLLM(context.Background(), "sys", "usr")
+	_, _, err := co.callLLM(context.Background(), "sys", "usr")
 	if err == nil {
 		t.Fatal("expected error to propagate from LLM")
 	}
@@ -935,21 +692,94 @@ func TestCallLLM_ErrorPropagates(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Factory registration
+// coordUnique helper
 // ---------------------------------------------------------------------------
 
-func TestRegister_NilRegistry(t *testing.T) {
-	err := Register(nil)
-	if err == nil {
-		t.Fatal("Register(nil) should return error")
+func TestCoordUnique_DeduplicatesPreservingOrder(t *testing.T) {
+	input := []string{"api/", "models/", "api/", "store/", "models/"}
+	got := coordUnique(input)
+	if len(got) != 3 {
+		t.Fatalf("coordUnique() len = %d, want 3", len(got))
 	}
+	if got[0] != "api/" || got[1] != "models/" || got[2] != "store/" {
+		t.Errorf("coordUnique() = %v, want [api/ models/ store/]", got)
+	}
+}
+
+func TestCoordUnique_EmptyInput(t *testing.T) {
+	got := coordUnique(nil)
+	if len(got) != 0 {
+		t.Errorf("coordUnique(nil) = %v, want empty", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// parseCoordTaskID
+// ---------------------------------------------------------------------------
+
+func TestParseCoordTaskID_Valid(t *testing.T) {
+	role, entityID := parseCoordTaskID("planner.0::local.semspec.workflow.plan.execution.my-slug")
+	if role != "planner.0" {
+		t.Errorf("role = %q, want planner.0", role)
+	}
+	if entityID != "local.semspec.workflow.plan.execution.my-slug" {
+		t.Errorf("entityID = %q unexpected", entityID)
+	}
+}
+
+func TestParseCoordTaskID_NoSeparator(t *testing.T) {
+	role, entityID := parseCoordTaskID("no-separator-here")
+	if role != "" || entityID != "" {
+		t.Errorf("parseCoordTaskID without separator should return empty strings, got %q, %q", role, entityID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// parseReviewerVerdict
+// ---------------------------------------------------------------------------
+
+func TestCoord_ParseReviewerVerdict_Approved(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
+	verdict, summary := co.parseReviewerVerdict(`{"verdict":"approved","summary":"Looks good"}`)
+	if verdict != "approved" {
+		t.Errorf("verdict = %q, want approved", verdict)
+	}
+	if summary != "Looks good" {
+		t.Errorf("summary = %q, want 'Looks good'", summary)
+	}
+}
+
+func TestCoord_ParseReviewerVerdict_InvalidJSON(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
+	verdict, _ := co.parseReviewerVerdict("not json")
+	if verdict != "escalated" {
+		t.Errorf("verdict = %q, want escalated for invalid JSON", verdict)
+	}
+}
+
+func TestCoord_ParseReviewerVerdict_EmptyVerdict(t *testing.T) {
+	co := newTestCoord(&mockCoordLLM{})
+	verdict, _ := co.parseReviewerVerdict(`{"verdict":"","summary":""}`)
+	if verdict != "escalated" {
+		t.Errorf("verdict = %q, want escalated for empty verdict", verdict)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stop when not running
+// ---------------------------------------------------------------------------
+
+func TestCoordinator_Stop_WhenNotRunning(t *testing.T) {
+	co := newCoordinator(CoordinatorConfig{}, nil, slog.Default())
+	// Should not panic or block
+	co.Stop()
 }
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-func containsAll(slice []string, expected ...string) bool {
+func coordContainsAll(slice []string, expected ...string) bool {
 	set := make(map[string]bool, len(slice))
 	for _, s := range slice {
 		set[s] = true

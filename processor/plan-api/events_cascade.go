@@ -22,6 +22,9 @@ func (c *Component) triggerPartialRequirementGeneration(ctx context.Context, pla
 		TraceID:               latestTraceID(plan),
 		ReplaceRequirementIDs: affectedIDs,
 		RejectionReasons:      reasons,
+		Goal:                  plan.Goal,
+		Context:               plan.Context,
+		Scope:                 &plan.Scope,
 	}
 
 	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
@@ -55,6 +58,9 @@ func (c *Component) triggerRequirementGeneration(ctx context.Context, plan *work
 		Slug:        plan.Slug,
 		Title:       plan.Title,
 		TraceID:     latestTraceID(plan),
+		Goal:        plan.Goal,
+		Context:     plan.Context,
+		Scope:       &plan.Scope,
 	}
 
 	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
@@ -95,8 +101,11 @@ func (c *Component) handleRequirementsGeneratedEvent(ctx context.Context, event 
 		return
 	}
 
-	// Update plan.json status so HTTP API reflects the transition.
+	// Load plan to update status and carry Goal/Context into scenario generation.
+	var planGoal, planContext string
 	if plan, err := manager.LoadPlan(ctx, event.Slug); err == nil {
+		planGoal = plan.Goal
+		planContext = plan.Context
 		if err := manager.SetPlanStatus(ctx, plan, workflow.StatusRequirementsGenerated); err != nil {
 			c.logger.Debug("Failed to transition plan to requirements_generated",
 				"slug", event.Slug, "error", err)
@@ -118,7 +127,7 @@ func (c *Component) handleRequirementsGeneratedEvent(ctx context.Context, event 
 	}
 
 	for _, req := range requirements {
-		c.triggerScenarioGeneration(ctx, event.Slug, req.ID, event.TraceID)
+		c.triggerScenarioGeneration(ctx, event.Slug, req.ID, event.TraceID, planGoal, planContext)
 	}
 
 	c.logger.Info("Dispatched scenario generation for all requirements",
@@ -149,12 +158,16 @@ func (c *Component) handleScenariosGeneratedEvent(ctx context.Context, event *wo
 }
 
 // triggerScenarioGeneration publishes a ScenarioGeneratorRequest for a single requirement.
-func (c *Component) triggerScenarioGeneration(ctx context.Context, slug, requirementID, traceID string) {
+// planGoal and planContext are carried in the payload so the scenario-generator does not
+// need to read plan.json from disk; pass empty strings for backward compatibility.
+func (c *Component) triggerScenarioGeneration(ctx context.Context, slug, requirementID, traceID, planGoal, planContext string) {
 	req := &payloads.ScenarioGeneratorRequest{
 		ExecutionID:   uuid.New().String(),
 		Slug:          slug,
 		RequirementID: requirementID,
 		TraceID:       traceID,
+		PlanGoal:      planGoal,
+		PlanContext:   planContext,
 	}
 
 	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")

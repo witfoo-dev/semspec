@@ -1,9 +1,7 @@
-// Package plancoordinator provides a processor that coordinates concurrent planners
-// for parallel plan generation.
+// coordinator provides a plan-coordination pipeline embedded within plan-api.
+// It orchestrates a fan-out/fan-in pipeline:
 //
-// The plan-coordinator orchestrates a fan-out/fan-in pipeline:
-//
-//  1. Receives a coordination trigger with title, description, and optional focus areas.
+//  1. Receives a coordination trigger (via NATS or direct call).
 //  2. Determines focus areas (via explicit list or LLM-driven analysis).
 //  3. Dispatches N planner agents in parallel (one per focus area).
 //  4. Collects planner results via agentic.loop_completed events.
@@ -11,13 +9,9 @@
 //  6. Writes terminal phase triple — rules handle status transitions.
 //
 // State lives as entity triples in ENTITY_STATES. No typed Go structs are
-// stored in KV — the component keeps lightweight in-memory tracking (sync.Map)
+// stored in KV — the coordinator keeps lightweight in-memory tracking (sync.Map)
 // for routing completion events back to the correct coordination execution.
-//
-// Terminal status transitions (completed, failed) are owned by the JSON rule
-// processor, NOT by this component. This component writes only workflow.phase;
-// rules react and set workflow.status + publish events.
-package plancoordinator
+package planapi
 
 import (
 	"context"
@@ -30,9 +24,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
-	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
@@ -47,15 +41,24 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-const (
-	componentName    = "plan-coordinator"
-	componentVersion = "0.3.0"
+func init() {
+	if err := component.RegisterPayload(&component.PayloadRegistration{
+		Domain:      "workflow",
+		Category:    "coordinator-result",
+		Version:     "v1",
+		Description: "Plan coordinator result with planner count and status",
+		Factory:     func() any { return &CoordinatorResult{} },
+	}); err != nil {
+		panic("failed to register coordinator result payload: " + err.Error())
+	}
+}
 
+const (
 	// WorkflowSlugPlan identifies plan phase events in LoopCompletedEvent.
 	WorkflowSlugPlan = "semspec-plan"
 
 	// Phase values written to entity triples.
-	// The plan-coordinator advances through these phases sequentially.
+	// The coordinator advances through these phases sequentially.
 	// Rules react to terminal phases (approved, escalated, error) to set status.
 	phaseFocusing               = "focusing"
 	phasePlanning               = "planning"
@@ -96,32 +99,71 @@ const (
 	roleReviewer      = "reviewer"
 )
 
-// llmCompleter is the subset of the LLM client used by plan-coordinator.
-type llmCompleter interface {
+// coordinatorLLMCompleter is the subset of the LLM client used by the coordinator.
+type coordinatorLLMCompleter interface {
 	Complete(ctx context.Context, req llm.Request) (*llm.Response, error)
 }
 
-// consumerInfo tracks a JetStream consumer created during Start so it can be
+// coordinatorConsumerInfo tracks a JetStream consumer created during Start so it can be
 // stopped cleanly via StopConsumer rather than context cancellation.
-type consumerInfo struct {
+type coordinatorConsumerInfo struct {
 	streamName   string
 	consumerName string
 }
 
-// Component orchestrates parallel planner coordination.
-type Component struct {
-	config       Config
+// CoordinatorConfig holds coordinator-specific configuration fields.
+// It is a subset of the plan-api Config, extracted for clarity.
+type CoordinatorConfig struct {
+	MaxConcurrentPlanners    int
+	TimeoutSeconds           int
+	MaxReviewIterations      int
+	AutoApprove              *bool
+	Model                    string
+	DefaultCapability        string
+	RepoPath                 string
+	SemsourceReadinessBudget string
+	Prompts                  *PromptsConfig
+}
+
+// IsAutoApprove returns whether the human approval gate should be skipped.
+func (c *CoordinatorConfig) IsAutoApprove() bool {
+	if c.AutoApprove == nil {
+		return true
+	}
+	return *c.AutoApprove
+}
+
+// GetTimeout returns the coordination timeout as a duration.
+func (c *CoordinatorConfig) GetTimeout() time.Duration {
+	if c.TimeoutSeconds <= 0 {
+		return 30 * time.Minute
+	}
+	return time.Duration(c.TimeoutSeconds) * time.Second
+}
+
+// GetSemsourceReadinessBudget returns the parsed semsource readiness budget.
+func (c *CoordinatorConfig) GetSemsourceReadinessBudget() time.Duration {
+	if c.SemsourceReadinessBudget == "" {
+		return 2 * time.Second
+	}
+	d, err := time.ParseDuration(c.SemsourceReadinessBudget)
+	if err != nil || d <= 0 {
+		return 2 * time.Second
+	}
+	return d
+}
+
+// coordinator orchestrates parallel planner coordination.
+// It is unexported — internal to plan-api.
+type coordinator struct {
+	config       CoordinatorConfig
 	natsClient   *natsclient.Client
 	logger       *slog.Logger
-	platform     component.PlatformMeta
 	tripleWriter *graphutil.TripleWriter
 
-	llmClient     llmCompleter
+	llmClient     coordinatorLLMCompleter
 	modelRegistry *model.Registry
 	assembler     *prompt.Assembler
-
-	inputPorts  []component.Port
-	outputPorts []component.Port
 
 	// activeCoordinations maps entityID → *coordinationExecution.
 	activeCoordinations sync.Map
@@ -131,7 +173,7 @@ type Component struct {
 	slugIndex sync.Map
 
 	// Lifecycle
-	consumerInfos []consumerInfo
+	consumerInfos []coordinatorConsumerInfo
 	wg            sync.WaitGroup
 	running       bool
 	mu            sync.RWMutex
@@ -146,80 +188,78 @@ type Component struct {
 	lastActivity           time.Time
 }
 
-// NewComponent creates a new plan-coordinator from raw JSON config.
-func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (component.Discoverable, error) {
-	var cfg Config
-	if err := json.Unmarshal(rawConfig, &cfg); err != nil {
-		return nil, fmt.Errorf("unmarshal plan-coordinator config: %w", err)
-	}
-	cfg = cfg.withDefaults()
-
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
-	}
-
-	logger := deps.Logger
+// newCoordinator creates a new coordinator with explicit dependencies.
+func newCoordinator(cfg CoordinatorConfig, natsClient *natsclient.Client, logger *slog.Logger) *coordinator {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	logger = logger.With("component", componentName)
+	logger = logger.With("component", coordinatorName)
 
-	// Initialize prompt assembler with software domain
+	// Apply defaults.
+	if cfg.MaxConcurrentPlanners <= 0 {
+		cfg.MaxConcurrentPlanners = 3
+	}
+	if cfg.MaxReviewIterations <= 0 {
+		cfg.MaxReviewIterations = 3
+	}
+	if cfg.TimeoutSeconds <= 0 {
+		cfg.TimeoutSeconds = 1800
+	}
+	if cfg.Model == "" {
+		cfg.Model = "default"
+	}
+	if cfg.DefaultCapability == "" {
+		cfg.DefaultCapability = "planning"
+	}
+	if cfg.RepoPath == "" {
+		cfg.RepoPath = os.Getenv("SEMSPEC_REPO_PATH")
+		if cfg.RepoPath == "" {
+			cfg.RepoPath = "."
+		}
+	}
+	if cfg.AutoApprove == nil {
+		defaultTrue := true
+		cfg.AutoApprove = &defaultTrue
+	}
+
+	// Initialize prompt assembler with software domain.
 	registry := prompt.NewRegistry()
 	registry.RegisterAll(promptdomain.Software()...)
 	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
 	assembler := prompt.NewAssembler(registry)
 
-	c := &Component{
+	return &coordinator{
 		config:        cfg,
-		natsClient:    deps.NATSClient,
+		natsClient:    natsClient,
 		logger:        logger,
-		platform:      deps.Platform,
 		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger)),
 		modelRegistry: model.Global(),
 		assembler:     assembler,
 		tripleWriter: &graphutil.TripleWriter{
-			NATSClient:    deps.NATSClient,
+			NATSClient:    natsClient,
 			Logger:        logger,
-			ComponentName: componentName,
+			ComponentName: coordinatorName,
 		},
 	}
-
-	for _, p := range cfg.Ports.Inputs {
-		c.inputPorts = append(c.inputPorts, component.BuildPortFromDefinition(
-			component.PortDefinition{Name: p.Name, Subject: p.Subject, Type: p.Type, StreamName: p.StreamName},
-			component.DirectionInput,
-		))
-	}
-	for _, p := range cfg.Ports.Outputs {
-		c.outputPorts = append(c.outputPorts, component.BuildPortFromDefinition(
-			component.PortDefinition{Name: p.Name, Subject: p.Subject, Type: p.Type, StreamName: p.StreamName},
-			component.DirectionOutput,
-		))
-	}
-
-	return c, nil
 }
 
-// Initialize prepares the component.
-func (c *Component) Initialize() error { return nil }
+// Start begins consuming trigger events and loop-completion events from NATS.
+// It also reconciles any in-flight coordinations from graph state.
+func (co *coordinator) Start(ctx context.Context) error {
+	co.lifecycleMu.Lock()
+	defer co.lifecycleMu.Unlock()
 
-// Start begins consuming trigger events and loop-completion events.
-func (c *Component) Start(ctx context.Context) error {
-	c.lifecycleMu.Lock()
-	defer c.lifecycleMu.Unlock()
-
-	c.mu.RLock()
-	if c.running {
-		c.mu.RUnlock()
+	co.mu.RLock()
+	if co.running {
+		co.mu.RUnlock()
 		return nil
 	}
-	c.mu.RUnlock()
+	co.mu.RUnlock()
 
-	c.logger.Info("Starting plan-coordinator")
+	co.logger.Info("Starting plan-coordinator")
 
 	// Reconcile: recover in-flight coordinations from graph state.
-	c.reconcileFromGraph(ctx)
+	co.reconcileFromGraph(ctx)
 
 	// Consumer 1: coordination triggers (WORKFLOW stream).
 	triggerCfg := natsclient.StreamConsumerConfig{
@@ -232,10 +272,10 @@ func (c *Component) Start(ctx context.Context) error {
 		AckWait:       30 * time.Second,
 		MaxAckPending: 1,
 	}
-	if err := c.natsClient.ConsumeStreamWithConfig(ctx, triggerCfg, c.handleTrigger); err != nil {
+	if err := co.natsClient.ConsumeStreamWithConfig(ctx, triggerCfg, co.handleTrigger); err != nil {
 		return fmt.Errorf("consume coordination triggers: %w", err)
 	}
-	c.consumerInfos = append(c.consumerInfos, consumerInfo{
+	co.consumerInfos = append(co.consumerInfos, coordinatorConsumerInfo{
 		streamName:   triggerCfg.StreamName,
 		consumerName: triggerCfg.ConsumerName,
 	})
@@ -251,14 +291,14 @@ func (c *Component) Start(ctx context.Context) error {
 		AckWait:       30 * time.Second,
 		MaxAckPending: 10,
 	}
-	if err := c.natsClient.ConsumeStreamWithConfig(ctx, completionCfg, c.handleLoopCompleted); err != nil {
-		for _, info := range c.consumerInfos {
-			c.natsClient.StopConsumer(info.streamName, info.consumerName)
+	if err := co.natsClient.ConsumeStreamWithConfig(ctx, completionCfg, co.handleLoopCompleted); err != nil {
+		for _, info := range co.consumerInfos {
+			co.natsClient.StopConsumer(info.streamName, info.consumerName)
 		}
-		c.consumerInfos = nil
+		co.consumerInfos = nil
 		return fmt.Errorf("consume loop completions: %w", err)
 	}
-	c.consumerInfos = append(c.consumerInfos, consumerInfo{
+	co.consumerInfos = append(co.consumerInfos, coordinatorConsumerInfo{
 		streamName:   completionCfg.StreamName,
 		consumerName: completionCfg.ConsumerName,
 	})
@@ -274,14 +314,14 @@ func (c *Component) Start(ctx context.Context) error {
 		AckWait:       30 * time.Second,
 		MaxAckPending: 5,
 	}
-	if err := c.natsClient.ConsumeStreamWithConfig(ctx, reqsCfg, c.handleGeneratorEvent); err != nil {
-		for _, info := range c.consumerInfos {
-			c.natsClient.StopConsumer(info.streamName, info.consumerName)
+	if err := co.natsClient.ConsumeStreamWithConfig(ctx, reqsCfg, co.handleGeneratorEvent); err != nil {
+		for _, info := range co.consumerInfos {
+			co.natsClient.StopConsumer(info.streamName, info.consumerName)
 		}
-		c.consumerInfos = nil
+		co.consumerInfos = nil
 		return fmt.Errorf("consume requirements generated events: %w", err)
 	}
-	c.consumerInfos = append(c.consumerInfos, consumerInfo{
+	co.consumerInfos = append(co.consumerInfos, coordinatorConsumerInfo{
 		streamName:   reqsCfg.StreamName,
 		consumerName: reqsCfg.ConsumerName,
 	})
@@ -297,66 +337,64 @@ func (c *Component) Start(ctx context.Context) error {
 		AckWait:       30 * time.Second,
 		MaxAckPending: 5,
 	}
-	if err := c.natsClient.ConsumeStreamWithConfig(ctx, scenCfg, c.handleGeneratorEvent); err != nil {
-		for _, info := range c.consumerInfos {
-			c.natsClient.StopConsumer(info.streamName, info.consumerName)
+	if err := co.natsClient.ConsumeStreamWithConfig(ctx, scenCfg, co.handleGeneratorEvent); err != nil {
+		for _, info := range co.consumerInfos {
+			co.natsClient.StopConsumer(info.streamName, info.consumerName)
 		}
-		c.consumerInfos = nil
+		co.consumerInfos = nil
 		return fmt.Errorf("consume scenarios generated events: %w", err)
 	}
-	c.consumerInfos = append(c.consumerInfos, consumerInfo{
+	co.consumerInfos = append(co.consumerInfos, coordinatorConsumerInfo{
 		streamName:   scenCfg.StreamName,
 		consumerName: scenCfg.ConsumerName,
 	})
 
-	c.mu.Lock()
-	c.running = true
-	c.mu.Unlock()
+	co.mu.Lock()
+	co.running = true
+	co.mu.Unlock()
 
 	return nil
 }
 
 // Stop performs graceful shutdown.
-func (c *Component) Stop(timeout time.Duration) error {
-	c.lifecycleMu.Lock()
-	defer c.lifecycleMu.Unlock()
+func (co *coordinator) Stop() {
+	co.lifecycleMu.Lock()
+	defer co.lifecycleMu.Unlock()
 
-	c.mu.RLock()
-	if !c.running {
-		c.mu.RUnlock()
-		return nil
+	co.mu.RLock()
+	if !co.running {
+		co.mu.RUnlock()
+		return
 	}
-	c.mu.RUnlock()
+	co.mu.RUnlock()
 
-	c.logger.Info("Stopping plan-coordinator",
-		"triggers_processed", c.triggersProcessed.Load(),
-		"coordinations_completed", c.coordinationsCompleted.Load(),
-		"coordinations_failed", c.coordinationsFailed.Load(),
+	co.logger.Info("Stopping plan-coordinator",
+		"triggers_processed", co.triggersProcessed.Load(),
+		"coordinations_completed", co.coordinationsCompleted.Load(),
+		"coordinations_failed", co.coordinationsFailed.Load(),
 	)
 
-	for _, info := range c.consumerInfos {
-		c.natsClient.StopConsumer(info.streamName, info.consumerName)
+	for _, info := range co.consumerInfos {
+		co.natsClient.StopConsumer(info.streamName, info.consumerName)
 	}
-	c.consumerInfos = nil
+	co.consumerInfos = nil
 
 	done := make(chan struct{})
 	go func() {
-		c.wg.Wait()
+		co.wg.Wait()
 		close(done)
 	}()
 
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
+	timeout := 10 * time.Second
 	select {
 	case <-done:
-		c.logger.Debug("All in-flight handlers drained")
+		co.logger.Debug("All in-flight handlers drained")
 	case <-time.After(timeout):
-		c.logger.Warn("Timed out waiting for in-flight handlers to drain")
+		co.logger.Warn("Timed out waiting for in-flight handlers to drain")
 	}
 
 	// Cancel any active coordination timeouts.
-	c.activeCoordinations.Range(func(_, value any) bool {
+	co.activeCoordinations.Range(func(_, value any) bool {
 		exec := value.(*coordinationExecution)
 		exec.mu.Lock()
 		if exec.timeoutTimer != nil {
@@ -366,11 +404,94 @@ func (c *Component) Stop(timeout time.Duration) error {
 		return true
 	})
 
-	c.mu.Lock()
-	c.running = false
-	c.mu.Unlock()
+	co.mu.Lock()
+	co.running = false
+	co.mu.Unlock()
+}
 
-	return nil
+// Cancel terminates an active coordination by slug with the given reason.
+// This is called when a plan is promoted via the REST API.
+func (co *coordinator) Cancel(slug, reason string) {
+	if co == nil {
+		return
+	}
+	entityIDVal, ok := co.slugIndex.Load(slug)
+	if !ok {
+		return
+	}
+	entityID := entityIDVal.(string)
+
+	execVal, ok := co.activeCoordinations.Load(entityID)
+	if !ok {
+		return
+	}
+	exec := execVal.(*coordinationExecution)
+
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+
+	if exec.terminated {
+		return
+	}
+
+	co.markErrorLocked(context.Background(), exec, reason)
+}
+
+// StartCoordination initiates a coordination pipeline directly (in-process),
+// bypassing NATS. Used by the plan-api HTTP handler on plan creation.
+func (co *coordinator) StartCoordination(
+	ctx context.Context,
+	slug, title, description, projectID, traceID, loopID, requestID string,
+	focusAreas []string,
+) {
+	entityID := fmt.Sprintf("local.semspec.workflow.plan.execution.%s", slug)
+
+	exec := &coordinationExecution{
+		EntityID:         entityID,
+		Slug:             slug,
+		Title:            title,
+		Description:      description,
+		ProjectID:        projectID,
+		TraceID:          traceID,
+		LoopID:           loopID,
+		RequestID:        requestID,
+		CompletedResults: make(map[string]*workflow.PlannerResult),
+	}
+
+	// Deduplicate: if a coordination for this entityID already exists, skip.
+	co.slugIndex.Store(slug, entityID)
+	if _, loaded := co.activeCoordinations.LoadOrStore(entityID, exec); loaded {
+		co.logger.Debug("Duplicate StartCoordination for active coordination, skipping",
+			"entity_id", entityID,
+		)
+		return
+	}
+
+	co.triggersProcessed.Add(1)
+	co.updateLastActivity()
+
+	// Build a synthetic trigger for shared pipeline logic.
+	trigger := &payloads.PlanCoordinatorRequest{
+		RequestID:   requestID,
+		Slug:        slug,
+		Title:       title,
+		Description: description,
+		ProjectID:   projectID,
+		TraceID:     traceID,
+		LoopID:      loopID,
+		FocusAreas:  focusAreas,
+	}
+
+	// All coordination work uses a background context so it is not bounded by
+	// the caller's HTTP request context.
+	workCtx, workCancel := context.WithTimeout(context.Background(), co.config.GetTimeout())
+
+	co.wg.Add(1)
+	go func() {
+		defer co.wg.Done()
+		defer workCancel()
+		co.runCoordinationPipeline(workCtx, exec, trigger)
+	}()
 }
 
 // ---------------------------------------------------------------------------
@@ -388,14 +509,14 @@ var coordTerminalPhases = map[string]bool{
 // reconcileFromGraph queries ENTITY_STATES for active coordinations and
 // rebuilds the in-memory sync.Map for event routing. This allows the
 // coordinator to resume after a process restart.
-func (c *Component) reconcileFromGraph(ctx context.Context) {
+func (co *coordinator) reconcileFromGraph(ctx context.Context) {
 	reconcileCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	entities, err := c.tripleWriter.ReadEntitiesByPrefix(reconcileCtx,
+	entities, err := co.tripleWriter.ReadEntitiesByPrefix(reconcileCtx,
 		"local.semspec.workflow.plan.execution.", 100)
 	if err != nil {
-		c.logger.Info("No graph state to reconcile (expected on first start)",
+		co.logger.Info("No graph state to reconcile (expected on first start)",
 			"error", err)
 		return
 	}
@@ -425,13 +546,13 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 			fmt.Sscanf(round, "%d", &exec.ReviewRound)
 		}
 
-		c.activeCoordinations.Store(entityID, exec)
+		co.activeCoordinations.Store(entityID, exec)
 		if slug != "" {
-			c.slugIndex.Store(slug, entityID)
+			co.slugIndex.Store(slug, entityID)
 		}
 		recovered++
 
-		c.logger.Info("Recovered coordination from graph",
+		co.logger.Info("Recovered coordination from graph",
 			"entity_id", entityID,
 			"slug", slug,
 			"phase", phase,
@@ -440,60 +561,59 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 	}
 
 	if recovered > 0 {
-		c.logger.Info("Coordination reconciliation complete",
+		co.logger.Info("Coordination reconciliation complete",
 			"recovered", recovered,
 			"total_entities", len(entities))
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Trigger handler
+// Trigger handler (NATS entry point — kept for backward compatibility)
 // ---------------------------------------------------------------------------
 
-// handleTrigger parses a coordination trigger, determines focus areas, and
+// handleTrigger parses a coordination trigger from NATS, determines focus areas, and
 // dispatches N planner agents in parallel.
-func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
-	c.triggersProcessed.Add(1)
-	c.updateLastActivity()
+func (co *coordinator) handleTrigger(ctx context.Context, msg jetstream.Msg) {
+	co.triggersProcessed.Add(1)
+	co.updateLastActivity()
 
 	trigger, err := payloads.ParseReactivePayload[payloads.PlanCoordinatorRequest](msg.Data())
 	if err != nil {
-		c.logger.Error("Failed to parse coordination trigger", "error", err)
-		c.errors.Add(1)
+		co.logger.Error("Failed to parse coordination trigger", "error", err)
+		co.errors.Add(1)
 		_ = msg.Nak()
 		return
 	}
 
 	if trigger.Slug == "" {
-		c.logger.Error("Trigger missing slug")
-		c.errors.Add(1)
+		co.logger.Error("Trigger missing slug")
+		co.errors.Add(1)
 		_ = msg.Nak()
 		return
 	}
 	if strings.Contains(trigger.Slug, taskIDSep) {
-		c.logger.Error("Slug contains reserved separator", "slug", trigger.Slug, "separator", taskIDSep)
-		c.errors.Add(1)
+		co.logger.Error("Slug contains reserved separator", "slug", trigger.Slug, "separator", taskIDSep)
+		co.errors.Add(1)
 		_ = msg.Nak()
 		return
 	}
 
-	// Best-effort semsource readiness check. If semsource isn't ready
-	// within the budget, proceed with local graph only.
+	// Best-effort semsource readiness check.
 	if reg := graph.GlobalRegistry(); reg != nil && reg.SemsourceConfigured() {
-		budget := c.config.GetSemsourceReadinessBudget()
+		budget := co.config.GetSemsourceReadinessBudget()
 		gateCtx, gateCancel := context.WithTimeout(context.Background(), budget)
 		if err := reg.WaitForSemsource(gateCtx, budget); err != nil {
-			c.logger.Warn("Semsource not ready, proceeding with local graph only",
+			co.logger.Warn("Semsource not ready, proceeding with local graph only",
 				"error", err, "slug", trigger.Slug, "budget", budget)
 		} else {
-			c.logger.Info("Semsource ready", "slug", trigger.Slug)
+			co.logger.Info("Semsource ready", "slug", trigger.Slug)
 		}
 		gateCancel()
 	}
 
 	entityID := fmt.Sprintf("local.semspec.workflow.plan.execution.%s", trigger.Slug)
 
-	c.logger.Info("Coordination trigger received",
+	co.logger.Info("Coordination trigger received",
 		"slug", trigger.Slug,
 		"entity_id", entityID,
 		"trace_id", trigger.TraceID,
@@ -513,9 +633,9 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Deduplicate: if a coordination for this entityID already exists, skip.
-	c.slugIndex.Store(trigger.Slug, entityID)
-	if _, loaded := c.activeCoordinations.LoadOrStore(entityID, exec); loaded {
-		c.logger.Debug("Duplicate trigger for active coordination, skipping",
+	co.slugIndex.Store(trigger.Slug, entityID)
+	if _, loaded := co.activeCoordinations.LoadOrStore(entityID, exec); loaded {
+		co.logger.Debug("Duplicate trigger for active coordination, skipping",
 			"entity_id", entityID,
 		)
 		_ = msg.Ack()
@@ -527,44 +647,53 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 
 	// All coordination work uses a background context so it is not bounded by
 	// the JetStream message delivery context or the 30s AckWait.
-	workCtx, workCancel := context.WithTimeout(context.Background(), c.config.GetTimeout())
-	defer workCancel()
+	workCtx, workCancel := context.WithTimeout(context.Background(), co.config.GetTimeout())
 
-	c.wg.Add(1)
-	defer c.wg.Done()
+	co.wg.Add(1)
+	go func() {
+		defer co.wg.Done()
+		defer workCancel()
+		co.runCoordinationPipeline(workCtx, exec, trigger)
+	}()
+}
+
+// runCoordinationPipeline executes the full coordination pipeline starting from
+// focus area determination. Called by both handleTrigger and StartCoordination.
+func (co *coordinator) runCoordinationPipeline(ctx context.Context, exec *coordinationExecution, trigger *payloads.PlanCoordinatorRequest) {
+	entityID := exec.EntityID
 
 	// Write initial entity triples.
-	_ = c.tripleWriter.WriteTriple(workCtx, entityID, wf.Type, "coordination")
-	if err := c.tripleWriter.WriteTriple(workCtx, entityID, wf.Phase, phaseFocusing); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseFocusing, "error", err)
+	_ = co.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "coordination")
+	if err := co.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phaseFocusing); err != nil {
+		co.logger.Error("Failed to write phase triple", "phase", phaseFocusing, "error", err)
 	}
-	_ = c.tripleWriter.WriteTriple(workCtx, entityID, wf.Slug, trigger.Slug)
-	_ = c.tripleWriter.WriteTriple(workCtx, entityID, wf.Title, trigger.Title)
-	_ = c.tripleWriter.WriteTriple(workCtx, entityID, wf.ProjectID, trigger.ProjectID)
-	_ = c.tripleWriter.WriteTriple(workCtx, entityID, wf.TraceID, trigger.TraceID)
+	_ = co.tripleWriter.WriteTriple(ctx, entityID, wf.Slug, trigger.Slug)
+	_ = co.tripleWriter.WriteTriple(ctx, entityID, wf.Title, trigger.Title)
+	_ = co.tripleWriter.WriteTriple(ctx, entityID, wf.ProjectID, trigger.ProjectID)
+	_ = co.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
 
 	// Publish initial entity snapshot for graph observability.
-	c.publishEntity(workCtx, NewCoordinationEntity(exec).WithPhase(phaseFocusing))
+	co.publishEntity(ctx, NewCoordinationEntity(exec).WithPhase(phaseFocusing))
 
 	// Determine focus areas BEFORE acquiring exec.mu — the LLM call can take
 	// 30+ seconds and we don't want to block the timeout callback.
-	llmCtx := workCtx
+	llmCtx := ctx
 	if trigger.TraceID != "" || trigger.LoopID != "" {
-		llmCtx = llm.WithTraceContext(workCtx, llm.TraceContext{
+		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
 			TraceID: trigger.TraceID,
 			LoopID:  trigger.LoopID,
 		})
 	}
 
-	focuses, err := c.determineFocusAreas(llmCtx, trigger)
+	focuses, err := co.determineFocusAreas(llmCtx, trigger)
 	if err != nil {
-		c.logger.Error("Focus determination failed",
+		co.logger.Error("Focus determination failed",
 			"entity_id", entityID,
 			"slug", trigger.Slug,
 			"error", err,
 		)
 		exec.mu.Lock()
-		c.markErrorLocked(workCtx, exec, fmt.Sprintf("focus determination failed: %v", err))
+		co.markErrorLocked(ctx, exec, fmt.Sprintf("focus determination failed: %v", err))
 		exec.mu.Unlock()
 		return
 	}
@@ -573,33 +702,33 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
 
-	c.startExecutionTimeoutLocked(exec)
+	co.startExecutionTimeoutLocked(exec)
 
 	exec.FocusAreas = focuses
-	if err := c.tripleWriter.WriteTriple(workCtx, entityID, wf.Phase, phasePlanning); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phasePlanning, "error", err)
+	if err := co.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phasePlanning); err != nil {
+		co.logger.Error("Failed to write phase triple", "phase", phasePlanning, "error", err)
 	}
-	_ = c.tripleWriter.WriteTriple(workCtx, entityID, "workflow.focus_areas", focusAreasJSON(focuses))
-	_ = c.tripleWriter.WriteTriple(workCtx, entityID, "workflow.planner_count", len(focuses))
+	_ = co.tripleWriter.WriteTriple(ctx, entityID, "workflow.focus_areas", focusAreasJSON(focuses))
+	_ = co.tripleWriter.WriteTriple(ctx, entityID, "workflow.planner_count", len(focuses))
 
-	c.logger.Info("Focus areas determined, dispatching planners",
+	co.logger.Info("Focus areas determined, dispatching planners",
 		"entity_id", entityID,
 		"focus_count", len(focuses),
 	)
 
 	// Dispatch N planner agents.
-	c.dispatchPlannersLocked(workCtx, exec)
+	co.dispatchPlannersLocked(ctx, exec)
 }
 
 // ---------------------------------------------------------------------------
 // Loop-completion handler
 // ---------------------------------------------------------------------------
 
-func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) {
+func (co *coordinator) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) {
 	var base message.BaseMessage
 	if err := json.Unmarshal(msg.Data(), &base); err != nil {
-		c.logger.Debug("Failed to unmarshal loop completed envelope", "error", err)
-		c.errors.Add(1)
+		co.logger.Debug("Failed to unmarshal loop completed envelope", "error", err)
+		co.errors.Add(1)
 		_ = msg.Nak()
 		return
 	}
@@ -612,18 +741,18 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 	}
 
 	// Extract role and entityID from TaskID encoding: "role::entityID"
-	role, entityID := parseTaskID(event.TaskID)
+	role, entityID := parseCoordTaskID(event.TaskID)
 	if entityID == "" {
 		// Not our event — TaskID doesn't use our encoding.
 		_ = msg.Ack()
 		return
 	}
 
-	c.updateLastActivity()
+	co.updateLastActivity()
 
-	execVal, ok := c.activeCoordinations.Load(entityID)
+	execVal, ok := co.activeCoordinations.Load(entityID)
 	if !ok {
-		c.logger.Debug("No active coordination for entity", "entity_id", entityID)
+		co.logger.Debug("No active coordination for entity", "entity_id", entityID)
 		_ = msg.Ack()
 		return
 	}
@@ -636,19 +765,17 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 
 	switch {
 	case strings.HasPrefix(role, rolePlanner):
-		c.handlePlannerCompleteLocked(ctx, event, exec)
+		co.handlePlannerCompleteLocked(ctx, event, exec)
 	case role == roleReviewer:
-		c.handleReviewerCompleteLocked(ctx, event, exec)
+		co.handleReviewerCompleteLocked(ctx, event, exec)
 	default:
-		// Requirement/scenario generators signal via workflow.events.* subjects
-		// (not LoopCompletedEvent), so they're handled by handleGeneratorEvent.
-		c.logger.Debug("Unknown completion role", "role", role, "entity_id", entityID)
+		co.logger.Debug("Unknown completion role", "role", role, "entity_id", entityID)
 	}
 }
 
-// parseTaskID splits a "role::entityID" encoded TaskID.
+// parseCoordTaskID splits a "role::entityID" encoded TaskID.
 // Returns empty strings if the encoding doesn't match.
-func parseTaskID(taskID string) (role, entityID string) {
+func parseCoordTaskID(taskID string) (role, entityID string) {
 	parts := strings.SplitN(taskID, taskIDSep, 2)
 	if len(parts) != 2 {
 		return "", ""
@@ -664,20 +791,20 @@ func parseTaskID(taskID string) (role, entityID string) {
 // planners have completed, it triggers synthesis.
 //
 // Caller must hold exec.mu.
-func (c *Component) handlePlannerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *coordinationExecution) {
+func (co *coordinator) handlePlannerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *coordinationExecution) {
 	// Guard against racing with timeout — if already terminated, skip.
 	if exec.terminated {
 		return
 	}
 
 	// Parse the planner result.
-	result, llmRequestIDs := c.parsePlannerResult(event.Result, event.TaskID)
+	result, llmRequestIDs := co.parsePlannerResult(event.Result, event.TaskID)
 	if result != nil {
 		exec.CompletedResults[event.TaskID] = result
 	}
 	exec.LLMRequestIDs = append(exec.LLMRequestIDs, llmRequestIDs...)
 
-	c.logger.Info("Planner completed",
+	co.logger.Info("Planner completed",
 		"entity_id", exec.EntityID,
 		"task_id", event.TaskID,
 		"completed", len(exec.CompletedResults),
@@ -690,8 +817,8 @@ func (c *Component) handlePlannerCompleteLocked(ctx context.Context, event *agen
 	}
 
 	// All planners complete — synthesize outside the lock so the timeout
-	// callback can fire during the LLM call (same pattern as determineFocusAreas).
-	c.advancePhase(ctx, exec, phaseSynthesizing)
+	// callback can fire during the LLM call.
+	co.advancePhase(ctx, exec, phaseSynthesizing)
 	results := exec.collectResults()
 	entityID := exec.EntityID
 	traceID := exec.TraceID
@@ -704,17 +831,17 @@ func (c *Component) handlePlannerCompleteLocked(ctx context.Context, event *agen
 			TraceID: traceID, LoopID: loopID,
 		})
 	}
-	synthesized, synthLLMID, synthErr := c.synthesizeResults(llmCtx, results)
+	synthesized, synthLLMID, synthErr := co.synthesizeResults(llmCtx, results)
 
 	exec.mu.Lock()
 	if exec.terminated {
 		return // Timeout fired while we were synthesizing.
 	}
 	if synthErr != nil {
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("synthesis failed: %v", synthErr))
+		co.markErrorLocked(ctx, exec, fmt.Sprintf("synthesis failed: %v", synthErr))
 		return
 	}
-	c.finishSynthesisLocked(ctx, exec, entityID, synthesized, synthLLMID)
+	co.finishSynthesisLocked(ctx, exec, entityID, synthesized, synthLLMID)
 }
 
 // ---------------------------------------------------------------------------
@@ -722,35 +849,49 @@ func (c *Component) handlePlannerCompleteLocked(ctx context.Context, event *agen
 // ---------------------------------------------------------------------------
 
 // finishSynthesisLocked writes synthesis results and advances to requirement generation.
-// Called after the LLM synthesis call completes successfully.
 // Caller must hold exec.mu.
-func (c *Component) finishSynthesisLocked(ctx context.Context, exec *coordinationExecution, entityID string, synthesized *SynthesizedPlan, synthLLMID string) {
+func (co *coordinator) finishSynthesisLocked(ctx context.Context, exec *coordinationExecution, entityID string, synthesized *SynthesizedPlan, synthLLMID string) {
 	exec.SynthesizedPlan = synthesized
 	exec.SynthesisLLMID = synthLLMID
 
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.plan_goal", synthesized.Goal)
+	_ = co.tripleWriter.WriteTriple(ctx, entityID, "workflow.plan_goal", synthesized.Goal)
 	if synthesized.Context != "" {
-		_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.plan_context", synthesized.Context)
+		_ = co.tripleWriter.WriteTriple(ctx, entityID, "workflow.plan_context", synthesized.Context)
 	}
 	if scopeJSON, err := json.Marshal(synthesized.Scope); err == nil {
-		_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.plan_scope", string(scopeJSON))
+		_ = co.tripleWriter.WriteTriple(ctx, entityID, "workflow.plan_scope", string(scopeJSON))
 	}
 
-	c.advancePhase(ctx, exec, phasePlanned)
+	// Write synthesized plan content to plan.json (single writer for Goal/Context/Scope).
+	// The coordinator is the authoritative writer for these fields; the planner no longer writes to disk.
+	manager := workflow.NewManager(co.config.RepoPath)
+	if plan, err := manager.LoadPlan(ctx, exec.Slug); err == nil {
+		plan.Goal = synthesized.Goal
+		plan.Context = synthesized.Context
+		plan.Scope = synthesized.Scope
+		if saveErr := manager.SavePlan(ctx, plan); saveErr != nil {
+			co.logger.Warn("Failed to save synthesized plan to disk",
+				"slug", exec.Slug, "error", saveErr)
+		}
+	} else {
+		co.logger.Warn("Failed to load plan for synthesis save",
+			"slug", exec.Slug, "error", err)
+	}
 
-	c.logger.Info("Plan synthesized, dispatching reviewer (round 1)",
+	co.advancePhase(ctx, exec, phasePlanned)
+
+	co.logger.Info("Plan synthesized, dispatching reviewer (round 1)",
 		"entity_id", entityID,
 		"slug", exec.Slug,
 		"planner_count", exec.ExpectedPlanners,
 	)
 
-	c.publishEntity(context.Background(), NewCoordinationEntity(exec).WithPhase(phasePlanned))
+	co.publishEntity(context.Background(), NewCoordinationEntity(exec).WithPhase(phasePlanned))
 
-	// Dispatch plan reviewer (round 1). On approval, handleReviewerCompleteLocked
-	// triggers requirement/scenario generation (round 2).
+	// Dispatch plan reviewer (round 1).
 	exec.ReviewRound = 1
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.coordination.review_round", 1)
-	c.dispatchReviewerLocked(ctx, exec)
+	_ = co.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.coordination.review_round", 1)
+	co.dispatchReviewerLocked(ctx, exec)
 }
 
 // ---------------------------------------------------------------------------
@@ -759,38 +900,38 @@ func (c *Component) finishSynthesisLocked(ctx context.Context, exec *coordinatio
 
 // markErrorLocked transitions to the error terminal state.
 // Caller must hold exec.mu.
-func (c *Component) markErrorLocked(ctx context.Context, exec *coordinationExecution, reason string) {
+func (co *coordinator) markErrorLocked(ctx context.Context, exec *coordinationExecution, reason string) {
 	if exec.terminated {
 		return
 	}
 	exec.terminated = true
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseError, "error", err)
+	if err := co.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
+		co.logger.Error("Failed to write phase triple", "phase", phaseError, "error", err)
 	}
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ErrorReason, reason)
+	_ = co.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ErrorReason, reason)
 
-	c.errors.Add(1)
-	c.coordinationsFailed.Add(1)
+	co.errors.Add(1)
+	co.coordinationsFailed.Add(1)
 
-	c.logger.Error("Coordination failed",
+	co.logger.Error("Coordination failed",
 		"entity_id", exec.EntityID,
 		"slug", exec.Slug,
 		"reason", reason,
 	)
 
-	c.publishEntity(context.Background(), NewCoordinationEntity(exec).WithPhase(phaseError).WithErrorReason(reason))
-	c.cleanupExecutionLocked(exec)
+	co.publishEntity(context.Background(), NewCoordinationEntity(exec).WithPhase(phaseError).WithErrorReason(reason))
+	co.cleanupExecutionLocked(exec)
 }
 
 // cleanupExecutionLocked removes execution from maps and cancels timeout.
 // Caller must hold exec.mu.
-func (c *Component) cleanupExecutionLocked(exec *coordinationExecution) {
+func (co *coordinator) cleanupExecutionLocked(exec *coordinationExecution) {
 	if exec.timeoutTimer != nil {
 		exec.timeoutTimer.stop()
 	}
-	c.slugIndex.Delete(exec.Slug)
-	c.activeCoordinations.Delete(exec.EntityID)
+	co.slugIndex.Delete(exec.Slug)
+	co.activeCoordinations.Delete(exec.EntityID)
 }
 
 // ---------------------------------------------------------------------------
@@ -801,18 +942,18 @@ func (c *Component) cleanupExecutionLocked(exec *coordinationExecution) {
 // if it does not complete within the configured timeout.
 //
 // Caller must hold exec.mu.
-func (c *Component) startExecutionTimeoutLocked(exec *coordinationExecution) {
-	timeout := c.config.GetTimeout()
+func (co *coordinator) startExecutionTimeoutLocked(exec *coordinationExecution) {
+	timeout := co.config.GetTimeout()
 
 	timer := time.AfterFunc(timeout, func() {
-		c.logger.Warn("Coordination timed out",
+		co.logger.Warn("Coordination timed out",
 			"entity_id", exec.EntityID,
 			"slug", exec.Slug,
 			"timeout", timeout,
 		)
 		exec.mu.Lock()
 		defer exec.mu.Unlock()
-		c.markErrorLocked(context.Background(), exec, fmt.Sprintf("coordination timed out after %s", timeout))
+		co.markErrorLocked(context.Background(), exec, fmt.Sprintf("coordination timed out after %s", timeout))
 	})
 
 	exec.timeoutTimer = &timeoutHandle{
@@ -827,17 +968,14 @@ func (c *Component) startExecutionTimeoutLocked(exec *coordinationExecution) {
 // dispatchPlannersLocked dispatches one planner agent per focus area.
 //
 // Caller must hold exec.mu.
-func (c *Component) dispatchPlannersLocked(ctx context.Context, exec *coordinationExecution) {
+func (co *coordinator) dispatchPlannersLocked(ctx context.Context, exec *coordinationExecution) {
 	exec.ExpectedPlanners = len(exec.FocusAreas)
 	exec.PlannerTaskIDs = make([]string, 0, exec.ExpectedPlanners)
 
 	for i, focus := range exec.FocusAreas {
-		// TaskID encodes role::entityID for completion routing.
-		// Include index to ensure uniqueness when multiple planners run in parallel.
 		taskID := fmt.Sprintf("planner.%d%s%s", i, taskIDSep, exec.EntityID)
 		exec.PlannerTaskIDs = append(exec.PlannerTaskIDs, taskID)
 
-		// Build the planner request payload with TaskID for LoopCompletedEvent routing.
 		req := &payloads.PlannerRequest{
 			ExecutionID:      exec.EntityID,
 			TaskID:           taskID,
@@ -849,22 +987,28 @@ func (c *Component) dispatchPlannersLocked(ctx context.Context, exec *coordinati
 			ProjectID:        exec.ProjectID,
 			TraceID:          exec.TraceID,
 			LoopID:           exec.LoopID,
-			Prompt:           c.buildPlannerPrompt(exec, focus),
+			Prompt:           co.buildPlannerPrompt(exec, focus),
 			Revision:         exec.Iteration > 0,
 			PreviousFindings: exec.ReviewFeedback,
 		}
 
-		// Publish typed request to planner's async subject.
-		// The planner component emits LoopCompletedEvent directly when done
-		// (no separate TaskMessage/agentic-loop needed).
-		if err := c.publishBaseMessage(ctx, subjectPlannerAsync, req); err != nil {
-			c.logger.Error("Failed to publish planner request",
+		// On revision, populate PreviousPlanJSON so the planner doesn't need to
+		// read plan.json from disk. The synthesized plan from the previous iteration
+		// is what the reviewer rejected — provide it as context for the retry.
+		if exec.Iteration > 0 && exec.SynthesizedPlan != nil {
+			if planJSON, err := json.Marshal(exec.SynthesizedPlan); err == nil {
+				req.PreviousPlanJSON = string(planJSON)
+			}
+		}
+
+		if err := co.publishBaseMessage(ctx, subjectPlannerAsync, req); err != nil {
+			co.logger.Error("Failed to publish planner request",
 				"slug", exec.Slug, "focus", focus.Area, "error", err)
-			c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch planner failed: %v", err))
+			co.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch planner failed: %v", err))
 			return
 		}
 
-		c.logger.Info("Dispatched planner",
+		co.logger.Info("Dispatched planner",
 			"slug", exec.Slug,
 			"focus", focus.Area,
 			"task_id", taskID,
@@ -878,12 +1022,12 @@ func (c *Component) dispatchPlannersLocked(ctx context.Context, exec *coordinati
 
 // dispatchRequirementGeneratorLocked dispatches the requirement generator
 // after plan synthesis completes.
-func (c *Component) dispatchRequirementGeneratorLocked(ctx context.Context, exec *coordinationExecution) {
+func (co *coordinator) dispatchRequirementGeneratorLocked(ctx context.Context, exec *coordinationExecution) {
 	if exec.terminated {
 		return
 	}
 
-	c.advancePhase(ctx, exec, phaseGeneratingRequirements)
+	co.advancePhase(ctx, exec, phaseGeneratingRequirements)
 
 	req := &payloads.RequirementGeneratorRequest{
 		ExecutionID: exec.EntityID,
@@ -892,33 +1036,41 @@ func (c *Component) dispatchRequirementGeneratorLocked(ctx context.Context, exec
 		TraceID:     exec.TraceID,
 	}
 
-	if err := c.publishBaseMessage(ctx, subjectReqGeneratorAsync, req); err != nil {
-		c.logger.Error("Failed to dispatch requirement generator", "error", err)
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch requirement-generator failed: %v", err))
+	// Populate plan content from synthesized plan so downstream components
+	// don't need to read plan.json from disk.
+	if exec.SynthesizedPlan != nil {
+		req.Goal = exec.SynthesizedPlan.Goal
+		req.Context = exec.SynthesizedPlan.Context
+		req.Scope = &exec.SynthesizedPlan.Scope
+	}
+
+	if err := co.publishBaseMessage(ctx, subjectReqGeneratorAsync, req); err != nil {
+		co.logger.Error("Failed to dispatch requirement generator", "error", err)
+		co.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch requirement-generator failed: %v", err))
 		return
 	}
 
-	c.logger.Info("Dispatched requirement-generator", "slug", exec.Slug)
+	co.logger.Info("Dispatched requirement-generator", "slug", exec.Slug)
 }
 
 // dispatchScenarioGeneratorLocked dispatches the scenario generator
 // after requirements are generated.
-func (c *Component) dispatchScenarioGeneratorLocked(ctx context.Context, exec *coordinationExecution) {
+func (co *coordinator) dispatchScenarioGeneratorLocked(ctx context.Context, exec *coordinationExecution) {
 	if exec.terminated {
 		return
 	}
 
-	c.advancePhase(ctx, exec, phaseGeneratingScenarios)
+	co.advancePhase(ctx, exec, phaseGeneratingScenarios)
 
 	// Load requirements from disk to fan out one scenario-generator per requirement.
-	manager := workflow.NewManager(c.config.RepoPath)
+	manager := workflow.NewManager(co.config.RepoPath)
 	requirements, err := manager.LoadRequirements(ctx, exec.Slug)
 	if err != nil {
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("load requirements for scenario generation: %v", err))
+		co.markErrorLocked(ctx, exec, fmt.Sprintf("load requirements for scenario generation: %v", err))
 		return
 	}
 	if len(requirements) == 0 {
-		c.markErrorLocked(ctx, exec, "no requirements found — cannot generate scenarios")
+		co.markErrorLocked(ctx, exec, "no requirements found — cannot generate scenarios")
 		return
 	}
 
@@ -929,28 +1081,35 @@ func (c *Component) dispatchScenarioGeneratorLocked(ctx context.Context, exec *c
 			RequirementID: requirement.ID,
 			TraceID:       exec.TraceID,
 		}
-		if err := c.publishBaseMessage(ctx, subjectScenGeneratorAsync, req); err != nil {
-			c.logger.Error("Failed to dispatch scenario generator",
+
+		// Populate plan content so scenario-generator doesn't need to read plan.json.
+		if exec.SynthesizedPlan != nil {
+			req.PlanGoal = exec.SynthesizedPlan.Goal
+			req.PlanContext = exec.SynthesizedPlan.Context
+		}
+
+		if err := co.publishBaseMessage(ctx, subjectScenGeneratorAsync, req); err != nil {
+			co.logger.Error("Failed to dispatch scenario generator",
 				"requirement_id", requirement.ID, "error", err)
-			c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch scenario-generator failed: %v", err))
+			co.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch scenario-generator failed: %v", err))
 			return
 		}
 	}
 
-	c.logger.Info("Dispatched scenario-generators",
+	co.logger.Info("Dispatched scenario-generators",
 		"slug", exec.Slug, "requirement_count", len(requirements))
 }
 
-// dispatchReviewerLocked dispatches the plan reviewer (el jefe) after
+// dispatchReviewerLocked dispatches the plan reviewer after
 // scenarios are generated.
-func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *coordinationExecution) {
+func (co *coordinator) dispatchReviewerLocked(ctx context.Context, exec *coordinationExecution) {
 	if exec.terminated {
 		return
 	}
 
 	taskID := fmt.Sprintf("%s%s%s", roleReviewer, taskIDSep, exec.EntityID)
 
-	c.advancePhase(ctx, exec, phaseReviewing)
+	co.advancePhase(ctx, exec, phaseReviewing)
 
 	req := &payloads.PlanReviewRequest{
 		ExecutionID:  exec.EntityID,
@@ -970,13 +1129,13 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *coordinati
 		}
 	}
 
-	if err := c.publishBaseMessage(ctx, subjectReviewerAsync, req); err != nil {
-		c.logger.Error("Failed to dispatch reviewer", "error", err)
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch reviewer failed: %v", err))
+	if err := co.publishBaseMessage(ctx, subjectReviewerAsync, req); err != nil {
+		co.logger.Error("Failed to dispatch reviewer", "error", err)
+		co.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch reviewer failed: %v", err))
 		return
 	}
 
-	c.logger.Info("Dispatched reviewer (el jefe)",
+	co.logger.Info("Dispatched reviewer (el jefe)",
 		"slug", exec.Slug, "task_id", taskID)
 }
 
@@ -986,15 +1145,15 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *coordinati
 
 // handleGeneratorEvent routes generator completion events (from WORKFLOW stream)
 // to the appropriate handler based on subject.
-func (c *Component) handleGeneratorEvent(ctx context.Context, msg jetstream.Msg) {
-	c.updateLastActivity()
+func (co *coordinator) handleGeneratorEvent(ctx context.Context, msg jetstream.Msg) {
+	co.updateLastActivity()
 
 	// Extract slug from payload to look up active coordination.
 	var envelope struct {
 		Payload json.RawMessage `json:"payload"`
 	}
 	if err := json.Unmarshal(msg.Data(), &envelope); err != nil {
-		c.logger.Debug("Failed to unmarshal generator event envelope", "error", err)
+		co.logger.Debug("Failed to unmarshal generator event envelope", "error", err)
 		_ = msg.Nak()
 		return
 	}
@@ -1003,20 +1162,20 @@ func (c *Component) handleGeneratorEvent(ctx context.Context, msg jetstream.Msg)
 		Slug string `json:"slug"`
 	}
 	if err := json.Unmarshal(envelope.Payload, &slugHolder); err != nil || slugHolder.Slug == "" {
-		c.logger.Debug("Generator event missing slug", "subject", msg.Subject())
+		co.logger.Debug("Generator event missing slug", "subject", msg.Subject())
 		_ = msg.Ack()
 		return
 	}
 
-	entityIDVal, ok := c.slugIndex.Load(slugHolder.Slug)
+	entityIDVal, ok := co.slugIndex.Load(slugHolder.Slug)
 	if !ok {
-		c.logger.Debug("No active coordination for slug", "slug", slugHolder.Slug)
+		co.logger.Debug("No active coordination for slug", "slug", slugHolder.Slug)
 		_ = msg.Ack()
 		return
 	}
 	entityID := entityIDVal.(string)
 
-	execVal, ok := c.activeCoordinations.Load(entityID)
+	execVal, ok := co.activeCoordinations.Load(entityID)
 	if !ok {
 		_ = msg.Ack()
 		return
@@ -1035,132 +1194,129 @@ func (c *Component) handleGeneratorEvent(ctx context.Context, msg jetstream.Msg)
 
 	switch msg.Subject() {
 	case subjectReqsGenerated:
-		// Guard: only accept if we're actually in the generating_requirements phase.
 		if exec.CurrentPhase != phaseGeneratingRequirements {
-			c.logger.Debug("Ignoring stale requirements event",
+			co.logger.Debug("Ignoring stale requirements event",
 				"current_phase", exec.CurrentPhase, "slug", exec.Slug)
 			return
 		}
-		c.handleReqsGeneratedLocked(ctx, exec, envelope.Payload)
+		co.handleReqsGeneratedLocked(ctx, exec, envelope.Payload)
 	case subjectScenariosGenerated:
-		// Guard: only accept if we're actually in the generating_scenarios phase.
 		if exec.CurrentPhase != phaseGeneratingScenarios {
-			c.logger.Debug("Ignoring stale/duplicate scenarios event",
+			co.logger.Debug("Ignoring stale/duplicate scenarios event",
 				"current_phase", exec.CurrentPhase, "slug", exec.Slug)
 			return
 		}
-		c.handleScenariosGeneratedLocked(ctx, exec, envelope.Payload)
+		co.handleScenariosGeneratedLocked(ctx, exec, envelope.Payload)
 	default:
-		c.logger.Debug("Unknown generator event subject", "subject", msg.Subject())
+		co.logger.Debug("Unknown generator event subject", "subject", msg.Subject())
 	}
 }
 
 // handleReqsGeneratedLocked processes the RequirementsGeneratedEvent.
-// Requirements are already saved to disk by the requirement-generator component.
-func (c *Component) handleReqsGeneratedLocked(ctx context.Context, exec *coordinationExecution, payload json.RawMessage) {
+func (co *coordinator) handleReqsGeneratedLocked(ctx context.Context, exec *coordinationExecution, payload json.RawMessage) {
 	var event workflow.RequirementsGeneratedEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
-		c.logger.Warn("Failed to parse RequirementsGeneratedEvent", "error", err)
+		co.logger.Warn("Failed to parse RequirementsGeneratedEvent", "error", err)
 	}
 
-	c.logger.Info("Requirements generated",
+	co.logger.Info("Requirements generated",
 		"entity_id", exec.EntityID,
 		"slug", exec.Slug,
 		"requirement_count", event.RequirementCount,
 	)
 
-	c.advancePhase(ctx, exec, phaseRequirementsGenerated)
+	co.advancePhase(ctx, exec, phaseRequirementsGenerated)
 
 	// Advance to scenario generation.
-	c.dispatchScenarioGeneratorLocked(ctx, exec)
+	co.dispatchScenarioGeneratorLocked(ctx, exec)
 }
 
 // handleScenariosGeneratedLocked processes the ScenariosGeneratedEvent.
-// Scenarios are already saved to disk by the scenario-generator component.
-func (c *Component) handleScenariosGeneratedLocked(ctx context.Context, exec *coordinationExecution, payload json.RawMessage) {
+func (co *coordinator) handleScenariosGeneratedLocked(ctx context.Context, exec *coordinationExecution, payload json.RawMessage) {
 	var event workflow.ScenariosGeneratedEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
-		c.logger.Warn("Failed to parse ScenariosGeneratedEvent", "error", err)
+		co.logger.Warn("Failed to parse ScenariosGeneratedEvent", "error", err)
 	}
 
-	c.logger.Info("Scenarios generated",
+	co.logger.Info("Scenarios generated",
 		"entity_id", exec.EntityID,
 		"slug", exec.Slug,
 		"scenario_count", event.ScenarioCount,
 	)
 
-	c.advancePhase(ctx, exec, phaseScenariosGenerated)
+	co.advancePhase(ctx, exec, phaseScenariosGenerated)
 
-	// Dispatch reviewer (round 2) — reviews requirements + scenarios together.
-	exec.ReviewRound = 2
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.coordination.review_round", 2)
-	c.dispatchReviewerLocked(ctx, exec)
+	if co.config.IsAutoApprove() {
+		exec.ReviewRound = 2
+		_ = co.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.coordination.review_round", 2)
+		co.dispatchReviewerLocked(ctx, exec)
+	} else {
+		co.advancePhase(ctx, exec, phaseAwaitingHuman)
+		co.logger.Info("Round 2 awaiting human approval (requirements + scenarios review)",
+			"slug", exec.Slug)
+		exec.terminated = true
+		co.coordinationsCompleted.Add(1)
+		co.cleanupExecutionLocked(exec)
+	}
 }
 
-// handleReviewerCompleteLocked processes reviewer (el jefe) completion.
-func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *coordinationExecution) {
+// handleReviewerCompleteLocked processes reviewer completion.
+func (co *coordinator) handleReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *coordinationExecution) {
 	if exec.terminated {
 		return
 	}
 
-	// Parse the reviewer verdict from the result.
-	verdict, summary := c.parseReviewerVerdict(event.Result)
+	verdict, summary := co.parseReviewerVerdict(event.Result)
 
-	c.logger.Info("Reviewer completed",
+	co.logger.Info("Reviewer completed",
 		"entity_id", exec.EntityID,
 		"slug", exec.Slug,
 		"verdict", verdict,
 		"summary", summary,
 	)
 
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.review.verdict", verdict)
+	_ = co.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.review.verdict", verdict)
 	if summary != "" {
-		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.review.summary", summary)
+		_ = co.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.review.summary", summary)
 	}
 
 	switch verdict {
 	case "approved":
-		c.handleReviewApprovalLocked(ctx, exec, verdict, summary)
+		co.handleReviewApprovalLocked(ctx, exec, verdict, summary)
 
 	case "needs_changes":
-		c.handleReviewRejectionLocked(ctx, exec, summary)
+		co.handleReviewRejectionLocked(ctx, exec, summary)
 
 	default:
-		c.logger.Warn("Unknown reviewer verdict, treating as error",
+		co.logger.Warn("Unknown reviewer verdict, treating as error",
 			"verdict", verdict, "slug", exec.Slug)
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("unknown reviewer verdict: %s", verdict))
+		co.markErrorLocked(ctx, exec, fmt.Sprintf("unknown reviewer verdict: %s", verdict))
 	}
 }
 
 // handleReviewApprovalLocked processes an "approved" verdict from the reviewer.
-// Round 1 approval triggers requirement/scenario generation (round 2).
-// Round 2 approval means the plan is complete and ready for execution.
 // Caller must hold exec.mu.
-func (c *Component) handleReviewApprovalLocked(ctx context.Context, exec *coordinationExecution, verdict, summary string) {
+func (co *coordinator) handleReviewApprovalLocked(ctx context.Context, exec *coordinationExecution, verdict, summary string) {
 	if exec.ReviewRound <= 1 {
-		// Round 1: plan approved — start requirement/scenario generation.
-		if c.config.AutoApprove {
-			c.logger.Info("Round 1 approved (auto), starting requirement generation",
+		if co.config.IsAutoApprove() {
+			co.logger.Info("Round 1 approved (auto), starting requirement generation",
 				"slug", exec.Slug)
-			c.advancePhase(ctx, exec, phaseApproved)
-			c.publishPlanApprovedEvent(ctx, exec, verdict, summary)
-			c.dispatchRequirementGeneratorLocked(ctx, exec)
+			co.advancePhase(ctx, exec, phaseApproved)
+			co.publishPlanApprovedEvent(ctx, exec, verdict, summary)
+			co.dispatchRequirementGeneratorLocked(ctx, exec)
 		} else {
-			// Human gate: pause for human to review/CRUD plan before approving.
-			c.advancePhase(ctx, exec, phaseAwaitingHuman)
-			c.logger.Info("Round 1 awaiting human approval (plan review)",
+			co.advancePhase(ctx, exec, phaseAwaitingHuman)
+			co.logger.Info("Round 1 awaiting human approval (plan review)",
 				"slug", exec.Slug, "iteration", exec.Iteration)
 			exec.terminated = true
-			c.coordinationsCompleted.Add(1)
-			c.cleanupExecutionLocked(exec)
+			co.coordinationsCompleted.Add(1)
+			co.cleanupExecutionLocked(exec)
 		}
 	} else {
 		// Round 2: requirements + scenarios approved — plan ready for execution.
-		c.advancePhase(ctx, exec, phaseApproved)
-		c.publishPlanApprovedEvent(ctx, exec, verdict, summary)
+		co.advancePhase(ctx, exec, phaseApproved)
+		co.publishPlanApprovedEvent(ctx, exec, verdict, summary)
 
-		// Transition plan status to ready_for_execution so the execute
-		// endpoint and scenario-orchestrator can proceed.
 		repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
 		if repoRoot == "" {
 			repoRoot, _ = os.Getwd()
@@ -1168,69 +1324,64 @@ func (c *Component) handleReviewApprovalLocked(ctx context.Context, exec *coordi
 		manager := workflow.NewManager(repoRoot)
 		if plan, err := manager.LoadPlan(ctx, exec.Slug); err == nil {
 			if err := manager.SetPlanStatus(ctx, plan, workflow.StatusReadyForExecution); err != nil {
-				c.logger.Warn("Failed to set plan to ready_for_execution",
+				co.logger.Warn("Failed to set plan to ready_for_execution",
 					"slug", exec.Slug, "error", err)
 			} else {
-				c.logger.Info("Round 2 approved, plan ready for execution",
+				co.logger.Info("Round 2 approved, plan ready for execution",
 					"slug", exec.Slug)
 			}
 		}
 
 		exec.terminated = true
-		c.coordinationsCompleted.Add(1)
-		c.cleanupExecutionLocked(exec)
+		co.coordinationsCompleted.Add(1)
+		co.cleanupExecutionLocked(exec)
 	}
 }
 
 // handleReviewRejectionLocked processes a "needs_changes" verdict.
-// Round 1 rejection retries planning. Round 2 rejection retries
-// requirement/scenario generation.
 // Caller must hold exec.mu.
-func (c *Component) handleReviewRejectionLocked(ctx context.Context, exec *coordinationExecution, summary string) {
+func (co *coordinator) handleReviewRejectionLocked(ctx context.Context, exec *coordinationExecution, summary string) {
 	exec.Iteration++
 	exec.ReviewFeedback = summary
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Iteration, exec.Iteration)
+	_ = co.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Iteration, exec.Iteration)
 
-	if exec.Iteration >= c.config.MaxReviewIterations {
-		c.logger.Warn("Review budget exhausted, escalating",
+	if exec.Iteration >= co.config.MaxReviewIterations {
+		co.logger.Warn("Review budget exhausted, escalating",
 			"slug", exec.Slug,
 			"round", exec.ReviewRound,
 			"iteration", exec.Iteration,
-			"max", c.config.MaxReviewIterations,
+			"max", co.config.MaxReviewIterations,
 		)
-		c.advancePhase(ctx, exec, phaseEscalated)
+		co.advancePhase(ctx, exec, phaseEscalated)
 		exec.terminated = true
-		c.coordinationsFailed.Add(1)
-		c.cleanupExecutionLocked(exec)
+		co.coordinationsFailed.Add(1)
+		co.cleanupExecutionLocked(exec)
 		return
 	}
 
 	if exec.ReviewRound <= 1 {
-		// Round 1 rejection: retry planning.
-		c.logger.Info("Round 1 reviewer requested changes, retrying planners",
+		co.logger.Info("Round 1 reviewer requested changes, retrying planners",
 			"slug", exec.Slug,
 			"iteration", exec.Iteration,
-			"max", c.config.MaxReviewIterations,
+			"max", co.config.MaxReviewIterations,
 		)
-		c.advancePhase(ctx, exec, phasePlanning)
+		co.advancePhase(ctx, exec, phasePlanning)
 		exec.CompletedResults = make(map[string]*workflow.PlannerResult)
 		exec.PlannerTaskIDs = nil
-		c.dispatchPlannersLocked(ctx, exec)
+		co.dispatchPlannersLocked(ctx, exec)
 	} else {
-		// Round 2 rejection: retry requirement/scenario generation.
-		c.logger.Info("Round 2 reviewer requested changes, retrying requirement generation",
+		co.logger.Info("Round 2 reviewer requested changes, retrying requirement generation",
 			"slug", exec.Slug,
 			"iteration", exec.Iteration,
-			"max", c.config.MaxReviewIterations,
+			"max", co.config.MaxReviewIterations,
 		)
-		c.advancePhase(ctx, exec, phaseGeneratingRequirements)
-		c.dispatchRequirementGeneratorLocked(ctx, exec)
+		co.advancePhase(ctx, exec, phaseGeneratingRequirements)
+		co.dispatchRequirementGeneratorLocked(ctx, exec)
 	}
 }
 
-// publishPlanApprovedEvent sends a typed PlanApprovedEvent to the WORKFLOW stream
-// so plan-api can update the plan file on disk.
-func (c *Component) publishPlanApprovedEvent(ctx context.Context, exec *coordinationExecution, verdict, summary string) {
+// publishPlanApprovedEvent sends a typed PlanApprovedEvent to the WORKFLOW stream.
+func (co *coordinator) publishPlanApprovedEvent(ctx context.Context, exec *coordinationExecution, verdict, summary string) {
 	event := &workflow.PlanApprovedEvent{
 		Slug:    exec.Slug,
 		Verdict: verdict,
@@ -1239,12 +1390,9 @@ func (c *Component) publishPlanApprovedEvent(ctx context.Context, exec *coordina
 
 	subject := workflow.PlanApproved.Pattern
 
-	// Wrap event in BaseMessage envelope for ParseReactivePayload compatibility.
-	// We construct the envelope manually because PlanApprovedEvent doesn't implement
-	// message.Payload. The ParseReactivePayload function only reads the "payload" field.
 	payloadData, err := json.Marshal(event)
 	if err != nil {
-		c.logger.Error("Failed to marshal PlanApprovedEvent", "error", err)
+		co.logger.Error("Failed to marshal PlanApprovedEvent", "error", err)
 		return
 	}
 
@@ -1265,67 +1413,38 @@ func (c *Component) publishPlanApprovedEvent(ctx context.Context, exec *coordina
 			Source    string `json:"source"`
 		}{
 			CreatedAt: time.Now().UnixMilli(),
-			Source:    componentName,
+			Source:    coordinatorName,
 		},
 	}
 
 	envelopeData, err := json.Marshal(envelope)
 	if err != nil {
-		c.logger.Error("Failed to marshal BaseMessage envelope", "error", err)
+		co.logger.Error("Failed to marshal BaseMessage envelope", "error", err)
 		return
 	}
 
-	if err := c.natsClient.PublishToStream(ctx, subject, envelopeData); err != nil {
-		c.logger.Error("Failed to publish PlanApprovedEvent",
+	if err := co.natsClient.PublishToStream(ctx, subject, envelopeData); err != nil {
+		co.logger.Error("Failed to publish PlanApprovedEvent",
 			"subject", subject, "slug", exec.Slug, "error", err)
 		return
 	}
 
-	c.logger.Info("Published PlanApprovedEvent",
-		"slug", exec.Slug, "subject", subject)
-}
-
-// triggerExecution publishes a scenario orchestration trigger to start the
-// execution phase. The scenario-orchestrator picks this up and dispatches
-// per-scenario execution.
-func (c *Component) triggerExecution(ctx context.Context, exec *coordinationExecution) {
-	subject := fmt.Sprintf("scenario.orchestrate.%s", exec.Slug)
-
-	// Typed trigger — scenario-orchestrator loads scenarios from disk.
-	trigger := &payloads.ScenarioOrchestrationTrigger{
-		PlanSlug: exec.Slug,
-		TraceID:  exec.TraceID,
-	}
-
-	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, componentName)
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		c.logger.Error("Failed to marshal execution trigger", "error", err)
-		return
-	}
-
-	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
-		c.logger.Error("Failed to trigger execution",
-			"subject", subject, "slug", exec.Slug, "error", err)
-		return
-	}
-
-	c.logger.Info("Triggered execution phase",
+	co.logger.Info("Published PlanApprovedEvent",
 		"slug", exec.Slug, "subject", subject)
 }
 
 // parseReviewerVerdict extracts verdict and summary from a reviewer result.
-func (c *Component) parseReviewerVerdict(result string) (verdict, summary string) {
+func (co *coordinator) parseReviewerVerdict(result string) (verdict, summary string) {
 	var parsed struct {
 		Verdict string `json:"verdict"`
 		Summary string `json:"summary"`
 	}
 	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
-		c.logger.Error("Failed to parse reviewer result, escalating", "error", err)
+		co.logger.Error("Failed to parse reviewer result, escalating", "error", err)
 		return "escalated", fmt.Sprintf("reviewer result parse failed: %v", err)
 	}
 	if parsed.Verdict == "" {
-		c.logger.Warn("Reviewer returned empty verdict, escalating")
+		co.logger.Warn("Reviewer returned empty verdict, escalating")
 		return "escalated", "reviewer returned empty verdict"
 	}
 	return parsed.Verdict, parsed.Summary
@@ -1335,8 +1454,7 @@ func (c *Component) parseReviewerVerdict(result string) (verdict, summary string
 // Planner prompt helpers
 // ---------------------------------------------------------------------------
 
-// buildPlannerPrompt constructs the prompt for a focused planner.
-func (c *Component) buildPlannerPrompt(exec *coordinationExecution, focus *FocusArea) string {
+func (co *coordinator) buildPlannerPrompt(exec *coordinationExecution, focus *FocusArea) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Focus Area: %s\n", focus.Area))
 	if focus.Description != "" {
@@ -1356,10 +1474,7 @@ func (c *Component) buildPlannerPrompt(exec *coordinationExecution, focus *Focus
 // Focus area determination
 // ---------------------------------------------------------------------------
 
-// determineFocusAreas decides what focus areas to use for planning.
-// Uses explicit focuses if provided, otherwise calls the LLM.
-func (c *Component) determineFocusAreas(ctx context.Context, trigger *payloads.PlanCoordinatorRequest) ([]*FocusArea, error) {
-	// If explicit focuses provided, use them.
+func (co *coordinator) determineFocusAreas(ctx context.Context, trigger *payloads.PlanCoordinatorRequest) ([]*FocusArea, error) {
 	if len(trigger.FocusAreas) > 0 {
 		focuses := make([]*FocusArea, len(trigger.FocusAreas))
 		for i, f := range trigger.FocusAreas {
@@ -1371,20 +1486,19 @@ func (c *Component) determineFocusAreas(ctx context.Context, trigger *payloads.P
 		return focuses, nil
 	}
 
-	// Use LLM to determine focus areas.
-	provider := c.resolveProvider()
-	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
+	provider := co.resolveProvider()
+	assembled := co.assembler.Assemble(&prompt.AssemblyContext{
 		Role:     prompt.RolePlanCoordinator,
 		Provider: provider,
 		Domain:   "software",
 	})
 	systemPrompt := assembled.SystemMessage
 
-	userPrompt := c.buildFocusUserPrompt(trigger, "")
+	userPrompt := co.buildFocusUserPrompt(trigger, "")
 
-	content, _, err := c.callLLM(ctx, systemPrompt, userPrompt)
+	content, _, err := co.callLLM(ctx, systemPrompt, userPrompt)
 	if err != nil {
-		c.logger.Warn("Failed to determine focus areas via LLM, falling back to single planner",
+		co.logger.Warn("Failed to determine focus areas via LLM, falling back to single planner",
 			"error", err)
 		return []*FocusArea{{
 			Area:        "general",
@@ -1392,9 +1506,9 @@ func (c *Component) determineFocusAreas(ctx context.Context, trigger *payloads.P
 		}}, nil
 	}
 
-	focuses, err := c.parseFocusAreas(content)
+	focuses, err := co.parseFocusAreas(content)
 	if err != nil {
-		c.logger.Warn("Failed to parse focus areas, falling back to single planner",
+		co.logger.Warn("Failed to parse focus areas, falling back to single planner",
 			"error", err)
 		return []*FocusArea{{
 			Area:        "general",
@@ -1402,8 +1516,7 @@ func (c *Component) determineFocusAreas(ctx context.Context, trigger *payloads.P
 		}}, nil
 	}
 
-	// Limit to max concurrent planners.
-	maxPlanners := c.config.MaxConcurrentPlanners
+	maxPlanners := co.config.MaxConcurrentPlanners
 	if trigger.MaxPlanners > 0 && trigger.MaxPlanners < maxPlanners {
 		maxPlanners = trigger.MaxPlanners
 	}
@@ -1414,8 +1527,7 @@ func (c *Component) determineFocusAreas(ctx context.Context, trigger *payloads.P
 	return focuses, nil
 }
 
-// buildFocusUserPrompt constructs the user prompt for focus area determination.
-func (c *Component) buildFocusUserPrompt(trigger *payloads.PlanCoordinatorRequest, graphContext string) string {
+func (co *coordinator) buildFocusUserPrompt(trigger *payloads.PlanCoordinatorRequest, graphContext string) string {
 	contextSection := ""
 	if graphContext != "" {
 		contextSection = fmt.Sprintf(`
@@ -1452,8 +1564,7 @@ Respond with a JSON object:
 `+"```", trigger.Title, trigger.Description, contextSection)
 }
 
-// parseFocusAreas extracts focus areas from LLM response.
-func (c *Component) parseFocusAreas(content string) ([]*FocusArea, error) {
+func (co *coordinator) parseFocusAreas(content string) ([]*FocusArea, error) {
 	jsonContent := llm.ExtractJSON(content)
 	if jsonContent == "" {
 		return nil, fmt.Errorf("no JSON found in response")
@@ -1491,28 +1602,35 @@ func (c *Component) parseFocusAreas(content string) ([]*FocusArea, error) {
 // Planner result parsing
 // ---------------------------------------------------------------------------
 
-// parsePlannerResult extracts a PlannerResult from the loop completion event's
-// raw result string.
-func (c *Component) parsePlannerResult(result, taskID string) (*workflow.PlannerResult, []string) {
+func (co *coordinator) parsePlannerResult(result, taskID string) (*workflow.PlannerResult, []string) {
 	var payload PlannerResultPayload
 	if err := json.Unmarshal([]byte(result), &payload); err != nil {
-		c.logger.Warn("Failed to parse planner result, using raw",
+		co.logger.Warn("Failed to parse planner result, using raw",
 			"task_id", taskID, "error", err)
-		// Fall back to treating the raw result as the goal.
 		return &workflow.PlannerResult{
 			PlannerID: taskID,
 			Goal:      result,
 		}, nil
 	}
 
+	// Prefer nested content (current planner format) over top-level fields (legacy).
+	goal := payload.Goal
+	planCtx := payload.Context
+	scope := payload.Scope
+	if payload.Content != nil && payload.Content.Goal != "" {
+		goal = payload.Content.Goal
+		planCtx = payload.Content.Context
+		scope = payload.Content.Scope
+	}
+
 	return &workflow.PlannerResult{
 		PlannerID: taskID,
-		Goal:      payload.Goal,
-		Context:   payload.Context,
+		Goal:      goal,
+		Context:   planCtx,
 		Scope: workflow.Scope{
-			Include:    payload.Scope.Include,
-			Exclude:    payload.Scope.Exclude,
-			DoNotTouch: payload.Scope.DoNotTouch,
+			Include:    scope.Include,
+			Exclude:    scope.Exclude,
+			DoNotTouch: scope.DoNotTouch,
 		},
 	}, nil
 }
@@ -1521,8 +1639,7 @@ func (c *Component) parsePlannerResult(result, taskID string) (*workflow.Planner
 // Synthesis
 // ---------------------------------------------------------------------------
 
-// synthesizeResults combines multiple planner results into a unified plan.
-func (c *Component) synthesizeResults(ctx context.Context, results []workflow.PlannerResult) (*SynthesizedPlan, string, error) {
+func (co *coordinator) synthesizeResults(ctx context.Context, results []workflow.PlannerResult) (*SynthesizedPlan, string, error) {
 	if len(results) == 1 {
 		return &SynthesizedPlan{
 			Goal:    results[0].Goal,
@@ -1534,28 +1651,27 @@ func (c *Component) synthesizeResults(ctx context.Context, results []workflow.Pl
 	systemPrompt := "You are synthesizing multiple planning perspectives into a unified development plan."
 	userPrompt := prompts.PlanCoordinatorSynthesisPrompt(results)
 
-	content, llmRequestID, err := c.callLLM(ctx, systemPrompt, userPrompt)
+	content, llmRequestID, err := co.callLLM(ctx, systemPrompt, userPrompt)
 	if err != nil {
-		c.logger.Warn("Synthesis LLM call failed, falling back to simple merge", "error", err)
-		return c.simpleMerge(results), "", nil
+		co.logger.Warn("Synthesis LLM call failed, falling back to simple merge", "error", err)
+		return co.simpleMerge(results), "", nil
 	}
 
-	synthesized, err := c.parseSynthesizedPlan(content)
+	synthesized, err := co.parseSynthesizedPlan(content)
 	if err != nil {
-		c.logger.Warn("Synthesis parse failed, falling back to simple merge", "error", err)
-		return c.simpleMerge(results), llmRequestID, nil
+		co.logger.Warn("Synthesis parse failed, falling back to simple merge", "error", err)
+		return co.simpleMerge(results), llmRequestID, nil
 	}
 
 	if synthesized.Goal == "" {
-		c.logger.Warn("Synthesis returned empty goal, falling back to simple merge")
-		return c.simpleMerge(results), llmRequestID, nil
+		co.logger.Warn("Synthesis returned empty goal, falling back to simple merge")
+		return co.simpleMerge(results), llmRequestID, nil
 	}
 
 	return synthesized, llmRequestID, nil
 }
 
-// simpleMerge performs a basic merge of planner results.
-func (c *Component) simpleMerge(results []workflow.PlannerResult) *SynthesizedPlan {
+func (co *coordinator) simpleMerge(results []workflow.PlannerResult) *SynthesizedPlan {
 	var goals, contexts []string
 	var include, exclude, doNotTouch []string
 
@@ -1573,15 +1689,14 @@ func (c *Component) simpleMerge(results []workflow.PlannerResult) *SynthesizedPl
 		Goal:    strings.Join(goals, "\n\n"),
 		Context: strings.Join(contexts, "\n\n"),
 		Scope: workflow.Scope{
-			Include:    unique(include),
-			Exclude:    unique(exclude),
-			DoNotTouch: unique(doNotTouch),
+			Include:    coordUnique(include),
+			Exclude:    coordUnique(exclude),
+			DoNotTouch: coordUnique(doNotTouch),
 		},
 	}
 }
 
-// parseSynthesizedPlan extracts a synthesized plan from LLM response.
-func (c *Component) parseSynthesizedPlan(content string) (*SynthesizedPlan, error) {
+func (co *coordinator) parseSynthesizedPlan(content string) (*SynthesizedPlan, error) {
 	jsonContent := llm.ExtractJSON(content)
 	if jsonContent == "" {
 		return nil, fmt.Errorf("no JSON found in response")
@@ -1616,15 +1731,14 @@ func (c *Component) parseSynthesizedPlan(content string) (*SynthesizedPlan, erro
 // LLM and prompt helpers
 // ---------------------------------------------------------------------------
 
-// callLLM makes an LLM API call.
-func (c *Component) callLLM(ctx context.Context, systemPrompt, userPrompt string) (string, string, error) {
-	capability := c.config.DefaultCapability
+func (co *coordinator) callLLM(ctx context.Context, systemPrompt, userPrompt string) (string, string, error) {
+	capability := co.config.DefaultCapability
 	if capability == "" {
 		capability = string(model.CapabilityPlanning)
 	}
 
 	temperature := 0.7
-	resp, err := c.llmClient.Complete(ctx, llm.Request{
+	resp, err := co.llmClient.Complete(ctx, llm.Request{
 		Capability: capability,
 		Messages: []llm.Message{
 			{Role: "system", Content: systemPrompt},
@@ -1640,47 +1754,31 @@ func (c *Component) callLLM(ctx context.Context, systemPrompt, userPrompt string
 	return resp.Content, resp.RequestID, nil
 }
 
-// resolveProvider determines the LLM provider for prompt formatting.
-func (c *Component) resolveProvider() prompt.Provider {
-	capability := c.config.DefaultCapability
+func (co *coordinator) resolveProvider() prompt.Provider {
+	capability := co.config.DefaultCapability
 	if capability == "" {
 		capability = string(model.CapabilityPlanning)
 	}
-	modelName := c.modelRegistry.Resolve(model.Capability(capability))
-	if endpoint := c.modelRegistry.GetEndpoint(modelName); endpoint != nil {
+	modelName := co.modelRegistry.Resolve(model.Capability(capability))
+	if endpoint := co.modelRegistry.GetEndpoint(modelName); endpoint != nil {
 		return prompt.Provider(endpoint.Provider)
 	}
 	return prompt.ProviderOllama
 }
 
-// loadPrompt loads a custom prompt from file or returns the default.
-func (c *Component) loadPrompt(configPath, defaultPrompt string) string {
-	if configPath == "" {
-		return defaultPrompt
-	}
-	content, err := os.ReadFile(configPath)
-	if err != nil {
-		c.logger.Warn("Failed to load custom prompt, using default",
-			"path", configPath, "error", err)
-		return defaultPrompt
-	}
-	return string(content)
-}
-
 // ---------------------------------------------------------------------------
-// Triple and task publishing helpers
+// Triple publishing helpers
 // ---------------------------------------------------------------------------
 
-// publishBaseMessage wraps a payload in a BaseMessage and publishes to JetStream.
-func (c *Component) publishBaseMessage(ctx context.Context, subject string, payload message.Payload) error {
-	baseMsg := message.NewBaseMessage(payload.Schema(), payload, componentName)
+func (co *coordinator) publishBaseMessage(ctx context.Context, subject string, payload message.Payload) error {
+	baseMsg := message.NewBaseMessage(payload.Schema(), payload, coordinatorName)
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		return fmt.Errorf("marshal base message: %w", err)
 	}
 
-	if c.natsClient != nil {
-		if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
+	if co.natsClient != nil {
+		if err := co.natsClient.PublishToStream(ctx, subject, data); err != nil {
 			return fmt.Errorf("publish to %s: %w", subject, err)
 		}
 	}
@@ -1728,27 +1826,22 @@ func (r *CoordinatorResult) UnmarshalJSON(data []byte) error {
 
 // advancePhase writes a phase triple and updates the in-memory CurrentPhase tracker.
 // Caller must hold exec.mu if exec is shared.
-func (c *Component) advancePhase(ctx context.Context, exec *coordinationExecution, phase string) {
+func (co *coordinator) advancePhase(ctx context.Context, exec *coordinationExecution, phase string) {
 	exec.CurrentPhase = phase
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phase); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phase, "error", err)
+	if err := co.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phase); err != nil {
+		co.logger.Error("Failed to write phase triple", "phase", phase, "error", err)
 	}
 }
 
-func (c *Component) updateLastActivity() {
-	c.lastActivityMu.Lock()
-	c.lastActivity = time.Now()
-	c.lastActivityMu.Unlock()
+func (co *coordinator) updateLastActivity() {
+	co.lastActivityMu.Lock()
+	co.lastActivity = time.Now()
+	co.lastActivityMu.Unlock()
 }
 
-func (c *Component) getLastActivity() time.Time {
-	c.lastActivityMu.RLock()
-	defer c.lastActivityMu.RUnlock()
-	return c.lastActivity
-}
-
-// unique returns unique strings from a slice.
-func unique(strs []string) []string {
+// coordUnique returns unique strings from a slice.
+// Named with coord prefix to avoid conflict with any other unique() in the package.
+func coordUnique(strs []string) []string {
 	seen := make(map[string]bool)
 	result := make([]string, 0, len(strs))
 	for _, s := range strs {
@@ -1758,53 +1851,4 @@ func unique(strs []string) []string {
 		}
 	}
 	return result
-}
-
-// ---------------------------------------------------------------------------
-// component.Discoverable interface
-// ---------------------------------------------------------------------------
-
-// Meta returns component metadata.
-func (c *Component) Meta() component.Metadata {
-	return component.Metadata{
-		Name:        componentName,
-		Type:        "processor",
-		Description: "Coordinates parallel planners for plan generation with focus areas and synthesis",
-		Version:     componentVersion,
-	}
-}
-
-// InputPorts returns the component's declared input ports.
-func (c *Component) InputPorts() []component.Port { return c.inputPorts }
-
-// OutputPorts returns the component's declared output ports.
-func (c *Component) OutputPorts() []component.Port { return c.outputPorts }
-
-// ConfigSchema returns the JSON schema for this component's configuration.
-func (c *Component) ConfigSchema() component.ConfigSchema {
-	return configSchema
-}
-
-// Health returns the current health status of the component.
-func (c *Component) Health() component.HealthStatus {
-	c.mu.RLock()
-	running := c.running
-	c.mu.RUnlock()
-
-	if running {
-		return component.HealthStatus{
-			Healthy:    true,
-			Status:     "healthy",
-			LastCheck:  time.Now(),
-			ErrorCount: int(c.errors.Load()),
-		}
-	}
-	return component.HealthStatus{Status: "stopped"}
-}
-
-// DataFlow returns current flow metrics for the component.
-func (c *Component) DataFlow() component.FlowMetrics {
-	return component.FlowMetrics{
-		LastActivity: c.getLastActivity(),
-	}
 }

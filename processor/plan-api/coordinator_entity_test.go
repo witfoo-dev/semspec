@@ -1,4 +1,4 @@
-package plancoordinator
+package planapi
 
 import (
 	"strings"

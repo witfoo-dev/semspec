@@ -28,6 +28,9 @@ type Component struct {
 	// KV bucket for workflow executions
 	execBucket jetstream.KeyValue
 
+	// coordinator is the embedded plan-coordinator pipeline.
+	coordinator *coordinator
+
 	// Question HTTP handler for Q&A endpoints
 	questionHandler *workflow.QuestionHTTPHandler
 
@@ -86,11 +89,15 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 			"error", err)
 	}
 
+	// Create coordinator with plan-api config fields.
+	co := newCoordinator(config.coordinatorConfig(), deps.NATSClient, logger)
+
 	return &Component{
 		name:            "plan-api",
 		config:          config,
 		natsClient:      deps.NATSClient,
 		logger:          logger,
+		coordinator:     co,
 		questionHandler: questionHandler,
 		workspace:       newWorkspaceProxy(config.SandboxURL),
 	}, nil
@@ -167,6 +174,13 @@ func (c *Component) Start(ctx context.Context) error {
 	// Consumes agent.complete.> to route rollup review results back to the plan.
 	go c.handleRollupCompletions(childCtx, js)
 
+	// Start the embedded coordinator (subscribes to NATS triggers + loop completions).
+	if err := c.coordinator.Start(childCtx); err != nil {
+		cancel()
+		c.state.Store(stateStopped)
+		return fmt.Errorf("start coordinator: %w", err)
+	}
+
 	// Transition to running
 	c.state.Store(stateRunning)
 
@@ -189,6 +203,9 @@ func (c *Component) Stop(_ time.Duration) error {
 		}
 		return fmt.Errorf("component in unexpected state: %d", currentState)
 	}
+
+	// Stop the embedded coordinator first (drains in-flight handlers).
+	c.coordinator.Stop()
 
 	// Get and clear cancel function
 	c.mu.Lock()

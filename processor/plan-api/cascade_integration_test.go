@@ -4,14 +4,14 @@ package planapi
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -189,7 +189,7 @@ func TestIntegration_ScenariosGenerated_UpdatesStatus(t *testing.T) {
 	comp.handleScenariosGeneratedEvent(ctx, event)
 
 	// Verify plan status is now scenarios_generated.
-	m := workflow.NewManager(t.TempDir()) // uses SEMSPEC_REPO_PATH env
+	m := comp.newManager()
 	plan, err := m.LoadPlan(ctx, slug)
 	if err != nil {
 		t.Fatalf("LoadPlan: %v", err)
@@ -234,6 +234,12 @@ func TestIntegration_PromoteRound2_SetsReadyForExecution(t *testing.T) {
 	}
 	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
+	}
+	scenarios := []workflow.Scenario{
+		{ID: "scenario." + slug + ".1.1", Given: "g", When: "w", Then: []string{"t"}},
+	}
+	if err := m.SaveScenarios(ctx, scenarios, slug); err != nil {
+		t.Fatalf("SaveScenarios: %v", err)
 	}
 	// Need to advance status through the chain
 	if err := m.SetPlanStatus(ctx, plan, workflow.StatusRequirementsGenerated); err != nil {
