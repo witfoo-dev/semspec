@@ -589,11 +589,6 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	c.logger.Info("Created plan via REST API", "slug", slug, "plan_id", plan.ID)
 
-	// Publish plan entity to graph (best-effort)
-	if pubErr := c.publishPlanEntity(ctx, plan); pubErr != nil {
-		c.logger.Warn("Failed to publish plan entity", "slug", plan.Slug, "error", pubErr)
-	}
-
 	// Start coordination pipeline directly (in-process, no NATS round-trip).
 	requestID := uuid.New().String()
 	c.coordinator.StartCoordination(ctx, plan.Slug, plan.Title, plan.Title, plan.ProjectID, tc.TraceID, "", requestID, nil)
@@ -752,10 +747,7 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 		}
 		c.logger.Info("Plan approved via REST API", "slug", slug, "status", plan.Status)
 
-		// Publish plan entity and approval to graph (best-effort)
-		if pubErr := c.publishPlanEntity(r.Context(), plan); pubErr != nil {
-			c.logger.Warn("Failed to publish plan entity", "slug", slug, "error", pubErr)
-		}
+		// Publish approval to graph (best-effort)
 		planEntityID := workflow.PlanEntityID(slug)
 		if pubErr := c.publishApprovalEntity(r.Context(), "plan", planEntityID, "approved", "user", ""); pubErr != nil {
 			c.logger.Warn("Failed to publish plan approval entity", "slug", slug, "error", pubErr)

@@ -247,11 +247,6 @@ func (c *Component) handleCreateScenario(w http.ResponseWriter, r *http.Request,
 
 	c.logger.Info("Scenario created via REST API", "slug", slug, "scenario_id", newScenario.ID)
 
-	// Publish to graph (best-effort)
-	if err := c.publishScenarioEntity(r.Context(), slug, &newScenario); err != nil {
-		c.logger.Warn("Failed to publish scenario entity to graph", "scenario_id", newScenario.ID, "error", err)
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(newScenario); err != nil {
@@ -319,11 +314,6 @@ func (c *Component) handleUpdateScenario(w http.ResponseWriter, r *http.Request,
 		c.logger.Error("Failed to save scenarios", "slug", slug, "error", err)
 		http.Error(w, "Failed to save scenario", http.StatusInternalServerError)
 		return
-	}
-
-	// Publish to graph (best-effort)
-	if err := c.publishScenarioEntity(r.Context(), slug, &scenarios[idx]); err != nil {
-		c.logger.Warn("Failed to publish scenario entity to graph", "scenario_id", scenarioID, "error", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

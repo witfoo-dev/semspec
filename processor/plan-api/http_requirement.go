@@ -196,11 +196,6 @@ func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Reque
 
 	c.logger.Info("Requirement created via REST API", "slug", slug, "requirement_id", newReq.ID)
 
-	// Publish to graph (best-effort)
-	if err := c.publishRequirementEntity(r.Context(), slug, &newReq); err != nil {
-		c.logger.Warn("Failed to publish requirement entity to graph", "requirement_id", newReq.ID, "error", err)
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(newReq); err != nil {
@@ -261,11 +256,6 @@ func (c *Component) handleUpdateRequirement(w http.ResponseWriter, r *http.Reque
 		c.logger.Error("Failed to save requirements", "slug", slug, "error", err)
 		http.Error(w, "Failed to save requirement", http.StatusInternalServerError)
 		return
-	}
-
-	// Publish to graph (best-effort)
-	if err := c.publishRequirementEntity(r.Context(), slug, &requirements[idx]); err != nil {
-		c.logger.Warn("Failed to publish requirement entity to graph", "requirement_id", requirementID, "error", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -432,11 +422,6 @@ func (c *Component) handleDeprecateRequirement(w http.ResponseWriter, r *http.Re
 		"slug", slug,
 		"requirement_id", requirementID,
 		"deprecated_count", len(toDeprecate))
-
-	// Publish to graph (best-effort)
-	if err := c.publishRequirementEntity(r.Context(), slug, &requirements[idx]); err != nil {
-		c.logger.Warn("Failed to publish requirement entity to graph", "requirement_id", requirementID, "error", err)
-	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(requirements[idx]); err != nil {

@@ -16,31 +16,6 @@ import (
 
 const graphIngestSubject = "graph.ingest.entity"
 
-// publishPlanEntity publishes a plan as a graph entity.
-func (c *Component) publishPlanEntity(ctx context.Context, plan *workflow.Plan) error {
-	entityID := workflow.PlanEntityID(plan.Slug)
-
-	triples := []message.Triple{
-		{Subject: entityID, Predicate: semspec.PlanTitle, Object: plan.Title},
-		{Subject: entityID, Predicate: semspec.PlanSlug, Object: plan.Slug},
-		{Subject: entityID, Predicate: semspec.PredicatePlanStatus, Object: string(plan.EffectiveStatus())},
-		{Subject: entityID, Predicate: semspec.PlanCreatedAt, Object: plan.CreatedAt.Format(time.RFC3339)},
-		{Subject: entityID, Predicate: semspec.DCTitle, Object: plan.Title},
-	}
-
-	if plan.Goal != "" {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanGoal, Object: plan.Goal})
-	}
-	if plan.Context != "" {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContext, Object: plan.Context})
-	}
-	if plan.ProjectID != "" {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanProject, Object: plan.ProjectID})
-	}
-
-	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.EntityType, entityID, triples))
-}
-
 // publishApprovalEntity publishes an approval decision to the graph.
 func (c *Component) publishApprovalEntity(ctx context.Context, targetType, targetID, decision, approvedBy, reason string) error {
 	entityID := workflow.ApprovalEntityID(uuid.New().String())
@@ -125,93 +100,10 @@ func (c *Component) publishQuestionEntity(ctx context.Context, q *workflow.Quest
 	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.QuestionEntityType, entityID, triples))
 }
 
-// publishRequirementEntity publishes a requirement as a graph entity.
-func (c *Component) publishRequirementEntity(ctx context.Context, slug string, req *workflow.Requirement) error {
-	entityID := workflow.RequirementEntityID(req.ID)
-	planEntityID := workflow.PlanEntityID(slug)
-
-	triples := []message.Triple{
-		{Subject: entityID, Predicate: semspec.RequirementTitle, Object: req.Title},
-		{Subject: entityID, Predicate: semspec.RequirementStatus, Object: string(req.Status)},
-		{Subject: entityID, Predicate: semspec.RequirementPlan, Object: planEntityID},
-		{Subject: entityID, Predicate: semspec.RequirementCreatedAt, Object: req.CreatedAt.Format(time.RFC3339)},
-		{Subject: entityID, Predicate: semspec.RequirementUpdatedAt, Object: req.UpdatedAt.Format(time.RFC3339)},
-		{Subject: entityID, Predicate: semspec.DCTitle, Object: req.Title},
-	}
-
-	if req.Description != "" {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.RequirementDescription, Object: req.Description})
-	}
-
-	for _, depID := range req.DependsOn {
-		depEntityID := workflow.RequirementEntityID(depID)
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.RequirementDependsOn, Object: depEntityID})
-	}
-
-	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.RequirementEntityType, entityID, triples))
-}
-
-// publishScenarioEntity publishes a scenario as a graph entity.
-func (c *Component) publishScenarioEntity(ctx context.Context, slug string, s *workflow.Scenario) error {
-	entityID := workflow.ScenarioEntityID(s.ID)
-	requirementEntityID := workflow.RequirementEntityID(s.RequirementID)
-
-	// DCTitle uses the When clause as a short description
-	title := s.When
-	if len(title) > 100 {
-		title = title[:97] + "..."
-	}
-
-	triples := []message.Triple{
-		{Subject: entityID, Predicate: semspec.ScenarioGiven, Object: s.Given},
-		{Subject: entityID, Predicate: semspec.ScenarioWhen, Object: s.When},
-		{Subject: entityID, Predicate: semspec.ScenarioStatus, Object: string(s.Status)},
-		{Subject: entityID, Predicate: semspec.ScenarioRequirement, Object: requirementEntityID},
-		{Subject: entityID, Predicate: semspec.ScenarioCreatedAt, Object: s.CreatedAt.Format(time.RFC3339)},
-		{Subject: entityID, Predicate: semspec.DCTitle, Object: title},
-	}
-
-	for _, then := range s.Then {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.ScenarioThen, Object: then})
-	}
-
-	_ = slug // available for future plan-scoped graph prefixes
-	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.ScenarioEntityType, entityID, triples))
-}
-
-// publishChangeProposalEntity publishes a change proposal as a graph entity.
-func (c *Component) publishChangeProposalEntity(ctx context.Context, slug string, p *workflow.ChangeProposal) error {
-	entityID := workflow.ChangeProposalEntityID(p.ID)
-	planEntityID := workflow.PlanEntityID(slug)
-
-	triples := []message.Triple{
-		{Subject: entityID, Predicate: semspec.ChangeProposalTitle, Object: p.Title},
-		{Subject: entityID, Predicate: semspec.ChangeProposalStatus, Object: string(p.Status)},
-		{Subject: entityID, Predicate: semspec.ChangeProposalProposedBy, Object: p.ProposedBy},
-		{Subject: entityID, Predicate: semspec.ChangeProposalPlan, Object: planEntityID},
-		{Subject: entityID, Predicate: semspec.ChangeProposalCreatedAt, Object: p.CreatedAt.Format(time.RFC3339)},
-		{Subject: entityID, Predicate: semspec.DCTitle, Object: truncateForTitle(p.Title, 100)},
-	}
-
-	if p.Rationale != "" {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.ChangeProposalRationale, Object: p.Rationale})
-	}
-	if p.DecidedAt != nil {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.ChangeProposalDecidedAt, Object: p.DecidedAt.Format(time.RFC3339)})
-	}
-
-	for _, reqID := range p.AffectedReqIDs {
-		requirementEntityID := workflow.RequirementEntityID(reqID)
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.ChangeProposalMutates, Object: requirementEntityID})
-	}
-
-	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.ChangeProposalEntityType, entityID, triples))
-}
-
 // publishDAGNodeEntity publishes a DAG execution node as a graph entity.
 func (c *Component) publishDAGNodeEntity(ctx context.Context, executionID string, node *decompose.TaskNode) error {
 	entityID := workflow.DAGNodeEntityID(executionID, node.ID)
-	execEntityID := fmt.Sprintf("local.semspec.workflow.scenario-execution.execution.%s", executionID)
+	execEntityID := fmt.Sprintf("%s.exec.scenario.run.%s", workflow.EntityPrefix(), executionID)
 
 	triples := []message.Triple{
 		{Subject: entityID, Predicate: wf.DAGNodeID, Object: node.ID},

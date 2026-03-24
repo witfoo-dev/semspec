@@ -247,11 +247,6 @@ func (c *Component) handleRequirementExecutionCompleteEvent(ctx context.Context,
 		return
 	}
 
-	if pubErr := c.publishPlanEntity(ctx, plan); pubErr != nil {
-		c.logger.Warn("Failed to publish plan entity after rollup transition",
-			"slug", event.Slug, "error", pubErr)
-	}
-
 	scenarios, err := workflow.LoadScenarios(ctx, kvStore, event.Slug)
 	if err != nil {
 		c.logger.Warn("Failed to load scenarios for rollup review",
@@ -374,12 +369,6 @@ func (c *Component) handleScenarioExecutionCompleteEvent(ctx context.Context, ev
 		c.logger.Error("Failed to set plan status to reviewing_rollup",
 			"slug", event.Slug, "error", err)
 		return
-	}
-
-	// Publish updated plan entity to graph (best-effort).
-	if pubErr := c.publishPlanEntity(ctx, plan); pubErr != nil {
-		c.logger.Warn("Failed to publish plan entity after rollup transition",
-			"slug", event.Slug, "error", pubErr)
 	}
 
 	c.dispatchPlanRollupReview(ctx, plan, scenarios, kvStore)
@@ -582,12 +571,6 @@ func (c *Component) handlePlanRollupCompleteEvent(ctx context.Context, slug stri
 			return
 		}
 
-		// Publish updated plan entity to graph (best-effort).
-		if pubErr := c.publishPlanEntity(ctx, plan); pubErr != nil {
-			c.logger.Warn("Failed to publish completed plan entity",
-				"slug", slug, "error", pubErr)
-		}
-
 		c.logger.Info("Plan rollup approved, plan complete",
 			"slug", slug,
 			"summary_length", len(result.Summary),
@@ -662,11 +645,6 @@ func (c *Component) handlePlanApprovedEvent(ctx context.Context, event *workflow
 			"slug", event.Slug,
 			"error", err)
 		return
-	}
-
-	// Publish plan entity to graph (best-effort)
-	if pubErr := c.publishPlanEntity(ctx, plan); pubErr != nil {
-		c.logger.Warn("Failed to publish plan entity", "slug", event.Slug, "error", pubErr)
 	}
 
 	// Publish plan approval entity to graph (best-effort)
@@ -819,10 +797,6 @@ func (c *Component) handlePlanRevisionNeededEvent(ctx context.Context, event *wo
 		return
 	}
 
-	// Publish plan entity to graph with updated review state (best-effort)
-	if pubErr := c.publishPlanEntity(ctx, plan); pubErr != nil {
-		c.logger.Warn("Failed to publish plan entity", "slug", event.Slug, "error", pubErr)
-	}
 }
 
 // handleTaskExecutionCompleteEvent updates a task's status and checks whether all
@@ -884,11 +858,6 @@ func (c *Component) handleTaskExecutionCompleteEvent(ctx context.Context, event 
 	}
 
 	c.logger.Info("All tasks done, plan marked complete", "slug", slug)
-
-	// Publish updated plan entity to graph (best-effort)
-	if pubErr := c.publishPlanEntity(ctx, plan); pubErr != nil {
-		c.logger.Warn("Failed to publish completed plan entity", "slug", slug, "error", pubErr)
-	}
 }
 
 // handleEscalationEvent dispatches escalation signals to the appropriate handler

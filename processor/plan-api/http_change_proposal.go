@@ -265,11 +265,6 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 
 	c.logger.Info("Change proposal created via REST API", "slug", slug, "proposal_id", newProposal.ID)
 
-	// Publish to graph (best-effort)
-	if err := c.publishChangeProposalEntity(r.Context(), slug, &newProposal); err != nil {
-		c.logger.Warn("Failed to publish change proposal entity to graph", "proposal_id", newProposal.ID, "error", err)
-	}
-
 	// Auto-accept: skip manual review, deprecate affected requirements, delete their
 	// scenarios, and trigger partial requirement regeneration immediately.
 	if req.AutoAccept && len(req.AffectedReqIDs) > 0 {
@@ -401,11 +396,6 @@ func (c *Component) handleUpdateChangeProposal(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Publish to graph (best-effort)
-	if err := c.publishChangeProposalEntity(r.Context(), slug, &proposals[idx]); err != nil {
-		c.logger.Warn("Failed to publish change proposal entity to graph", "proposal_id", proposalID, "error", err)
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(proposals[idx]); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
@@ -495,11 +485,6 @@ func (c *Component) handleSubmitChangeProposal(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Publish to graph (best-effort)
-	if err := c.publishChangeProposalEntity(r.Context(), slug, &proposals[idx]); err != nil {
-		c.logger.Warn("Failed to publish change proposal entity to graph", "proposal_id", proposalID, "error", err)
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(proposals[idx]); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
@@ -554,11 +539,6 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 	}
 
 	c.logger.Info("Change proposal accepted via REST API", "slug", slug, "proposal_id", proposalID)
-
-	// Publish to graph (best-effort)
-	if err := c.publishChangeProposalEntity(r.Context(), slug, &proposals[idx]); err != nil {
-		c.logger.Warn("Failed to publish change proposal entity to graph", "proposal_id", proposalID, "error", err)
-	}
 
 	// Publish cascade request to JetStream for async processing by change-proposal-handler.
 	if c.natsClient != nil {
@@ -632,11 +612,6 @@ func (c *Component) handleRejectChangeProposal(w http.ResponseWriter, r *http.Re
 		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to reject change proposal", http.StatusInternalServerError)
 		return
-	}
-
-	// Publish to graph (best-effort)
-	if err := c.publishChangeProposalEntity(r.Context(), slug, &proposals[idx]); err != nil {
-		c.logger.Warn("Failed to publish change proposal entity to graph", "proposal_id", proposalID, "error", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
