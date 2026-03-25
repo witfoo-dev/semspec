@@ -712,10 +712,6 @@ func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug s
 // Approves the plan directly (manual approval via REST API).
 // If the plan is already approved, it returns immediately.
 func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, slug string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
 	plan, err := c.loadPlanCached(r.Context(), slug)
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
@@ -750,8 +746,8 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 	// Cancel any active coordination for this slug — the human has taken over.
 	c.coordinator.Cancel(slug, "plan promoted via REST API")
 
-	requirements, _ := workflow.LoadRequirements(r.Context(), tw, slug)
-	scenarios, _ := workflow.LoadScenarios(r.Context(), tw, slug)
+	requirements := c.requirements.listByPlan(slug)
+	scenarios := c.scenarios.listByPlan(slug, c.requirements)
 
 	switch {
 	case len(requirements) == 0:

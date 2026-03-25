@@ -216,20 +216,10 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Validate that all affected requirement IDs exist in this plan
+	// Validate that all affected requirement IDs exist in this plan.
 	if len(req.AffectedReqIDs) > 0 {
-		requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
-		if err != nil {
-			c.logger.Error("Failed to load requirements for validation", "slug", slug, "error", err)
-			http.Error(w, "Failed to validate requirement IDs", http.StatusInternalServerError)
-			return
-		}
-		reqIndex := make(map[string]bool, len(requirements))
-		for _, r := range requirements {
-			reqIndex[r.ID] = true
-		}
 		for _, reqID := range req.AffectedReqIDs {
-			if !reqIndex[reqID] {
+			if _, ok := c.requirements.get(reqID); !ok {
 				http.Error(w, fmt.Sprintf("requirement %q not found in plan", reqID), http.StatusBadRequest)
 				return
 			}
@@ -280,43 +270,24 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 			c.logger.Error("Failed to save auto-accepted proposal status", "slug", slug, "error", err)
 		}
 
-		// Deprecate affected requirements.
-		existingReqs, err := workflow.LoadRequirements(r.Context(), tw, slug)
-		if err == nil {
-			affected := make(map[string]bool, len(req.AffectedReqIDs))
-			for _, id := range req.AffectedReqIDs {
-				affected[id] = true
-			}
-			for i := range existingReqs {
-				if affected[existingReqs[i].ID] {
-					existingReqs[i].Status = workflow.RequirementStatusDeprecated
+		// Deprecate affected requirements (entity-level writes).
+		affected := make(map[string]bool, len(req.AffectedReqIDs))
+		for _, id := range req.AffectedReqIDs {
+			affected[id] = true
+			if existing, ok := c.requirements.get(id); ok {
+				existing.Status = workflow.RequirementStatusDeprecated
+				if saveErr := c.requirements.save(r.Context(), existing); saveErr != nil {
+					c.logger.Error("Failed to deprecate requirement", "id", id, "error", saveErr)
 				}
 			}
-			if saveErr := workflow.SaveRequirements(r.Context(), tw, existingReqs, slug); saveErr != nil {
-				c.logger.Error("Failed to save deprecated requirements", "slug", slug, "error", saveErr)
-			}
-		} else {
-			c.logger.Error("Failed to load requirements for auto-accept deprecation", "slug", slug, "error", err)
 		}
 
 		// Delete scenarios for deprecated requirements.
-		existingScenarios, err := workflow.LoadScenarios(r.Context(), tw, slug)
-		if err == nil {
-			affected := make(map[string]bool, len(req.AffectedReqIDs))
-			for _, id := range req.AffectedReqIDs {
-				affected[id] = true
+		scenarios := c.scenarios.listByPlan(slug, c.requirements)
+		for i := range scenarios {
+			if affected[scenarios[i].RequirementID] {
+				_ = c.scenarios.delete(r.Context(), scenarios[i].ID)
 			}
-			kept := existingScenarios[:0]
-			for _, s := range existingScenarios {
-				if !affected[s.RequirementID] {
-					kept = append(kept, s)
-				}
-			}
-			if saveErr := workflow.SaveScenarios(r.Context(), tw, kept, slug); saveErr != nil {
-				c.logger.Error("Failed to save pruned scenarios", "slug", slug, "error", saveErr)
-			}
-		} else {
-			c.logger.Error("Failed to load scenarios for auto-accept pruning", "slug", slug, "error", err)
 		}
 
 		// Build per-requirement rejection reasons map and trigger partial regen.

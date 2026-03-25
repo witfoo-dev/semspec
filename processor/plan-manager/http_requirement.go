@@ -97,17 +97,9 @@ func (c *Component) handleRequirementByID(w http.ResponseWriter, r *http.Request
 }
 
 // handleListRequirements handles GET /plans/{slug}/requirements.
-func (c *Component) handleListRequirements(w http.ResponseWriter, r *http.Request, slug string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
-	requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load requirements", "slug", slug, "error", err)
-		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
-		return
-	}
+// Reads from the requirement cache — never hits the graph.
+func (c *Component) handleListRequirements(w http.ResponseWriter, _ *http.Request, slug string) {
+	requirements := c.requirements.listByPlan(slug)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(requirements); err != nil {
@@ -116,37 +108,23 @@ func (c *Component) handleListRequirements(w http.ResponseWriter, r *http.Reques
 }
 
 // handleGetRequirement handles GET /plans/{slug}/requirements/{reqId}.
-func (c *Component) handleGetRequirement(w http.ResponseWriter, r *http.Request, slug, requirementID string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
-	requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load requirements", "slug", slug, "error", err)
-		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
+// O(1) cache lookup by ID.
+func (c *Component) handleGetRequirement(w http.ResponseWriter, _ *http.Request, _, requirementID string) {
+	req, ok := c.requirements.get(requirementID)
+	if !ok {
+		http.Error(w, "Requirement not found", http.StatusNotFound)
 		return
 	}
 
-	for _, req := range requirements {
-		if req.ID == requirementID {
-			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(req); err != nil {
-				c.logger.Warn("Failed to encode response", "error", err)
-			}
-			return
-		}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(req); err != nil {
+		c.logger.Warn("Failed to encode response", "error", err)
 	}
-
-	http.Error(w, "Requirement not found", http.StatusNotFound)
 }
 
 // handleCreateRequirement handles POST /plans/{slug}/requirements.
+// Validates DAG with existing requirements + the new one, then writes a single entity.
 func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Request, slug string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
 	var req CreateRequirementHTTPRequest
@@ -160,15 +138,10 @@ func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load requirements", "slug", slug, "error", err)
-		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
-		return
-	}
+	existing := c.requirements.listByPlan(slug)
 
 	now := time.Now()
-	id := fmt.Sprintf("requirement.%s.%d", slug, len(requirements)+1)
+	id := fmt.Sprintf("requirement.%s.%d", slug, len(existing)+1)
 
 	newReq := workflow.Requirement{
 		ID:          id,
@@ -181,15 +154,18 @@ func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Reque
 		UpdatedAt:   now,
 	}
 
-	requirements = append(requirements, newReq)
-
-	if err := workflow.ValidateRequirementDAG(requirements); err != nil {
-		writeJSONError(w, err.Error(), http.StatusUnprocessableEntity)
-		return
+	// Validate DAG with existing + new requirement.
+	if len(req.DependsOn) > 0 {
+		candidate := append(existing, newReq)
+		if err := workflow.ValidateRequirementDAG(candidate); err != nil {
+			writeJSONError(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
 	}
 
-	if err := workflow.SaveRequirements(r.Context(), tw, requirements, slug); err != nil {
-		c.logger.Error("Failed to save requirements", "slug", slug, "error", err)
+	// Single entity write.
+	if err := c.requirements.save(r.Context(), &newReq); err != nil {
+		c.logger.Error("Failed to save requirement", "slug", slug, "error", err)
 		http.Error(w, "Failed to save requirement", http.StatusInternalServerError)
 		return
 	}
@@ -204,11 +180,8 @@ func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Reque
 }
 
 // handleUpdateRequirement handles PATCH /plans/{slug}/requirements/{reqId}.
+// Updates a single entity. DAG validation only when dependencies change.
 func (c *Component) handleUpdateRequirement(w http.ResponseWriter, r *http.Request, slug, requirementID string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
 	var req UpdateRequirementHTTPRequest
@@ -217,109 +190,79 @@ func (c *Component) handleUpdateRequirement(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load requirements", "slug", slug, "error", err)
-		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
-		return
-	}
-
-	idx := -1
-	for i, existing := range requirements {
-		if existing.ID == requirementID {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
+	existing, ok := c.requirements.get(requirementID)
+	if !ok {
 		http.Error(w, "Requirement not found", http.StatusNotFound)
 		return
 	}
 
 	if req.Title != nil {
-		requirements[idx].Title = *req.Title
+		existing.Title = *req.Title
 	}
 	if req.Description != nil {
-		requirements[idx].Description = *req.Description
+		existing.Description = *req.Description
 	}
-	if req.DependsOn != nil {
-		requirements[idx].DependsOn = req.DependsOn
+	depsChanged := req.DependsOn != nil
+	if depsChanged {
+		existing.DependsOn = req.DependsOn
 	}
-	requirements[idx].UpdatedAt = time.Now()
+	existing.UpdatedAt = time.Now()
 
-	if err := workflow.ValidateRequirementDAG(requirements); err != nil {
-		writeJSONError(w, err.Error(), http.StatusUnprocessableEntity)
-		return
+	// Validate DAG only when dependencies changed.
+	if depsChanged {
+		all := c.requirements.listByPlan(slug)
+		// Replace this requirement in the list for validation.
+		for i, r := range all {
+			if r.ID == requirementID {
+				all[i] = *existing
+				break
+			}
+		}
+		if err := workflow.ValidateRequirementDAG(all); err != nil {
+			writeJSONError(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
 	}
 
-	if err := workflow.SaveRequirements(r.Context(), tw, requirements, slug); err != nil {
-		c.logger.Error("Failed to save requirements", "slug", slug, "error", err)
+	// Single entity write.
+	if err := c.requirements.save(r.Context(), existing); err != nil {
+		c.logger.Error("Failed to save requirement", "slug", slug, "error", err)
 		http.Error(w, "Failed to save requirement", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(requirements[idx]); err != nil {
+	if err := json.NewEncoder(w).Encode(existing); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
 	}
 }
 
 // handleDeleteRequirement handles DELETE /plans/{slug}/requirements/{reqId}.
-// Cascade: also removes any requirements that depend on this one, and all
-// scenarios belonging to removed requirements.
+// Cascade: deletes transitive dependents and their scenarios.
 func (c *Component) handleDeleteRequirement(w http.ResponseWriter, r *http.Request, slug, requirementID string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
-	requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load requirements", "slug", slug, "error", err)
-		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
-		return
-	}
-
-	// Find the target requirement.
-	found := false
-	for _, existing := range requirements {
-		if existing.ID == requirementID {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if _, ok := c.requirements.get(requirementID); !ok {
 		http.Error(w, "Requirement not found", http.StatusNotFound)
 		return
 	}
 
-	// Compute blast radius: the target + anything that depends on it (transitively).
-	toRemove := requirementBlastRadius(requirements, requirementID)
+	// Compute blast radius from cache.
+	all := c.requirements.listByPlan(slug)
+	toRemove := requirementBlastRadius(all, requirementID)
 
-	// Remove requirements in the blast radius.
-	var kept []workflow.Requirement
-	for _, req := range requirements {
-		if !toRemove[req.ID] {
-			kept = append(kept, req)
+	// Delete each requirement in the blast radius.
+	for id := range toRemove {
+		if err := c.requirements.delete(r.Context(), id); err != nil {
+			c.logger.Error("Failed to delete requirement", "id", id, "error", err)
+			http.Error(w, "Failed to delete requirement", http.StatusInternalServerError)
+			return
 		}
 	}
 
-	if err := workflow.SaveRequirements(r.Context(), tw, kept, slug); err != nil {
-		c.logger.Error("Failed to save requirements", "slug", slug, "error", err)
-		http.Error(w, "Failed to delete requirement", http.StatusInternalServerError)
-		return
-	}
-
-	// Cascade: remove scenarios for all removed requirements.
-	scenarios, err := workflow.LoadScenarios(r.Context(), tw, slug)
-	if err == nil && len(scenarios) > 0 {
-		var keptScenarios []workflow.Scenario
-		for _, s := range scenarios {
-			if !toRemove[s.RequirementID] {
-				keptScenarios = append(keptScenarios, s)
-			}
-		}
-		if len(keptScenarios) != len(scenarios) {
-			_ = workflow.SaveScenarios(r.Context(), tw, keptScenarios, slug)
+	// Cascade: delete scenarios for all removed requirements.
+	scenarios := c.scenarios.listByPlan(slug, c.requirements)
+	for i := range scenarios {
+		if toRemove[scenarios[i].RequirementID] {
+			_ = c.scenarios.delete(r.Context(), scenarios[i].ID)
 		}
 	}
 
@@ -359,62 +302,41 @@ func requirementBlastRadius(requirements []workflow.Requirement, rootID string) 
 }
 
 // handleDeprecateRequirement handles POST /plans/{slug}/requirements/{reqId}/deprecate.
+// Cascade: deprecates transitive dependents and removes their scenarios.
 func (c *Component) handleDeprecateRequirement(w http.ResponseWriter, r *http.Request, slug, requirementID string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
-	requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load requirements", "slug", slug, "error", err)
-		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
-		return
-	}
-
-	idx := -1
-	for i, existing := range requirements {
-		if existing.ID == requirementID {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
+	target, ok := c.requirements.get(requirementID)
+	if !ok {
 		http.Error(w, "Requirement not found", http.StatusNotFound)
 		return
 	}
 
-	if !requirements[idx].Status.CanTransitionTo(workflow.RequirementStatusDeprecated) {
+	if !target.Status.CanTransitionTo(workflow.RequirementStatusDeprecated) {
 		http.Error(w, "Cannot deprecate requirement in current status", http.StatusConflict)
 		return
 	}
 
-	// Cascade: deprecate the target + any transitive dependents.
-	toDeprecate := requirementBlastRadius(requirements, requirementID)
+	// Compute blast radius from cache.
+	all := c.requirements.listByPlan(slug)
+	toDeprecate := requirementBlastRadius(all, requirementID)
+
+	// Deprecate each requirement in the blast radius.
 	now := time.Now()
-	for i := range requirements {
-		if toDeprecate[requirements[i].ID] && requirements[i].Status != workflow.RequirementStatusDeprecated {
-			requirements[i].Status = workflow.RequirementStatusDeprecated
-			requirements[i].UpdatedAt = now
-		}
-	}
-
-	if err := workflow.SaveRequirements(r.Context(), tw, requirements, slug); err != nil {
-		c.logger.Error("Failed to save requirements", "slug", slug, "error", err)
-		http.Error(w, "Failed to deprecate requirement", http.StatusInternalServerError)
-		return
-	}
-
-	// Cascade: remove scenarios for deprecated requirements.
-	scenarios, loadErr := workflow.LoadScenarios(r.Context(), tw, slug)
-	if loadErr == nil && len(scenarios) > 0 {
-		var keptScenarios []workflow.Scenario
-		for _, s := range scenarios {
-			if !toDeprecate[s.RequirementID] {
-				keptScenarios = append(keptScenarios, s)
+	for _, req := range all {
+		if toDeprecate[req.ID] && req.Status != workflow.RequirementStatusDeprecated {
+			updated := req
+			updated.Status = workflow.RequirementStatusDeprecated
+			updated.UpdatedAt = now
+			if err := c.requirements.save(r.Context(), &updated); err != nil {
+				c.logger.Error("Failed to deprecate requirement", "id", req.ID, "error", err)
 			}
 		}
-		if len(keptScenarios) != len(scenarios) {
-			_ = workflow.SaveScenarios(r.Context(), tw, keptScenarios, slug)
+	}
+
+	// Cascade: delete scenarios for deprecated requirements.
+	scenarios := c.scenarios.listByPlan(slug, c.requirements)
+	for i := range scenarios {
+		if toDeprecate[scenarios[i].RequirementID] {
+			_ = c.scenarios.delete(r.Context(), scenarios[i].ID)
 		}
 	}
 
@@ -423,8 +345,13 @@ func (c *Component) handleDeprecateRequirement(w http.ResponseWriter, r *http.Re
 		"requirement_id", requirementID,
 		"deprecated_count", len(toDeprecate))
 
+	// Re-read the target to get updated status.
+	if updated, ok := c.requirements.get(requirementID); ok {
+		target = updated
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(requirements[idx]); err != nil {
+	if err := json.NewEncoder(w).Encode(target); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
 	}
 }

@@ -96,8 +96,6 @@ func (c *Component) handleRequirementsGeneratedEvent(ctx context.Context, event 
 		return
 	}
 
-	tw := c.tripleWriter
-
 	// Load plan to update status and carry Goal/Context into scenario generation.
 	var planGoal, planContext string
 	if plan, err := c.loadPlanCached(ctx, event.Slug); err == nil {
@@ -109,13 +107,8 @@ func (c *Component) handleRequirementsGeneratedEvent(ctx context.Context, event 
 		}
 	}
 
-	// Load requirements and dispatch scenario generation for each.
-	requirements, err := workflow.LoadRequirements(ctx, tw, event.Slug)
-	if err != nil {
-		c.logger.Error("Failed to load requirements for scenario generation",
-			"slug", event.Slug, "error", err)
-		return
-	}
+	// Load requirements from cache and dispatch scenario generation for each.
+	requirements := c.requirements.listByPlan(event.Slug)
 
 	if len(requirements) == 0 {
 		c.logger.Warn("No requirements found after generation event",

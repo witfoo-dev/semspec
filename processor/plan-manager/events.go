@@ -177,7 +177,7 @@ func (c *Component) handleRequirementExecutionCompleteEvent(ctx context.Context,
 		return
 	}
 
-	requirements, err := workflow.LoadRequirements(ctx, tw, event.Slug)
+	requirements := c.requirements.listByPlan(event.Slug)
 	if err != nil {
 		c.logger.Warn("Failed to load requirements for completion check",
 			"slug", event.Slug, "error", err)
@@ -230,7 +230,7 @@ func (c *Component) handleRequirementExecutionCompleteEvent(ctx context.Context,
 		return
 	}
 
-	scenarios, err := workflow.LoadScenarios(ctx, tw, event.Slug)
+	scenarios := c.scenarios.listByPlan(event.Slug, c.requirements)
 	if err != nil {
 		c.logger.Warn("Failed to load scenarios for rollup review",
 			"slug", event.Slug, "error", err)
@@ -270,7 +270,7 @@ func (c *Component) handleScenarioExecutionCompleteEvent(ctx context.Context, ev
 		return
 	}
 
-	scenarios, err := workflow.LoadScenarios(ctx, tw, event.Slug)
+	scenarios := c.scenarios.listByPlan(event.Slug, c.requirements)
 	if err != nil {
 		c.logger.Warn("Failed to load scenarios for completion check",
 			"slug", event.Slug, "error", err)
@@ -361,7 +361,7 @@ func (c *Component) handleScenarioExecutionCompleteEvent(ctx context.Context, ev
 // existing plan-reviewer component. It builds a PlanReviewRequest with the
 // rollup context (requirements + scenario outcomes) as the plan content.
 func (c *Component) dispatchPlanRollupReview(ctx context.Context, plan *workflow.Plan, scenarios []workflow.Scenario, tw *graphutil.TripleWriter) {
-	requirements, _ := workflow.LoadRequirements(ctx, tw, plan.Slug)
+	requirements := c.requirements.listByPlan(plan.Slug)
 
 	// Build rollup content summarizing requirements and scenario outcomes.
 	var rollupContent strings.Builder

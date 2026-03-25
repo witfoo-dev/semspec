@@ -46,33 +46,16 @@ type RetrospectiveResponse struct {
 //  1. Load requirements for the plan
 //  2. Load scenarios; group them by parent requirement
 //  3. Return the nested structure: Requirement → Scenario
-func (c *Component) handlePhasesRetrospective(w http.ResponseWriter, r *http.Request, slug string) {
-	ctx := r.Context()
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
+func (c *Component) handlePhasesRetrospective(w http.ResponseWriter, _ *http.Request, slug string) {
 	// Verify the plan exists.
 	if !c.plans.exists(slug) {
 		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
-	// Load requirements.
-	requirements, err := workflow.LoadRequirements(ctx, tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load requirements for retrospective", "slug", slug, "error", err)
-		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
-		return
-	}
-
-	// Load scenarios and build a lookup: requirementID → []Scenario.
-	scenarios, err := workflow.LoadScenarios(ctx, tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load scenarios for retrospective", "slug", slug, "error", err)
-		http.Error(w, "Failed to load scenarios", http.StatusInternalServerError)
-		return
-	}
+	// Load requirements and scenarios from cache.
+	requirements := c.requirements.listByPlan(slug)
+	scenarios := c.scenarios.listByPlan(slug, c.requirements)
 
 	scenariosByReq := make(map[string][]workflow.Scenario, len(requirements))
 	for _, s := range scenarios {

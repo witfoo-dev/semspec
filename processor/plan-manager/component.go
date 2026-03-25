@@ -240,6 +240,7 @@ func (c *Component) Start(ctx context.Context) error {
 
 	// Wire stores into coordinator so it can read/write plan state.
 	c.coordinator.plans = ps
+	c.coordinator.requirements = rs
 
 	// Update state atomically with lock for complex state
 	c.mu.Lock()

@@ -161,6 +161,7 @@ type coordinator struct {
 	logger       *slog.Logger
 	tripleWriter *graphutil.TripleWriter
 	plans        *planStore
+	requirements *requirementStore
 
 	llmClient     coordinatorLLMCompleter
 	modelRegistry *model.Registry
@@ -1054,12 +1055,8 @@ func (co *coordinator) dispatchScenarioGeneratorLocked(ctx context.Context, exec
 
 	co.advancePhase(ctx, exec, phaseGeneratingScenarios)
 
-	// Load requirements from disk to fan out one scenario-generator per requirement.
-	requirements, err := workflow.LoadRequirements(ctx, co.tripleWriter, exec.Slug)
-	if err != nil {
-		co.markErrorLocked(ctx, exec, fmt.Sprintf("load requirements for scenario generation: %v", err))
-		return
-	}
+	// Load requirements from cache to fan out one scenario-generator per requirement.
+	requirements := co.requirements.listByPlan(exec.Slug)
 	if len(requirements) == 0 {
 		co.markErrorLocked(ctx, exec, "no requirements found — cannot generate scenarios")
 		return
