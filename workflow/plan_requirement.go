@@ -101,11 +101,9 @@ func SaveRequirements(ctx context.Context, kv *natsclient.KVStore, requirements 
 		if requirements[i].PlanID == "" {
 			requirements[i].PlanID = PlanEntityID(slug)
 		}
-		entityID := RequirementEntityID(requirements[i].ID)
-		if err := kvPut(ctx, kv, entityID, requirements[i]); err != nil {
+		if err := kvPut(ctx, kv, RequirementEntityID(requirements[i].ID), requirements[i]); err != nil {
 			return fmt.Errorf("save requirement %s: %w", requirements[i].ID, err)
 		}
-		publishEntitySideEffect(ctx, entityID, RequirementEntityType, RequirementTriples(slug, &requirements[i]))
 	}
 
 	return nil
