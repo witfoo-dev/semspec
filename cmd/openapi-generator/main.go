@@ -77,9 +77,9 @@ var componentRegistry = map[string]struct {
 		Description: "HTTP endpoints for querying LLM call trajectories and agent loop history",
 		Domain:      "semspec",
 	},
-	"plan-api": {
+	"plan-manager": {
 		ConfigType:  reflect.TypeOf(planmanager.Config{}),
-		Description: "HTTP API for development plan lifecycle management - create, approve, and execute plans",
+		Description: "Plan lifecycle manager: CRUD, coordination, requirements, scenarios",
 		Domain:      "semspec",
 	},
 	"project-api": {

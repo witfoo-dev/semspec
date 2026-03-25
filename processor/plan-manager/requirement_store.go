@@ -37,7 +37,7 @@ func (s *requirementStore) reconcile(ctx context.Context) {
 	prefix := workflow.EntityPrefix() + ".wf.plan.req."
 	entities, err := s.tripleWriter.ReadEntitiesByPrefix(reconcileCtx, prefix, 500)
 	if err != nil {
-		s.logger.Info("No requirement state to reconcile", "error", err)
+		s.logger.Warn("Requirement reconciliation failed", "error", err)
 		return
 	}
 

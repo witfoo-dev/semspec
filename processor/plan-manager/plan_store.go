@@ -47,7 +47,8 @@ func (s *planStore) reconcile(ctx context.Context) {
 	prefix := workflow.EntityPrefix() + ".wf.plan.plan."
 	entities, err := s.tripleWriter.ReadEntitiesByPrefix(reconcileCtx, prefix, 500)
 	if err != nil {
-		s.logger.Info("No plan state to reconcile (expected on first start)", "error", err)
+		s.logger.Warn("Plan reconciliation failed (cache will be empty until plans are created/mutated)",
+			"error", err)
 		return
 	}
 
@@ -71,13 +72,16 @@ func (s *planStore) reconcile(ctx context.Context) {
 	}
 }
 
-// get returns a plan by slug from the cache.
+// get returns a shallow copy of a plan by slug from the cache.
+// Returns a copy to prevent data races — multiple goroutines (HTTP handlers,
+// event handlers, coordinator) may hold plan pointers concurrently.
 func (s *planStore) get(slug string) (*workflow.Plan, bool) {
 	val, ok := s.cache.Load(slug)
 	if !ok {
 		return nil, false
 	}
-	return val.(*workflow.Plan), true
+	p := *val.(*workflow.Plan)
+	return &p, true
 }
 
 // list returns all plans from the cache, sorted by creation time (newest first).

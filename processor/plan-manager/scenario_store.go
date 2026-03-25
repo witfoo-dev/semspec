@@ -37,7 +37,7 @@ func (s *scenarioStore) reconcile(ctx context.Context) {
 	prefix := workflow.EntityPrefix() + ".wf.plan.scenario."
 	entities, err := s.tripleWriter.ReadEntitiesByPrefix(reconcileCtx, prefix, 500)
 	if err != nil {
-		s.logger.Info("No scenario state to reconcile", "error", err)
+		s.logger.Warn("Scenario reconciliation failed", "error", err)
 		return
 	}
 
