@@ -5,7 +5,7 @@
   "description": "When plan execution encounters an error, mark as failed",
   "enabled": true,
   "entity": {
-    "pattern": "local.semspec.workflow.plan.execution.*",
+    "pattern": "semspec.local.exec.plan.run.*",
     "watch_buckets": ["ENTITY_STATES"]
   },
   "conditions": [

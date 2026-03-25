@@ -796,7 +796,7 @@ func TestHelper_ListTeams_SkipsInsightSubEntities(t *testing.T) {
 
 	// Manually inject a fake team-insight key that shares the team prefix.
 	insightKey := agentgraph.TeamInsightEntityID("real-team", "ins1")
-	kv.data[insightKey] = []byte(`{"ID":"semspec.local.agentic.orchestrator.team-insight.real-team-ins1"}`)
+	kv.data[insightKey] = []byte(`{"ID":"semspec.local.agent.team.insight.real-team-ins1"}`)
 
 	got, err := h.ListTeams(context.Background())
 	if err != nil {

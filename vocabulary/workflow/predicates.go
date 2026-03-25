@@ -127,7 +127,7 @@ const (
 
 // DAG node predicates.
 // These predicates describe individual nodes within a scenario's execution DAG.
-// DAG nodes are ephemeral graph entities (local.semspec.workflow.dag-node.node.*).
+// DAG nodes are ephemeral graph entities ({prefix}.agent.loop.dag.*).
 const (
 	// DAGNodeID is the node identifier within the DAG.
 	DAGNodeID = "workflow.dag.node_id"

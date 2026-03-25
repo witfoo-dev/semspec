@@ -38,9 +38,12 @@ func (o *OllamaProvider) BuildURL(baseURL string) string {
 }
 
 // SetHeaders adds OpenAI-compatible headers.
-func (o *OllamaProvider) SetHeaders(req *http.Request) {
+func (o *OllamaProvider) SetHeaders(req *http.Request, apiKeyEnv string) {
+	if apiKeyEnv == "" {
+		apiKeyEnv = "OPENAI_API_KEY"
+	}
 	// Check for API key (for OpenRouter, vLLM, etc.)
-	if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
+	if apiKey := os.Getenv(apiKeyEnv); apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 }

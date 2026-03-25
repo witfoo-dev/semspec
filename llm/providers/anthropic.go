@@ -36,9 +36,11 @@ func (a *AnthropicProvider) BuildURL(baseURL string) string {
 }
 
 // SetHeaders adds Anthropic-specific authentication headers.
-func (a *AnthropicProvider) SetHeaders(req *http.Request) {
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey != "" {
+func (a *AnthropicProvider) SetHeaders(req *http.Request, apiKeyEnv string) {
+	if apiKeyEnv == "" {
+		apiKeyEnv = "ANTHROPIC_API_KEY"
+	}
+	if apiKey := os.Getenv(apiKeyEnv); apiKey != "" {
 		req.Header.Set("x-api-key", apiKey)
 	}
 	req.Header.Set("anthropic-version", anthropicVersion)

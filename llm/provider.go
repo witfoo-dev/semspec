@@ -14,7 +14,8 @@ type Provider interface {
 	BuildURL(baseURL string) string
 
 	// SetHeaders adds provider-specific headers to the request.
-	SetHeaders(req *http.Request)
+	// The endpoint config provides the APIKeyEnv field for dynamic key resolution.
+	SetHeaders(req *http.Request, apiKeyEnv string)
 
 	// BuildRequestBody creates the JSON request body for the provider.
 	// temperature is nil to use provider default, or a pointer to explicit value.

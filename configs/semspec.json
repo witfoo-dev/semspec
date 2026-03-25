@@ -488,11 +488,11 @@
         ],
         "entity_watch_buckets": {
           "ENTITY_STATES": [
-            "local.semspec.workflow.*-review.execution.*"
+            "semspec.local.exec.review.run.*"
           ]
         },
         "entity": {
-          "pattern": "local.semspec.workflow.*-review.execution.*",
+          "pattern": "semspec.local.exec.review.run.*",
           "watch_buckets": [
             "ENTITY_STATES"
           ]
@@ -582,11 +582,11 @@
         ],
         "entity_watch_buckets": {
           "ENTITY_STATES": [
-            "local.semspec.workflow.task-execution.execution.*"
+            "semspec.local.exec.task.run.*"
           ]
         },
         "entity": {
-          "pattern": "local.semspec.workflow.task-execution.execution.*",
+          "pattern": "semspec.local.exec.task.run.*",
           "watch_buckets": [
             "ENTITY_STATES"
           ]
@@ -625,11 +625,11 @@
         ],
         "entity_watch_buckets": {
           "ENTITY_STATES": [
-            "local.semspec.workflow.coordination.execution.*"
+            "semspec.local.exec.coord.run.*"
           ]
         },
         "entity": {
-          "pattern": "local.semspec.workflow.coordination.execution.*",
+          "pattern": "semspec.local.exec.coord.run.*",
           "watch_buckets": [
             "ENTITY_STATES"
           ]
@@ -786,11 +786,11 @@
         ],
         "entity_watch_buckets": {
           "ENTITY_STATES": [
-            "local.semspec.workflow.scenario-execution.execution.*"
+            "semspec.local.exec.scenario.run.*"
           ]
         },
         "entity": {
-          "pattern": "local.semspec.workflow.scenario-execution.execution.*",
+          "pattern": "semspec.local.exec.scenario.run.*",
           "watch_buckets": [
             "ENTITY_STATES"
           ]

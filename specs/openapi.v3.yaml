@@ -120,6 +120,70 @@ paths:
                     description: Invalid file name
                 "404":
                     description: Configuration file not found
+    /api/project/checklist:
+        get:
+            summary: Get checklist
+            description: Returns the current checklist.json with quality gate checks
+            tags:
+                - Project
+            responses:
+                "200":
+                    description: Current checklist
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Checklist'
+                "404":
+                    description: checklist.json not found
+        patch:
+            summary: Update checklist
+            description: Replaces the checks array in checklist.json. Preserves version, timestamps, and approval state.
+            tags:
+                - Project
+            requestBody:
+                description: New checks array
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ChecklistUpdateRequest'
+            responses:
+                "200":
+                    description: Updated checklist
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Checklist'
+                "400":
+                    description: Invalid request body
+                "404":
+                    description: checklist.json not found — run init first
+    /api/project/config:
+        patch:
+            summary: Update project config
+            description: Updates project.json fields. Org and platform changes are only allowed before the first plan is created to prevent entity ID divergence.
+            tags:
+                - Project
+            requestBody:
+                description: Fields to update (all optional)
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConfigUpdateRequest'
+            responses:
+                "200":
+                    description: Updated project config
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProjectConfig'
+                "400":
+                    description: Invalid request body
+                "404":
+                    description: project.json not found — run init first
+                "409":
+                    description: Cannot change org/platform after plans exist
     /api/project/detect:
         post:
             summary: Detect project stack
@@ -200,6 +264,44 @@ paths:
                                 $ref: '#/components/schemas/ScaffoldResponse'
                 "400":
                     description: Missing languages in request
+    /api/project/standards:
+        get:
+            summary: Get standards
+            description: Returns the current standards.json with project rules
+            tags:
+                - Project
+            responses:
+                "200":
+                    description: Current standards
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Standards'
+                "404":
+                    description: standards.json not found
+        patch:
+            summary: Update standards
+            description: Replaces the rules array in standards.json. Recalculates token estimate. Preserves version, timestamps, and approval state.
+            tags:
+                - Project
+            requestBody:
+                description: New rules array
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/StandardsUpdateRequest'
+            responses:
+                "200":
+                    description: Updated standards
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Standards'
+                "400":
+                    description: Invalid request body
+                "404":
+                    description: standards.json not found — run init first
     /api/project/status:
         get:
             summary: Get project status
@@ -590,6 +692,231 @@ paths:
                         application/json:
                             schema:
                                 type: object
+    /plan-api/plans:
+        get:
+            summary: List plans
+            description: Returns all development plans with their current workflow stage and active agent loops
+            tags:
+                - Plans
+            responses:
+                "200":
+                    description: Array of plans with status
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/PlanWithStatus'
+        post:
+            summary: Create plan
+            description: Creates a new development plan from a description and triggers the planner agent to generate Goal, Context, and Scope
+            tags:
+                - Plans
+            requestBody:
+                description: Plan description
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreatePlanRequest'
+            responses:
+                "200":
+                    description: Plan already exists, returns current state
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PlanWithStatus'
+                "201":
+                    description: Plan created and planning triggered
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreatePlanResponse'
+                "400":
+                    description: Invalid request (missing description)
+    /plan-api/plans/{slug}:
+        get:
+            summary: Get plan
+            description: Returns a single plan with its current workflow stage and active agent loops
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Plan with current status
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PlanWithStatus'
+                "404":
+                    description: Plan not found
+        patch:
+            summary: Update plan
+            description: Partially updates a plan's title, goal, or context
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            requestBody:
+                description: Fields to update (all optional)
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdatePlanHTTPRequest'
+            responses:
+                "200":
+                    description: Plan updated
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PlanWithStatus'
+                "400":
+                    description: Invalid request body
+                "404":
+                    description: Plan not found
+        delete:
+            summary: Delete plan
+            description: Deletes a plan and all associated tasks and phases
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: Plan deleted
+                "404":
+                    description: Plan not found
+    /plan-api/plans/{slug}/execute:
+        post:
+            summary: Execute plan
+            description: Triggers the batch task dispatcher to execute all tasks for an approved plan
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "202":
+                    description: Plan execution accepted and started asynchronously
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PlanWithStatus'
+                "400":
+                    description: Plan must be approved before execution
+                "404":
+                    description: Plan not found
+    /plan-api/plans/{slug}/promote:
+        post:
+            summary: Promote plan
+            description: Approves a plan draft, marking it ready for task generation and execution
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Plan approved and returned with updated status
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PlanWithStatus'
+                "404":
+                    description: Plan not found
+    /plan-api/plans/{slug}/reviews:
+        get:
+            summary: Get plan reviews
+            description: Returns the aggregated review synthesis result for a plan, combining findings from all reviewers
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Aggregated review synthesis result with verdict, findings, and per-reviewer summaries
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SynthesisResult'
+                "404":
+                    description: Plan not found or no completed review available
+    /plan-api/plans/{slug}/tasks:
+        get:
+            summary: List plan tasks
+            description: Returns all tasks associated with the given plan
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Array of tasks for the plan
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/Task'
+    /plan-api/plans/{slug}/unarchive:
+        post:
+            summary: Unarchive plan
+            description: Restores an archived plan to complete status
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Plan restored
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PlanWithStatus'
+                "404":
+                    description: Plan not found
+                "409":
+                    description: Plan is not archived
     /stats:
         get:
             summary: Get message statistics
@@ -893,766 +1220,6 @@ paths:
                         application/json:
                             schema:
                                 type: object
-    /workflow-api/plans:
-        get:
-            summary: List plans
-            description: Returns all development plans with their current workflow stage and active agent loops
-            tags:
-                - Plans
-            responses:
-                "200":
-                    description: Array of plans with status
-                    content:
-                        application/json:
-                            schema:
-                                type: array
-                                items:
-                                    $ref: '#/components/schemas/PlanWithStatus'
-        post:
-            summary: Create plan
-            description: Creates a new development plan from a description and triggers the planner agent to generate Goal, Context, and Scope
-            tags:
-                - Plans
-            requestBody:
-                description: Plan description
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/CreatePlanRequest'
-            responses:
-                "200":
-                    description: Plan already exists, returns current state
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/PlanWithStatus'
-                "201":
-                    description: Plan created and planning triggered
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/CreatePlanResponse'
-                "400":
-                    description: Invalid request (missing description)
-    /workflow-api/plans/{slug}:
-        get:
-            summary: Get plan
-            description: Returns a single plan with its current workflow stage and active agent loops
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: Plan with current status
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/PlanWithStatus'
-                "404":
-                    description: Plan not found
-        patch:
-            summary: Update plan
-            description: Partially updates a plan's title, goal, or context
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            requestBody:
-                description: Fields to update (all optional)
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/UpdatePlanHTTPRequest'
-            responses:
-                "200":
-                    description: Plan updated
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/PlanWithStatus'
-                "400":
-                    description: Invalid request body
-                "404":
-                    description: Plan not found
-        delete:
-            summary: Delete plan
-            description: Deletes a plan and all associated tasks and phases
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            responses:
-                "204":
-                    description: Plan deleted
-                "404":
-                    description: Plan not found
-    /workflow-api/plans/{slug}/execute:
-        post:
-            summary: Execute plan
-            description: Triggers the batch task dispatcher to execute all tasks for an approved plan
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            responses:
-                "202":
-                    description: Plan execution accepted and started asynchronously
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/PlanWithStatus'
-                "400":
-                    description: Plan must be approved before execution
-                "404":
-                    description: Plan not found
-    /workflow-api/plans/{slug}/phases:
-        get:
-            summary: List phases
-            description: Returns all phases for a plan, ordered by sequence
-            tags:
-                - Phases
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: Array of phases for the plan
-                    content:
-                        application/json:
-                            schema:
-                                type: array
-                                items:
-                                    $ref: '#/components/schemas/Phase'
-                "404":
-                    description: Plan not found
-        post:
-            summary: Create phase
-            description: Creates a new phase within the plan
-            tags:
-                - Phases
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            requestBody:
-                description: Phase creation request
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/CreatePhaseHTTPRequest'
-            responses:
-                "201":
-                    description: Phase created successfully
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Phase'
-                "400":
-                    description: Invalid request body
-                "404":
-                    description: Plan not found
-    /workflow-api/plans/{slug}/phases/{phaseId}:
-        get:
-            summary: Get phase
-            description: Returns a single phase by ID
-            tags:
-                - Phases
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-                - name: phaseId
-                  in: path
-                  required: true
-                  description: Phase identifier
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: Phase details
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Phase'
-                "404":
-                    description: Phase not found
-        patch:
-            summary: Update phase
-            description: Partially updates a phase's name, description, dependencies, or agent config
-            tags:
-                - Phases
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-                - name: phaseId
-                  in: path
-                  required: true
-                  description: Phase identifier
-                  schema:
-                    type: string
-            requestBody:
-                description: Fields to update (all optional)
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/UpdatePhaseHTTPRequest'
-            responses:
-                "200":
-                    description: Phase updated
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Phase'
-                "400":
-                    description: Invalid request body
-                "404":
-                    description: Phase not found
-        delete:
-            summary: Delete phase
-            description: Deletes a phase and reassigns its tasks to the default phase
-            tags:
-                - Phases
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-                - name: phaseId
-                  in: path
-                  required: true
-                  description: Phase identifier
-                  schema:
-                    type: string
-            responses:
-                "204":
-                    description: Phase deleted
-                "404":
-                    description: Phase not found
-    /workflow-api/plans/{slug}/phases/{phaseId}/approve:
-        post:
-            summary: Approve phase
-            description: Approves a single phase for execution
-            tags:
-                - Phases
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-                - name: phaseId
-                  in: path
-                  required: true
-                  description: Phase identifier
-                  schema:
-                    type: string
-            requestBody:
-                description: Optional approval metadata
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/ApprovePhaseHTTPRequest'
-            responses:
-                "200":
-                    description: Phase approved
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Phase'
-                "404":
-                    description: Phase not found
-    /workflow-api/plans/{slug}/phases/{phaseId}/reject:
-        post:
-            summary: Reject phase
-            description: Rejects a phase with a reason
-            tags:
-                - Phases
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-                - name: phaseId
-                  in: path
-                  required: true
-                  description: Phase identifier
-                  schema:
-                    type: string
-            requestBody:
-                description: Rejection reason
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/RejectPhaseHTTPRequest'
-            responses:
-                "200":
-                    description: Phase rejected
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Phase'
-                "400":
-                    description: Rejection reason required
-                "404":
-                    description: Phase not found
-    /workflow-api/plans/{slug}/phases/{phaseId}/tasks:
-        get:
-            summary: List phase tasks
-            description: Returns all tasks belonging to a specific phase
-            tags:
-                - Phases
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-                - name: phaseId
-                  in: path
-                  required: true
-                  description: Phase identifier
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: Array of tasks for the phase
-                    content:
-                        application/json:
-                            schema:
-                                type: array
-                                items:
-                                    $ref: '#/components/schemas/Task'
-                "404":
-                    description: Phase not found
-    /workflow-api/plans/{slug}/phases/approve:
-        post:
-            summary: Approve all phases
-            description: Bulk-approves all pending phases for a plan
-            tags:
-                - Phases
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: All phases approved, returns updated phases
-                    content:
-                        application/json:
-                            schema:
-                                type: array
-                                items:
-                                    $ref: '#/components/schemas/Phase'
-                "404":
-                    description: Plan not found
-    /workflow-api/plans/{slug}/phases/generate:
-        post:
-            summary: Generate phases
-            description: Triggers the LLM to generate phases from an approved plan's Goal, Context, and Scope
-            tags:
-                - Phases
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            responses:
-                "202":
-                    description: Phase generation accepted and started asynchronously
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/AsyncOperationResponse'
-                "400":
-                    description: Plan must be approved before generating phases
-                "404":
-                    description: Plan not found
-    /workflow-api/plans/{slug}/phases/reorder:
-        put:
-            summary: Reorder phases
-            description: Reorders phases within the plan by specifying new sequence order
-            tags:
-                - Phases
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            requestBody:
-                description: Ordered list of phase IDs
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/ReorderPhasesHTTPRequest'
-            responses:
-                "200":
-                    description: Phases reordered, returns updated phases
-                    content:
-                        application/json:
-                            schema:
-                                type: array
-                                items:
-                                    $ref: '#/components/schemas/Phase'
-                "400":
-                    description: Invalid phase IDs
-                "404":
-                    description: Plan not found
-    /workflow-api/plans/{slug}/promote:
-        post:
-            summary: Promote plan
-            description: Approves a plan draft, marking it ready for task generation and execution
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: Plan approved and returned with updated status
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/PlanWithStatus'
-                "404":
-                    description: Plan not found
-    /workflow-api/plans/{slug}/reviews:
-        get:
-            summary: Get plan reviews
-            description: Returns the aggregated review synthesis result for a plan, combining findings from all reviewers
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: Aggregated review synthesis result with verdict, findings, and per-reviewer summaries
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/SynthesisResult'
-                "404":
-                    description: Plan not found or no completed review available
-    /workflow-api/plans/{slug}/tasks:
-        get:
-            summary: List plan tasks
-            description: Returns all tasks associated with the given plan
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: Array of tasks for the plan
-                    content:
-                        application/json:
-                            schema:
-                                type: array
-                                items:
-                                    $ref: '#/components/schemas/Task'
-        post:
-            summary: Create task
-            description: Creates a new task within the plan
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            requestBody:
-                description: Task creation request
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/CreateTaskHTTPRequest'
-            responses:
-                "201":
-                    description: Task created
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Task'
-                "400":
-                    description: Invalid request body
-                "404":
-                    description: Plan not found
-    /workflow-api/plans/{slug}/tasks/{taskId}:
-        get:
-            summary: Get task
-            description: Returns a single task by ID
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-                - name: taskId
-                  in: path
-                  required: true
-                  description: Task identifier
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: Task details
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Task'
-                "404":
-                    description: Task not found
-        patch:
-            summary: Update task
-            description: Partially updates a task's description, type, acceptance criteria, files, or dependencies
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-                - name: taskId
-                  in: path
-                  required: true
-                  description: Task identifier
-                  schema:
-                    type: string
-            requestBody:
-                description: Fields to update (all optional)
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/UpdateTaskHTTPRequest'
-            responses:
-                "200":
-                    description: Task updated
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Task'
-                "400":
-                    description: Invalid request body
-                "404":
-                    description: Task not found
-        delete:
-            summary: Delete task
-            description: Deletes a task from the plan
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-                - name: taskId
-                  in: path
-                  required: true
-                  description: Task identifier
-                  schema:
-                    type: string
-            responses:
-                "204":
-                    description: Task deleted
-                "404":
-                    description: Task not found
-    /workflow-api/plans/{slug}/tasks/{taskId}/approve:
-        post:
-            summary: Approve task
-            description: Approves a single task for execution
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-                - name: taskId
-                  in: path
-                  required: true
-                  description: Task identifier
-                  schema:
-                    type: string
-            requestBody:
-                description: Optional approval metadata
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/ApproveTaskRequest'
-            responses:
-                "200":
-                    description: Task approved
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Task'
-                "404":
-                    description: Task not found
-    /workflow-api/plans/{slug}/tasks/{taskId}/reject:
-        post:
-            summary: Reject task
-            description: Rejects a task with a reason
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-                - name: taskId
-                  in: path
-                  required: true
-                  description: Task identifier
-                  schema:
-                    type: string
-            requestBody:
-                description: Rejection reason
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/RejectTaskRequest'
-            responses:
-                "200":
-                    description: Task rejected
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Task'
-                "400":
-                    description: Rejection reason required
-                "404":
-                    description: Task not found
-    /workflow-api/plans/{slug}/tasks/approve:
-        post:
-            summary: Approve all tasks
-            description: Bulk-approves all pending tasks for a plan
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: All tasks approved, returns updated tasks
-                    content:
-                        application/json:
-                            schema:
-                                type: array
-                                items:
-                                    $ref: '#/components/schemas/Task'
-                "404":
-                    description: Plan not found
-    /workflow-api/plans/{slug}/tasks/generate:
-        post:
-            summary: Generate tasks
-            description: Triggers the task generator agent to produce executable tasks from an approved plan's Goal, Context, and Scope
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            responses:
-                "202":
-                    description: Task generation accepted and started asynchronously
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/AsyncOperationResponse'
-                "400":
-                    description: Plan must be approved before generating tasks
-                "404":
-                    description: Plan not found
 components:
     schemas:
         AcceptanceCriterion:
@@ -1700,11 +1267,6 @@ components:
                 - call_count
                 - duration_ms
             type: object
-        ApprovePhaseHTTPRequest:
-            properties:
-                approved_by:
-                    type: string
-            type: object
         ApproveRequest:
             properties:
                 file:
@@ -1725,11 +1287,6 @@ components:
                 - file
                 - approved_at
                 - all_approved
-            type: object
-        ApproveTaskRequest:
-            properties:
-                approved_by:
-                    type: string
             type: object
         AsyncOperationResponse:
             properties:
@@ -1950,6 +1507,104 @@ components:
                 - timeout
                 - description
             type: object
+        Checklist:
+            properties:
+                approved_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                checks:
+                    items:
+                        properties:
+                            category:
+                                type: string
+                            command:
+                                type: string
+                            description:
+                                type: string
+                            name:
+                                type: string
+                            required:
+                                type: boolean
+                            timeout:
+                                type: string
+                            trigger:
+                                items:
+                                    type: string
+                                type: array
+                            working_dir:
+                                type: string
+                        required:
+                            - name
+                            - command
+                            - trigger
+                            - category
+                            - required
+                            - timeout
+                            - description
+                        type: object
+                    type: array
+                created_at:
+                    format: date-time
+                    type: string
+                version:
+                    type: string
+            required:
+                - version
+                - created_at
+                - checks
+            type: object
+        ChecklistUpdateRequest:
+            properties:
+                checks:
+                    items:
+                        properties:
+                            category:
+                                type: string
+                            command:
+                                type: string
+                            description:
+                                type: string
+                            name:
+                                type: string
+                            required:
+                                type: boolean
+                            timeout:
+                                type: string
+                            trigger:
+                                items:
+                                    type: string
+                                type: array
+                            working_dir:
+                                type: string
+                        required:
+                            - name
+                            - command
+                            - trigger
+                            - category
+                            - required
+                            - timeout
+                            - description
+                        type: object
+                    type: array
+            required:
+                - checks
+            type: object
+        ConfigUpdateRequest:
+            properties:
+                description:
+                    nullable: true
+                    type: string
+                name:
+                    nullable: true
+                    type: string
+                org:
+                    nullable: true
+                    type: string
+                platform:
+                    nullable: true
+                    type: string
+            type: object
         ContextStats:
             properties:
                 by_capability:
@@ -2054,35 +1709,6 @@ components:
                 - total_budget
                 - total_used
             type: object
-        CreatePhaseHTTPRequest:
-            properties:
-                agent_config:
-                    nullable: true
-                    properties:
-                        max_concurrent:
-                            type: integer
-                        model:
-                            type: string
-                        review_strategy:
-                            type: string
-                        roles:
-                            items:
-                                type: string
-                            type: array
-                    type: object
-                depends_on:
-                    items:
-                        type: string
-                    type: array
-                description:
-                    type: string
-                name:
-                    type: string
-                requires_approval:
-                    type: boolean
-            required:
-                - name
-            type: object
         CreatePlanRequest:
             properties:
                 description:
@@ -2105,39 +1731,6 @@ components:
                 - request_id
                 - trace_id
                 - message
-            type: object
-        CreateTaskHTTPRequest:
-            properties:
-                acceptance_criteria:
-                    items:
-                        properties:
-                            given:
-                                type: string
-                            then:
-                                type: string
-                            when:
-                                type: string
-                        required:
-                            - given
-                            - when
-                            - then
-                        type: object
-                    type: array
-                depends_on:
-                    items:
-                        type: string
-                    type: array
-                description:
-                    type: string
-                files:
-                    items:
-                        type: string
-                    type: array
-                type:
-                    type: string
-            required:
-                - description
-                - type
             type: object
         DetectedDoc:
             properties:
@@ -2711,6 +2304,10 @@ components:
                             type: array
                         name:
                             type: string
+                        org:
+                            type: string
+                        platform:
+                            type: string
                         repository:
                             type: string
                     required:
@@ -2776,6 +2373,8 @@ components:
                     format: date-time
                     nullable: true
                     type: string
+                entity_prefix:
+                    type: string
                 has_checklist:
                     type: boolean
                 has_project_json:
@@ -2791,6 +2390,10 @@ components:
                 project_description:
                     type: string
                 project_name:
+                    type: string
+                project_org:
+                    type: string
+                project_platform:
                     type: string
                 scaffolded:
                     type: boolean
@@ -2816,6 +2419,7 @@ components:
                     type: string
             required:
                 - initialized
+                - entity_prefix
                 - has_project_json
                 - has_checklist
                 - has_standards
@@ -2946,80 +2550,6 @@ components:
                 - component
                 - metrics
             type: object
-        Phase:
-            properties:
-                agent_config:
-                    nullable: true
-                    properties:
-                        max_concurrent:
-                            type: integer
-                        model:
-                            type: string
-                        review_strategy:
-                            type: string
-                        roles:
-                            items:
-                                type: string
-                            type: array
-                    type: object
-                approved:
-                    type: boolean
-                approved_at:
-                    format: date-time
-                    nullable: true
-                    type: string
-                approved_by:
-                    type: string
-                completed_at:
-                    format: date-time
-                    nullable: true
-                    type: string
-                created_at:
-                    format: date-time
-                    type: string
-                depends_on:
-                    items:
-                        type: string
-                    type: array
-                description:
-                    type: string
-                id:
-                    type: string
-                name:
-                    type: string
-                plan_id:
-                    type: string
-                requires_approval:
-                    type: boolean
-                sequence:
-                    type: integer
-                started_at:
-                    format: date-time
-                    nullable: true
-                    type: string
-                status:
-                    type: string
-            required:
-                - id
-                - plan_id
-                - sequence
-                - name
-                - status
-                - created_at
-            type: object
-        PhaseAgentConfig:
-            properties:
-                max_concurrent:
-                    type: integer
-                model:
-                    type: string
-                review_strategy:
-                    type: string
-                roles:
-                    items:
-                        type: string
-                    type: array
-            type: object
         PhaseMetrics:
             properties:
                 call_count:
@@ -3054,33 +2584,6 @@ components:
                 - call_count
                 - duration_ms
             type: object
-        PhaseStats:
-            properties:
-                active:
-                    type: integer
-                blocked:
-                    type: integer
-                complete:
-                    type: integer
-                failed:
-                    type: integer
-                pending:
-                    type: integer
-                ready:
-                    type: integer
-                total:
-                    type: integer
-            required:
-                - total
-                - pending
-                - ready
-                - active
-                - complete
-                - failed
-                - blocked
-            type: object
-        PhaseStatus:
-            type: string
         Plan:
             properties:
                 approved:
@@ -3111,22 +2614,6 @@ components:
                 llm_call_history:
                     nullable: true
                     properties:
-                        phase_review:
-                            items:
-                                properties:
-                                    iteration:
-                                        type: integer
-                                    llm_request_ids:
-                                        items:
-                                            type: string
-                                        type: array
-                                    verdict:
-                                        type: string
-                                required:
-                                    - iteration
-                                    - llm_request_ids
-                                type: object
-                            type: array
                         plan_review:
                             items:
                                 properties:
@@ -3143,44 +2630,7 @@ components:
                                     - llm_request_ids
                                 type: object
                             type: array
-                        task_review:
-                            items:
-                                properties:
-                                    iteration:
-                                        type: integer
-                                    llm_request_ids:
-                                        items:
-                                            type: string
-                                        type: array
-                                    verdict:
-                                        type: string
-                                required:
-                                    - iteration
-                                    - llm_request_ids
-                                type: object
-                            type: array
                     type: object
-                phase_review_findings:
-                    format: byte
-                    type: string
-                phase_review_formatted_findings:
-                    type: string
-                phase_review_iteration:
-                    type: integer
-                phase_review_summary:
-                    type: string
-                phase_review_verdict:
-                    type: string
-                phase_reviewed_at:
-                    format: date-time
-                    nullable: true
-                    type: string
-                phases_approved:
-                    type: boolean
-                phases_approved_at:
-                    format: date-time
-                    nullable: true
-                    type: string
                 project_id:
                     type: string
                 review_findings:
@@ -3216,27 +2666,6 @@ components:
                 slug:
                     type: string
                 status:
-                    type: string
-                task_review_findings:
-                    format: byte
-                    type: string
-                task_review_formatted_findings:
-                    type: string
-                task_review_iteration:
-                    type: integer
-                task_review_summary:
-                    type: string
-                task_review_verdict:
-                    type: string
-                task_reviewed_at:
-                    format: date-time
-                    nullable: true
-                    type: string
-                tasks_approved:
-                    type: boolean
-                tasks_approved_at:
-                    format: date-time
-                    nullable: true
                     type: string
                 title:
                     type: string
@@ -3293,22 +2722,6 @@ components:
                 llm_call_history:
                     nullable: true
                     properties:
-                        phase_review:
-                            items:
-                                properties:
-                                    iteration:
-                                        type: integer
-                                    llm_request_ids:
-                                        items:
-                                            type: string
-                                        type: array
-                                    verdict:
-                                        type: string
-                                required:
-                                    - iteration
-                                    - llm_request_ids
-                                type: object
-                            type: array
                         plan_review:
                             items:
                                 properties:
@@ -3325,44 +2738,7 @@ components:
                                     - llm_request_ids
                                 type: object
                             type: array
-                        task_review:
-                            items:
-                                properties:
-                                    iteration:
-                                        type: integer
-                                    llm_request_ids:
-                                        items:
-                                            type: string
-                                        type: array
-                                    verdict:
-                                        type: string
-                                required:
-                                    - iteration
-                                    - llm_request_ids
-                                type: object
-                            type: array
                     type: object
-                phase_review_findings:
-                    format: byte
-                    type: string
-                phase_review_formatted_findings:
-                    type: string
-                phase_review_iteration:
-                    type: integer
-                phase_review_summary:
-                    type: string
-                phase_review_verdict:
-                    type: string
-                phase_reviewed_at:
-                    format: date-time
-                    nullable: true
-                    type: string
-                phases_approved:
-                    type: boolean
-                phases_approved_at:
-                    format: date-time
-                    nullable: true
-                    type: string
                 project_id:
                     type: string
                 review_findings:
@@ -3401,27 +2777,6 @@ components:
                     type: string
                 status:
                     type: string
-                task_review_findings:
-                    format: byte
-                    type: string
-                task_review_formatted_findings:
-                    type: string
-                task_review_iteration:
-                    type: integer
-                task_review_summary:
-                    type: string
-                task_review_verdict:
-                    type: string
-                task_reviewed_at:
-                    format: date-time
-                    nullable: true
-                    type: string
-                tasks_approved:
-                    type: boolean
-                tasks_approved_at:
-                    format: date-time
-                    nullable: true
-                    type: string
                 title:
                     type: string
             required:
@@ -3433,6 +2788,83 @@ components:
                 - created_at
                 - stage
                 - active_loops
+            type: object
+        ProjectConfig:
+            properties:
+                approved_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                description:
+                    type: string
+                frameworks:
+                    items:
+                        properties:
+                            language:
+                                type: string
+                            name:
+                                type: string
+                        required:
+                            - name
+                            - language
+                        type: object
+                    type: array
+                initialized_at:
+                    format: date-time
+                    type: string
+                languages:
+                    items:
+                        properties:
+                            name:
+                                type: string
+                            primary:
+                                type: boolean
+                            version:
+                                nullable: true
+                                type: string
+                        required:
+                            - name
+                            - primary
+                        type: object
+                    type: array
+                name:
+                    type: string
+                org:
+                    type: string
+                platform:
+                    type: string
+                repository:
+                    properties:
+                        default_branch:
+                            type: string
+                        url:
+                            type: string
+                    type: object
+                tooling:
+                    properties:
+                        ci:
+                            type: string
+                        container:
+                            type: string
+                        linters:
+                            items:
+                                type: string
+                            type: array
+                        task_runner:
+                            type: string
+                        test_frameworks:
+                            items:
+                                type: string
+                            type: array
+                    type: object
+                version:
+                    type: string
+            required:
+                - name
+                - version
+                - initialized_at
+                - languages
+                - tooling
             type: object
         ProjectInitInput:
             properties:
@@ -3448,26 +2880,16 @@ components:
                     type: array
                 name:
                     type: string
+                org:
+                    type: string
+                platform:
+                    type: string
                 repository:
                     type: string
             required:
                 - name
                 - languages
                 - frameworks
-            type: object
-        RejectPhaseHTTPRequest:
-            properties:
-                reason:
-                    type: string
-            required:
-                - reason
-            type: object
-        RejectTaskRequest:
-            properties:
-                reason:
-                    type: string
-            required:
-                - reason
             type: object
         ReloadResponse:
             properties:
@@ -3480,15 +2902,6 @@ components:
             required:
                 - success
                 - rule_count
-            type: object
-        ReorderPhasesHTTPRequest:
-            properties:
-                phase_ids:
-                    items:
-                        type: string
-                    type: array
-            required:
-                - phase_ids
             type: object
         Response:
             properties:
@@ -3872,6 +3285,50 @@ components:
                 - rules
                 - count
             type: object
+        Standards:
+            properties:
+                approved_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                generated_at:
+                    format: date-time
+                    type: string
+                rules:
+                    items:
+                        properties:
+                            applies_to:
+                                items:
+                                    type: string
+                                type: array
+                            category:
+                                type: string
+                            id:
+                                type: string
+                            origin:
+                                type: string
+                            severity:
+                                type: string
+                            text:
+                                type: string
+                        required:
+                            - id
+                            - text
+                            - severity
+                            - category
+                            - origin
+                        type: object
+                    type: array
+                token_estimate:
+                    type: integer
+                version:
+                    type: string
+            required:
+                - version
+                - generated_at
+                - token_estimate
+                - rules
+            type: object
         StandardsInput:
             properties:
                 rules:
@@ -3903,6 +3360,36 @@ components:
                     type: string
             required:
                 - version
+                - rules
+            type: object
+        StandardsUpdateRequest:
+            properties:
+                rules:
+                    items:
+                        properties:
+                            applies_to:
+                                items:
+                                    type: string
+                                type: array
+                            category:
+                                type: string
+                            id:
+                                type: string
+                            origin:
+                                type: string
+                            severity:
+                                type: string
+                            text:
+                                type: string
+                        required:
+                            - id
+                            - text
+                            - severity
+                            - category
+                            - origin
+                        type: object
+                    type: array
+            required:
                 - rules
             type: object
         StatusStreamEnvelope:
@@ -4110,8 +3597,6 @@ components:
                     format: date-time
                     nullable: true
                     type: string
-                phase_id:
-                    type: string
                 plan_id:
                     type: string
                 rejection_reason:
@@ -4133,7 +3618,6 @@ components:
             required:
                 - id
                 - plan_id
-                - phase_id
                 - sequence
                 - description
                 - acceptance_criteria
@@ -4157,15 +3641,9 @@ components:
                                 type: integer
                             error:
                                 type: string
-                            finish_reason:
-                                type: string
-                            messages_count:
-                                type: integer
                             model:
                                 type: string
                             provider:
-                                type: string
-                            request_id:
                                 type: string
                             response_preview:
                                 type: string
@@ -4173,24 +3651,6 @@ components:
                                 type: string
                             retries:
                                 type: integer
-                            status:
-                                type: string
-                            storage_ref:
-                                nullable: true
-                                properties:
-                                    content_type:
-                                        type: string
-                                    key:
-                                        type: string
-                                    size:
-                                        type: integer
-                                    storage_instance:
-                                        type: string
-                                required:
-                                    - storage_instance
-                                    - key
-                                    - content_type
-                                type: object
                             timestamp:
                                 format: date-time
                                 type: string
@@ -4246,15 +3706,9 @@ components:
                     type: integer
                 error:
                     type: string
-                finish_reason:
-                    type: string
-                messages_count:
-                    type: integer
                 model:
                     type: string
                 provider:
-                    type: string
-                request_id:
                     type: string
                 response_preview:
                     type: string
@@ -4262,24 +3716,6 @@ components:
                     type: string
                 retries:
                     type: integer
-                status:
-                    type: string
-                storage_ref:
-                    nullable: true
-                    properties:
-                        content_type:
-                            type: string
-                        key:
-                            type: string
-                        size:
-                            type: integer
-                        storage_instance:
-                            type: string
-                    required:
-                        - storage_instance
-                        - key
-                        - content_type
-                    type: object
                 timestamp:
                     format: date-time
                     type: string
@@ -4314,36 +3750,6 @@ components:
                 - truncated_calls
                 - truncation_rate
             type: object
-        UpdatePhaseHTTPRequest:
-            properties:
-                agent_config:
-                    nullable: true
-                    properties:
-                        max_concurrent:
-                            type: integer
-                        model:
-                            type: string
-                        review_strategy:
-                            type: string
-                        roles:
-                            items:
-                                type: string
-                            type: array
-                    type: object
-                depends_on:
-                    items:
-                        type: string
-                    type: array
-                description:
-                    nullable: true
-                    type: string
-                name:
-                    nullable: true
-                    type: string
-                requires_approval:
-                    nullable: true
-                    type: boolean
-            type: object
         UpdatePlanHTTPRequest:
             properties:
                 context:
@@ -4353,41 +3759,6 @@ components:
                     nullable: true
                     type: string
                 title:
-                    nullable: true
-                    type: string
-            type: object
-        UpdateTaskHTTPRequest:
-            properties:
-                acceptance_criteria:
-                    items:
-                        properties:
-                            given:
-                                type: string
-                            then:
-                                type: string
-                            when:
-                                type: string
-                        required:
-                            - given
-                            - when
-                            - then
-                        type: object
-                    type: array
-                depends_on:
-                    items:
-                        type: string
-                    type: array
-                description:
-                    nullable: true
-                    type: string
-                files:
-                    items:
-                        type: string
-                    type: array
-                sequence:
-                    nullable: true
-                    type: integer
-                type:
                     nullable: true
                     type: string
             type: object
@@ -4589,8 +3960,6 @@ tags:
       description: Visual flow CRUD operations
     - name: MessageLogger
       description: Message observation and debugging endpoints
-    - name: Phases
-      description: Phase management - logical groupings of tasks within a plan with dependencies and approval gates
     - name: Plans
       description: Workflow plan management - create, retrieve, and advance development plans through their lifecycle
     - name: Project

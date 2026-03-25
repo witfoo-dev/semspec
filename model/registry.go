@@ -52,6 +52,10 @@ type EndpointConfig struct {
 	// ToolFormat specifies the tool calling format: "anthropic" or "openai".
 	// Empty means auto-detect from provider.
 	ToolFormat string `json:"tool_format,omitempty"`
+
+	// APIKeyEnv is the environment variable name containing the API key.
+	// When empty, providers fall back to their default env var (e.g., OPENAI_API_KEY).
+	APIKeyEnv string `json:"api_key_env,omitempty"`
 }
 
 // DefaultsConfig holds default model settings.

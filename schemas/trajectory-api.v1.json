@@ -5,33 +5,32 @@
   "title": "trajectory-api Configuration",
   "description": "HTTP endpoints for querying LLM call trajectories and agent loop history",
   "properties": {
-    "artifact_api_subject": {
+    "content_bucket": {
       "type": "string",
-      "description": "NATS subject for LLM artifact ObjectStore API",
-      "category": "basic"
-    },
-    "entity_prefix": {
-      "type": "string",
-      "description": "Entity ID prefix for LLM call queries",
-      "default": "local.semspec.llm.call.semspec",
+      "description": "ObjectStore bucket for step content",
+      "default": "AGENT_CONTENT",
       "category": "basic"
     },
     "graph_gateway_url": {
       "type": "string",
-      "description": "Graph gateway URL for LLM call queries",
+      "description": "Graph gateway URL for step entity queries",
       "default": "http://localhost:8082",
-      "category": "basic"
-    },
-    "llm_calls_bucket": {
-      "type": "string",
-      "description": "KV bucket for LLM call records",
-      "default": "LLM_CALLS",
       "category": "basic"
     },
     "loops_bucket": {
       "type": "string",
       "description": "KV bucket for agent loop state",
       "default": "AGENT_LOOPS",
+      "category": "basic"
+    },
+    "org": {
+      "type": "string",
+      "description": "Organization identifier for entity ID construction",
+      "category": "basic"
+    },
+    "platform": {
+      "type": "string",
+      "description": "Platform identifier for entity ID construction",
       "category": "basic"
     },
     "ports": {
@@ -42,12 +41,6 @@
     "repo_root": {
       "type": "string",
       "description": "Repository root path for plan access",
-      "category": "basic"
-    },
-    "tool_calls_bucket": {
-      "type": "string",
-      "description": "KV bucket for tool call records",
-      "default": "TOOL_CALLS",
       "category": "basic"
     }
   },

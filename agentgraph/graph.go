@@ -136,7 +136,7 @@ func (h *Helper) RecordLoopCreated(ctx context.Context, loopID, role, model stri
 		propertyTriple(entityID, PredicateStatus, "created", now),
 	}
 
-	data, err := marshalEntityState(entityID, triples, message.Type{Domain: DomainAgentic, Category: TypeLoop, Version: "v1"})
+	data, err := marshalEntityState(entityID, triples, message.Type{Domain: DomainAgent, Category: TypeLoop, Version: "v1"})
 	if err != nil {
 		return fmt.Errorf("agentgraph: marshal loop %q: %w", loopID, err)
 	}
@@ -165,7 +165,7 @@ func (h *Helper) RecordSpawn(ctx context.Context, parentLoopID, childLoopID, rol
 			// Parent doesn't exist yet — create a minimal entity.
 			entity = &gtypes.EntityState{
 				ID:          parentEntityID,
-				MessageType: message.Type{Domain: DomainAgentic, Category: TypeLoop, Version: "v1"},
+				MessageType: message.Type{Domain: DomainAgent, Category: TypeLoop, Version: "v1"},
 				UpdatedAt:   time.Now(),
 			}
 		} else {
@@ -322,7 +322,7 @@ func (h *Helper) SeedErrorCategories(ctx context.Context, categories []*workflow
 			triples = append(triples, propertyTriple(entityID, PredicateErrorCategorySignal, signal, now))
 		}
 
-		data, err := marshalEntityState(entityID, triples, message.Type{Domain: DomainAgentic, Category: TypeErrorCategory, Version: "v1"})
+		data, err := marshalEntityState(entityID, triples, message.Type{Domain: DomainAgent, Category: TypeErrorCategory, Version: "v1"})
 		if err != nil {
 			return fmt.Errorf("agentgraph: marshal error category %q: %w", cat.ID, err)
 		}
@@ -355,7 +355,7 @@ func (h *Helper) CreateAgent(ctx context.Context, agent workflow.Agent) error {
 		propertyTriple(entityID, PredicateAgentUpdatedAt, agent.UpdatedAt.Format(time.RFC3339), now),
 	}
 
-	data, err := marshalEntityState(entityID, triples, message.Type{Domain: DomainAgentic, Category: TypeAgent, Version: "v1"})
+	data, err := marshalEntityState(entityID, triples, message.Type{Domain: DomainAgent, Category: TypeAgent, Version: "v1"})
 	if err != nil {
 		return fmt.Errorf("agentgraph: marshal agent %q: %w", agent.ID, err)
 	}
@@ -665,7 +665,7 @@ func (h *Helper) RecordReview(ctx context.Context, review workflow.Review) error
 		}
 	}
 
-	data, err := marshalEntityState(entityID, triples, message.Type{Domain: DomainAgentic, Category: TypeReview, Version: "v1"})
+	data, err := marshalEntityState(entityID, triples, message.Type{Domain: DomainAgent, Category: TypeReview, Version: "v1"})
 	if err != nil {
 		return fmt.Errorf("agentgraph: marshal review %q: %w", review.ID, err)
 	}
@@ -765,7 +765,7 @@ func (h *Helper) CreateTeam(ctx context.Context, team *workflow.Team) error {
 	}
 	triples = append(triples, propertyTriple(entityID, PredicateTeamInsight, string(insightJSON), now))
 
-	data, err := marshalEntityState(entityID, triples, message.Type{Domain: DomainAgentic, Category: TypeTeam, Version: "v1"})
+	data, err := marshalEntityState(entityID, triples, message.Type{Domain: DomainAgent, Category: TypeTeam, Version: "v1"})
 	if err != nil {
 		return fmt.Errorf("agentgraph: marshal team %q: %w", team.ID, err)
 	}
@@ -875,7 +875,7 @@ func (h *Helper) ListTeams(ctx context.Context) ([]*workflow.Team, error) {
 	var teams []*workflow.Team
 	for _, key := range keys {
 		// Skip team-insight sub-entities which share the team prefix.
-		if strings.Contains(key, "."+TypeTeamInsight+".") {
+		if strings.Contains(key, "."+TypeInsight+".") {
 			continue
 		}
 		entry, err := h.kv.Get(ctx, key)

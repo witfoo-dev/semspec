@@ -4,29 +4,36 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/pkg/types"
 )
 
 // Entity ID component constants. These define the fixed hierarchy positions
 // used when constructing 6-part graph entity IDs for agentic resources.
 //
-// Format: org.platform.domain.system.type.instance
-// Example loop:  semspec.local.agentic.orchestrator.loop.<loopID>
-// Example task:  semspec.local.agentic.orchestrator.task.<taskID>
-// Example DAG:   semspec.local.agentic.orchestrator.dag.<dagID>
+// Format: {org}.{platform}.{domain}.{system}.{type}.{instance}
+//
+// Example loop:   semspec.local.agent.loop.loop.<loopID>
+// Example task:   semspec.local.agent.loop.task.<taskID>
+// Example DAG:    semspec.local.agent.loop.dag.<dagID>
+// Example agent:  semspec.local.agent.roster.agent.<agentID>
+// Example review: semspec.local.agent.roster.review.<reviewID>
+// Example errcat: semspec.local.agent.roster.errcat.<categoryID>
+// Example team:   semspec.local.agent.team.team.<teamID>
+// Example insight:semspec.local.agent.team.insight.<teamID>-<insightID>
 const (
-	OrgDefault         = "semspec"
-	PlatformDefault    = "local"
-	DomainAgentic      = "agentic"
-	SystemOrchestrator = "orchestrator"
-	TypeLoop           = "loop"
-	TypeTask           = "task"
-	TypeDAG            = "dag"
-	TypeAgent          = "agent"
-	TypeReview         = "review"
-	TypeErrorCategory  = "error-category"
-	TypeTeam           = "team"
-	TypeTeamInsight    = "team-insight"
+	DomainAgent   = "agent"
+	SystemLoop    = "loop"
+	SystemRoster  = "roster"
+	SystemTeam    = "team"
+	TypeLoop      = "loop"
+	TypeTask      = "task"
+	TypeDAG       = "dag"
+	TypeAgent     = "agent"
+	TypeReview    = "review"
+	TypeErrorCategory = "errcat"
+	TypeTeam      = "team"
+	TypeInsight   = "insight"
 
 	// SourceSemspec is the source identifier stamped on triples created by Semspec.
 	// It enables provenance filtering when querying the graph.
@@ -45,95 +52,66 @@ func ValidateInstanceID(id string) error {
 	return nil
 }
 
+// entityID constructs a 6-part graph entity ID from the fixed hierarchy components.
+// Format: {prefix}.{domain}.{system}.{typ}.{instance}
+func entityID(domain, system, typ, instance string) string {
+	return fmt.Sprintf("%s.%s.%s.%s.%s", workflow.EntityPrefix(), domain, system, typ, instance)
+}
+
+// typePrefix constructs a 5-part entity type prefix for listing/matching.
+// Format: {prefix}.{domain}.{system}.{typ}
+func typePrefix(domain, system, typ string) string {
+	return fmt.Sprintf("%s.%s.%s.%s", workflow.EntityPrefix(), domain, system, typ)
+}
+
 // LoopEntityID returns the full 6-part graph entity ID string for an agent loop.
-// Format: semspec.local.agentic.orchestrator.loop.<loopID>
+// Format: {prefix}.agent.loop.loop.<loopID>
 // Panics if loopID is empty or contains dots.
 func LoopEntityID(loopID string) string {
 	if err := ValidateInstanceID(loopID); err != nil {
 		panic(err)
 	}
-	return LoopEntityIDParsed(loopID).String()
+	return entityID(DomainAgent, SystemLoop, TypeLoop, loopID)
+}
+
+// LoopTypePrefix returns the 5-part prefix that identifies the loop entity type.
+// Use this prefix with EntityManager.ListWithPrefix to enumerate all loop entities.
+// Format: {prefix}.agent.loop.loop
+func LoopTypePrefix() string {
+	return typePrefix(DomainAgent, SystemLoop, TypeLoop)
 }
 
 // TaskEntityID returns the full 6-part graph entity ID string for a task.
-// Format: semspec.local.agentic.orchestrator.task.<taskID>
+// Format: {prefix}.agent.loop.task.<taskID>
 // Panics if taskID is empty or contains dots.
 func TaskEntityID(taskID string) string {
 	if err := ValidateInstanceID(taskID); err != nil {
 		panic(err)
 	}
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeTask,
-		Instance: taskID,
-	}.String()
+	return entityID(DomainAgent, SystemLoop, TypeTask, taskID)
+}
+
+// TaskTypePrefix returns the 5-part prefix that identifies the task entity type.
+// Use this prefix with EntityManager.ListWithPrefix to enumerate all task entities.
+// Format: {prefix}.agent.loop.task
+func TaskTypePrefix() string {
+	return typePrefix(DomainAgent, SystemLoop, TypeTask)
 }
 
 // DAGEntityID returns the full 6-part graph entity ID string for a DAG execution.
-// Format: semspec.local.agentic.orchestrator.dag.<dagID>
+// Format: {prefix}.agent.loop.dag.<dagID>
 // Panics if dagID is empty or contains dots.
 func DAGEntityID(dagID string) string {
 	if err := ValidateInstanceID(dagID); err != nil {
 		panic(err)
 	}
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeDAG,
-		Instance: dagID,
-	}.String()
-}
-
-// LoopEntityIDParsed returns a structured EntityID for an agent loop.
-// Prefer LoopEntityID when only the string form is needed.
-func LoopEntityIDParsed(loopID string) types.EntityID {
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeLoop,
-		Instance: loopID,
-	}
-}
-
-// LoopTypePrefix returns the 5-part prefix that identifies the loop entity type.
-// Use this prefix with EntityManager.ListWithPrefix to enumerate all loop entities.
-// Format: semspec.local.agentic.orchestrator.loop
-func LoopTypePrefix() string {
-	return LoopEntityIDParsed("_").TypePrefix()
-}
-
-// TaskTypePrefix returns the 5-part prefix that identifies the task entity type.
-// Use this prefix with EntityManager.ListWithPrefix to enumerate all task entities.
-// Format: semspec.local.agentic.orchestrator.task
-func TaskTypePrefix() string {
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeTask,
-		Instance: "_",
-	}.TypePrefix()
+	return entityID(DomainAgent, SystemLoop, TypeDAG, dagID)
 }
 
 // DAGTypePrefix returns the 5-part prefix that identifies the DAG entity type.
-// Format: semspec.local.agentic.orchestrator.dag
+// Format: {prefix}.agent.loop.dag
 func DAGTypePrefix() string {
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeDAG,
-		Instance: "_",
-	}.TypePrefix()
+	return typePrefix(DomainAgent, SystemLoop, TypeDAG)
 }
 
 // ParseEntityID extracts the instance component from a 6-part entity ID string.
@@ -148,131 +126,75 @@ func ParseEntityID(entityID string) (instance string, ok bool) {
 }
 
 // AgentEntityID returns the full 6-part graph entity ID string for a persistent agent.
-// Format: semspec.local.agentic.orchestrator.agent.<agentID>
+// Format: {prefix}.agent.roster.agent.<agentID>
 // Panics if agentID is empty or contains dots.
 func AgentEntityID(agentID string) string {
 	if err := ValidateInstanceID(agentID); err != nil {
 		panic(err)
 	}
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeAgent,
-		Instance: agentID,
-	}.String()
+	return entityID(DomainAgent, SystemRoster, TypeAgent, agentID)
 }
 
 // AgentTypePrefix returns the 5-part prefix that identifies the agent entity type.
 // Use this prefix with EntityManager.ListWithPrefix to enumerate all agent entities.
-// Format: semspec.local.agentic.orchestrator.agent
+// Format: {prefix}.agent.roster.agent
 func AgentTypePrefix() string {
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeAgent,
-		Instance: "_",
-	}.TypePrefix()
+	return typePrefix(DomainAgent, SystemRoster, TypeAgent)
 }
 
 // ReviewEntityID returns the full 6-part graph entity ID string for a review record.
-// Format: semspec.local.agentic.orchestrator.review.<reviewID>
+// Format: {prefix}.agent.roster.review.<reviewID>
 // Panics if reviewID is empty or contains dots.
 func ReviewEntityID(reviewID string) string {
 	if err := ValidateInstanceID(reviewID); err != nil {
 		panic(err)
 	}
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeReview,
-		Instance: reviewID,
-	}.String()
+	return entityID(DomainAgent, SystemRoster, TypeReview, reviewID)
 }
 
 // ReviewTypePrefix returns the 5-part prefix that identifies the review entity type.
 // Use this prefix with EntityManager.ListWithPrefix to enumerate all review entities.
-// Format: semspec.local.agentic.orchestrator.review
+// Format: {prefix}.agent.roster.review
 func ReviewTypePrefix() string {
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeReview,
-		Instance: "_",
-	}.TypePrefix()
+	return typePrefix(DomainAgent, SystemRoster, TypeReview)
 }
 
 // ErrorCategoryEntityID returns the full 6-part graph entity ID string for an error category.
-// Format: semspec.local.agentic.orchestrator.error-category.<categoryID>
+// Format: {prefix}.agent.roster.errcat.<categoryID>
 // Panics if categoryID is empty or contains dots.
 func ErrorCategoryEntityID(categoryID string) string {
 	if err := ValidateInstanceID(categoryID); err != nil {
 		panic(err)
 	}
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeErrorCategory,
-		Instance: categoryID,
-	}.String()
+	return entityID(DomainAgent, SystemRoster, TypeErrorCategory, categoryID)
 }
 
 // ErrorCategoryTypePrefix returns the 5-part prefix that identifies the error category entity type.
 // Use this prefix with EntityManager.ListWithPrefix to enumerate all error category entities.
-// Format: semspec.local.agentic.orchestrator.error-category
+// Format: {prefix}.agent.roster.errcat
 func ErrorCategoryTypePrefix() string {
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeErrorCategory,
-		Instance: "_",
-	}.TypePrefix()
+	return typePrefix(DomainAgent, SystemRoster, TypeErrorCategory)
 }
 
 // TeamEntityID returns the full 6-part graph entity ID string for a team.
-// Format: semspec.local.agentic.orchestrator.team.<teamID>
+// Format: {prefix}.agent.team.team.<teamID>
 // Panics if teamID is empty or contains dots.
 func TeamEntityID(teamID string) string {
 	if err := ValidateInstanceID(teamID); err != nil {
 		panic(err)
 	}
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeTeam,
-		Instance: teamID,
-	}.String()
+	return entityID(DomainAgent, SystemTeam, TypeTeam, teamID)
 }
 
 // TeamTypePrefix returns the 5-part prefix that identifies the team entity type.
 // Use this prefix with EntityManager.ListWithPrefix to enumerate all team entities.
-// Format: semspec.local.agentic.orchestrator.team
+// Format: {prefix}.agent.team.team
 func TeamTypePrefix() string {
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeTeam,
-		Instance: "_",
-	}.TypePrefix()
+	return typePrefix(DomainAgent, SystemTeam, TypeTeam)
 }
 
 // TeamInsightEntityID returns the full 6-part graph entity ID string for a team insight.
-// Format: semspec.local.agentic.orchestrator.team-insight.<teamID>-<insightID>
+// Format: {prefix}.agent.team.insight.<teamID>-<insightID>
 // Panics if teamID or insightID is empty or contains dots.
 func TeamInsightEntityID(teamID, insightID string) string {
 	if err := ValidateInstanceID(teamID); err != nil {
@@ -281,12 +203,12 @@ func TeamInsightEntityID(teamID, insightID string) string {
 	if err := ValidateInstanceID(insightID); err != nil {
 		panic(fmt.Errorf("insightID: %w", err))
 	}
-	return types.EntityID{
-		Org:      OrgDefault,
-		Platform: PlatformDefault,
-		Domain:   DomainAgentic,
-		System:   SystemOrchestrator,
-		Type:     TypeTeamInsight,
-		Instance: teamID + "-" + insightID,
-	}.String()
+	return fmt.Sprintf("%s-%s", entityID(DomainAgent, SystemTeam, TypeInsight, teamID), insightID)
+}
+
+// TeamInsightTypePrefix returns the 5-part prefix that identifies the team insight entity type.
+// Use this prefix with EntityManager.ListWithPrefix to enumerate all team insight entities.
+// Format: {prefix}.agent.team.insight
+func TeamInsightTypePrefix() string {
+	return typePrefix(DomainAgent, SystemTeam, TypeInsight)
 }

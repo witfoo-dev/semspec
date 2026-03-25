@@ -18,17 +18,17 @@ func TestLoopEntityID(t *testing.T) {
 		{
 			name:   "simple alphanumeric loop ID",
 			loopID: "abc123",
-			want:   "semspec.local.agentic.orchestrator.loop.abc123",
+			want:   "semspec.local.agent.loop.loop.abc123",
 		},
 		{
 			name:   "uuid-style loop ID",
 			loopID: "550e8400-e29b-41d4-a716-446655440000",
-			want:   "semspec.local.agentic.orchestrator.loop.550e8400-e29b-41d4-a716-446655440000",
+			want:   "semspec.local.agent.loop.loop.550e8400-e29b-41d4-a716-446655440000",
 		},
 		{
 			name:   "single character loop ID",
 			loopID: "1",
-			want:   "semspec.local.agentic.orchestrator.loop.1",
+			want:   "semspec.local.agent.loop.loop.1",
 		},
 	}
 
@@ -100,12 +100,12 @@ func TestTaskEntityID(t *testing.T) {
 		{
 			name:   "simple task ID",
 			taskID: "task-001",
-			want:   "semspec.local.agentic.orchestrator.task.task-001",
+			want:   "semspec.local.agent.loop.task.task-001",
 		},
 		{
 			name:   "numeric task ID",
 			taskID: "42",
-			want:   "semspec.local.agentic.orchestrator.task.42",
+			want:   "semspec.local.agent.loop.task.42",
 		},
 	}
 
@@ -141,12 +141,12 @@ func TestDAGEntityID(t *testing.T) {
 		{
 			name:  "simple dag ID",
 			dagID: "dag-001",
-			want:  "semspec.local.agentic.orchestrator.dag.dag-001",
+			want:  "semspec.local.agent.loop.dag.dag-001",
 		},
 		{
 			name:  "uuid-style dag ID",
 			dagID: "abcdef123456",
-			want:  "semspec.local.agentic.orchestrator.dag.abcdef123456",
+			want:  "semspec.local.agent.loop.dag.abcdef123456",
 		},
 	}
 
@@ -193,7 +193,7 @@ func TestLoopTaskDAGEntityIDs_AreAllDistinct(t *testing.T) {
 func TestLoopTypePrefix(t *testing.T) {
 	t.Parallel()
 
-	want := "semspec.local.agentic.orchestrator.loop"
+	want := "semspec.local.agent.loop.loop"
 	got := agentgraph.LoopTypePrefix()
 	if got != want {
 		t.Errorf("LoopTypePrefix() = %q, want %q", got, want)
@@ -203,7 +203,7 @@ func TestLoopTypePrefix(t *testing.T) {
 func TestTaskTypePrefix(t *testing.T) {
 	t.Parallel()
 
-	want := "semspec.local.agentic.orchestrator.task"
+	want := "semspec.local.agent.loop.task"
 	got := agentgraph.TaskTypePrefix()
 	if got != want {
 		t.Errorf("TaskTypePrefix() = %q, want %q", got, want)
@@ -227,31 +227,6 @@ func TestTaskTypePrefix_MatchesTaskEntityIDPrefix(t *testing.T) {
 	eid := agentgraph.TaskEntityID("some-task")
 	if !strings.HasPrefix(eid, prefix+".") {
 		t.Errorf("TaskEntityID(%q) = %q does not start with TaskTypePrefix %q + \".\"", "some-task", eid, prefix)
-	}
-}
-
-func TestLoopEntityIDParsed(t *testing.T) {
-	t.Parallel()
-
-	eid := agentgraph.LoopEntityIDParsed("myloop")
-
-	checks := []struct {
-		field string
-		got   string
-		want  string
-	}{
-		{"Org", eid.Org, agentgraph.OrgDefault},
-		{"Platform", eid.Platform, agentgraph.PlatformDefault},
-		{"Domain", eid.Domain, agentgraph.DomainAgentic},
-		{"System", eid.System, agentgraph.SystemOrchestrator},
-		{"Type", eid.Type, agentgraph.TypeLoop},
-		{"Instance", eid.Instance, "myloop"},
-	}
-
-	for _, c := range checks {
-		if c.got != c.want {
-			t.Errorf("LoopEntityIDParsed field %s = %q, want %q", c.field, c.got, c.want)
-		}
 	}
 }
 
@@ -284,7 +259,7 @@ func TestParseEntityID(t *testing.T) {
 		},
 		{
 			name:     "malformed: too few parts",
-			entityID: "semspec.local.agentic",
+			entityID: "semspec.local.agent",
 			wantOK:   false,
 		},
 		{
@@ -337,5 +312,73 @@ func TestValidateInstanceID(t *testing.T) {
 				t.Errorf("ValidateInstanceID(%q) error = %v, wantErr %v", tc.id, err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestSystemPrefixesAreDistinct verifies that loop, roster, and team systems
+// produce non-overlapping prefixes, preventing cross-system entity collisions.
+func TestSystemPrefixesAreDistinct(t *testing.T) {
+	t.Parallel()
+
+	prefixes := []string{
+		agentgraph.LoopTypePrefix(),
+		agentgraph.TaskTypePrefix(),
+		agentgraph.DAGTypePrefix(),
+		agentgraph.AgentTypePrefix(),
+		agentgraph.ReviewTypePrefix(),
+		agentgraph.ErrorCategoryTypePrefix(),
+		agentgraph.TeamTypePrefix(),
+	}
+
+	seen := make(map[string]bool)
+	for _, p := range prefixes {
+		if seen[p] {
+			t.Errorf("type prefix collision: %q appears more than once", p)
+		}
+		seen[p] = true
+	}
+}
+
+// TestAgentEntityID verifies roster agent IDs use the roster system.
+func TestAgentEntityID(t *testing.T) {
+	t.Parallel()
+
+	got := agentgraph.AgentEntityID("agent-42")
+	want := "semspec.local.agent.roster.agent.agent-42"
+	if got != want {
+		t.Errorf("AgentEntityID(%q) = %q, want %q", "agent-42", got, want)
+	}
+}
+
+// TestErrorCategoryEntityID verifies errcat IDs use the roster system.
+func TestErrorCategoryEntityID(t *testing.T) {
+	t.Parallel()
+
+	got := agentgraph.ErrorCategoryEntityID("missing-tests")
+	want := "semspec.local.agent.roster.errcat.missing-tests"
+	if got != want {
+		t.Errorf("ErrorCategoryEntityID(%q) = %q, want %q", "missing-tests", got, want)
+	}
+}
+
+// TestTeamEntityID verifies team IDs use the team system.
+func TestTeamEntityID(t *testing.T) {
+	t.Parallel()
+
+	got := agentgraph.TeamEntityID("alpha")
+	want := "semspec.local.agent.team.team.alpha"
+	if got != want {
+		t.Errorf("TeamEntityID(%q) = %q, want %q", "alpha", got, want)
+	}
+}
+
+// TestTeamInsightEntityID verifies insight IDs use the team system with combined instance.
+func TestTeamInsightEntityID(t *testing.T) {
+	t.Parallel()
+
+	got := agentgraph.TeamInsightEntityID("alpha", "ins-1")
+	want := "semspec.local.agent.team.insight.alpha-ins-1"
+	if got != want {
+		t.Errorf("TeamInsightEntityID(%q, %q) = %q, want %q", "alpha", "ins-1", got, want)
 	}
 }

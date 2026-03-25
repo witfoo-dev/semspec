@@ -4,7 +4,7 @@
 // query infrastructure.
 //
 // Entity IDs follow the 6-part format: org.platform.domain.system.type.instance
-// Example loop:  semspec.local.agentic.orchestrator.loop.<loopID>
-// Example task:  semspec.local.agentic.orchestrator.task.<taskID>
-// Example DAG:   semspec.local.agentic.orchestrator.dag.<dagID>
+// Example loop:  semspec.local.agent.loop.loop.<loopID>
+// Example task:  semspec.local.agent.loop.task.<taskID>
+// Example DAG:   semspec.local.agent.loop.dag.<dagID>
 package agentgraph

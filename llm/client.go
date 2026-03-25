@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/c360studio/semspec/model"
@@ -278,6 +279,13 @@ func (c *Client) calculateBackoff(attempt int) time.Duration {
 
 // doRequest executes a single HTTP request to the LLM endpoint.
 func (c *Client) doRequest(ctx context.Context, ep *model.EndpointConfig, req Request) (*Response, error) {
+	// Fail fast if endpoint explicitly requires an API key that isn't set.
+	// Note: SetHeaders reads the env var again — intentional to keep the Provider
+	// interface simple (env var name, not resolved value). os.Getenv is trivial.
+	if ep.APIKeyEnv != "" && os.Getenv(ep.APIKeyEnv) == "" {
+		return nil, NewFatalError(fmt.Errorf("endpoint %q requires %s but it is not set", ep.Model, ep.APIKeyEnv))
+	}
+
 	provider := GetProvider(ep.Provider)
 	if provider == nil {
 		return nil, NewFatalError(fmt.Errorf("unknown provider: %s", ep.Provider))
@@ -312,7 +320,7 @@ func (c *Client) doRequest(ctx context.Context, ep *model.EndpointConfig, req Re
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	provider.SetHeaders(httpReq)
+	provider.SetHeaders(httpReq, ep.APIKeyEnv)
 
 	// Execute request
 	httpResp, err := c.httpClient.Do(httpReq)

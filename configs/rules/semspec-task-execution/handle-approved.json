@@ -5,7 +5,7 @@
   "description": "When code reviewer approves, complete the task execution and publish event",
   "enabled": true,
   "entity": {
-    "pattern": "local.semspec.workflow.task-execution.execution.*",
+    "pattern": "semspec.local.exec.task.run.*",
     "watch_buckets": ["ENTITY_STATES"]
   },
   "conditions": [

@@ -38,9 +38,11 @@ func (o *OpenAIProvider) BuildURL(baseURL string) string {
 }
 
 // SetHeaders adds OpenAI authentication headers.
-func (o *OpenAIProvider) SetHeaders(req *http.Request) {
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey != "" {
+func (o *OpenAIProvider) SetHeaders(req *http.Request, apiKeyEnv string) {
+	if apiKeyEnv == "" {
+		apiKeyEnv = "OPENAI_API_KEY"
+	}
+	if apiKey := os.Getenv(apiKeyEnv); apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
