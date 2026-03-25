@@ -44,7 +44,6 @@ import (
 	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
 	scenarioorchestrator "github.com/c360studio/semspec/processor/scenario-orchestrator"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
-	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 	"github.com/c360studio/semspec/workflow"
 	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
@@ -263,7 +262,6 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return scenariogenerator.Register(componentRegistry) },
 		func() error { return planner.Register(componentRegistry) },
 		func() error { return planmanager.Register(componentRegistry) },
-		func() error { return trajectoryapi.Register(componentRegistry) },
 		func() error { return planreviewer.Register(componentRegistry) },
 		func() error { return projectapi.Register(componentRegistry) },
 		func() error { return structuralvalidator.Register(componentRegistry) },

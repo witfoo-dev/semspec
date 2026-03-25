@@ -27,7 +27,6 @@ type QuestionHTTPHandler struct {
 	nc      *natsclient.Client
 	logger  *slog.Logger
 	prefix  string // URL prefix for path extraction
-	actions *ActionDispatcher
 }
 
 // NewQuestionHTTPHandler creates a new HTTP handler for questions.
@@ -47,12 +46,6 @@ func NewQuestionHTTPHandler(nc *natsclient.Client, logger *slog.Logger) (*Questi
 		nc:     nc,
 		logger: logger,
 	}, nil
-}
-
-// SetActionDispatcher configures the handler to execute answer actions.
-// When set, answering a question with an action triggers execution via the dispatcher.
-func (h *QuestionHTTPHandler) SetActionDispatcher(d *ActionDispatcher) {
-	h.actions = d
 }
 
 // log returns the logger, defaulting to slog.Default if nil.
@@ -347,7 +340,6 @@ func (h *QuestionHTTPHandler) handleAnswerWithID(w http.ResponseWriter, r *http.
 	}
 
 	h.publishAnswerEvent(ctx, id, answeredBy, &req)
-	h.executeAnswerAction(ctx, question, &req)
 
 	// Return the updated question (backward-compatible — ActionResult uses omitempty).
 	h.writeJSON(w, http.StatusOK, question)
@@ -375,24 +367,6 @@ func (h *QuestionHTTPHandler) publishAnswerEvent(ctx context.Context, id, answer
 		h.log().Warn("Failed to publish answer event", "question_id", id, "error", err)
 	}
 	h.log().Info("Question answered via HTTP", "question_id", id, "answered_by", answeredBy)
-}
-
-// executeAnswerAction runs the answer action if configured.
-func (h *QuestionHTTPHandler) executeAnswerAction(ctx context.Context, question *Question, req *AnswerRequest) {
-	if req.Action == nil || req.Action.Type == ActionNone || h.actions == nil {
-		return
-	}
-	result, err := h.actions.Execute(ctx, question.TaskID, req.Action)
-	if err != nil {
-		h.log().Warn("Action execution failed",
-			"question_id", question.ID,
-			"action_type", req.Action.Type,
-			"error", err,
-		)
-		question.ActionResult = fmt.Sprintf("action failed: %v", err)
-	} else if result != "" {
-		question.ActionResult = result
-	}
 }
 
 // SSE event types for the questions stream.

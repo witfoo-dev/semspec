@@ -27,7 +27,6 @@ import (
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
-	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 
 	"github.com/c360studio/semstreams/component"
@@ -70,11 +69,6 @@ var componentRegistry = map[string]struct {
 	"workflow-documents": {
 		ConfigType:  reflect.TypeOf(workflowdocuments.Config{}),
 		Description: "Writes workflow documents to the filesystem",
-		Domain:      "semspec",
-	},
-	"trajectory-api": {
-		ConfigType:  reflect.TypeOf(trajectoryapi.Config{}),
-		Description: "HTTP endpoints for querying LLM call trajectories and agent loop history",
 		Domain:      "semspec",
 	},
 	"plan-manager": {

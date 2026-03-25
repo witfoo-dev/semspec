@@ -354,19 +354,7 @@
         "model": "default",
         "default_capability": "planning"
       }
-    },
-    "trajectory-api": {
-      "name": "trajectory-api",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "loops_bucket": "AGENT_LOOPS",
-        "content_bucket": "AGENT_CONTENT",
-        "graph_gateway_url": "http://localhost:8082",
-        "org": "semspec",
-        "platform": "semspec-dev"
-      }
-    },
+    }
     "workflow-validator": {
       "name": "workflow-validator",
       "type": "processor",

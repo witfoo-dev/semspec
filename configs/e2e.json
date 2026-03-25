@@ -61,7 +61,7 @@
         "fallback": [
           "qwen"
         ]
-      },
+      }
     },
     "endpoints": {
       "qwen": {
@@ -347,19 +347,7 @@
         "max_iterations": 5,
         "output_dir": "/workspace/.semspec/plans"
       }
-    },
-    "trajectory-api": {
-      "name": "trajectory-api",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "loops_bucket": "AGENT_LOOPS",
-        "graph_gateway_url": "http://localhost:8082",
-        "content_bucket": "AGENT_CONTENT",
-        "org": "semspec",
-        "platform": "semspec-e2e"
-      }
-    },
+    }
     "plan-manager": {
       "name": "plan-manager",
       "type": "processor",
