@@ -2,17 +2,21 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
-	"github.com/c360studio/semstreams/natsclient"
+	"github.com/c360studio/semspec/vocabulary/semspec"
+	"github.com/c360studio/semspec/workflow/graphutil"
 )
 
 // ScenariosJSONFile is the filename for machine-readable scenario storage (JSON format).
 const ScenariosJSONFile = "scenarios.json"
 
-// SaveScenarios saves scenarios to ENTITY_STATES KV bucket.
+// SaveScenarios saves scenarios to ENTITY_STATES as triples.
 // Each scenario is stored as a separate entity keyed by ScenarioEntityID.
-func SaveScenarios(ctx context.Context, kv *natsclient.KVStore, scenarios []Scenario, slug string) error {
+// Multi-valued fields (Then) are stored as JSON arrays.
+func SaveScenarios(ctx context.Context, tw *graphutil.TripleWriter, scenarios []Scenario, slug string) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
 	}
@@ -22,7 +26,7 @@ func SaveScenarios(ctx context.Context, kv *natsclient.KVStore, scenarios []Scen
 	}
 
 	for i := range scenarios {
-		if err := kvPut(ctx, kv, ScenarioEntityID(scenarios[i].ID), scenarios[i]); err != nil {
+		if err := writeScenarioTriples(ctx, tw, &scenarios[i]); err != nil {
 			return fmt.Errorf("save scenario %s: %w", scenarios[i].ID, err)
 		}
 	}
@@ -30,14 +34,87 @@ func SaveScenarios(ctx context.Context, kv *natsclient.KVStore, scenarios []Scen
 	return nil
 }
 
-// LoadScenarios loads scenarios for a plan from ENTITY_STATES KV bucket.
+// writeScenarioTriples writes all Scenario fields as individual triples.
+func writeScenarioTriples(ctx context.Context, tw *graphutil.TripleWriter, s *Scenario) error {
+	if tw == nil {
+		return nil
+	}
+	entityID := ScenarioEntityID(s.ID)
+
+	_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioGiven, s.Given)
+	_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioWhen, s.When)
+	if err := tw.WriteTriple(ctx, entityID, semspec.ScenarioStatus, string(s.Status)); err != nil {
+		return fmt.Errorf("write scenario status: %w", err)
+	}
+	_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioRequirement, RequirementEntityID(s.RequirementID))
+	_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioCreatedAt, s.CreatedAt.Format(time.RFC3339))
+
+	title := s.When
+	if len(title) > 100 {
+		title = title[:97] + "..."
+	}
+	_ = tw.WriteTriple(ctx, entityID, semspec.DCTitle, title)
+
+	// Store Then as JSON array to avoid multi-value collapse.
+	if thenJSON, err := json.Marshal(s.Then); err == nil {
+		_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioThen, string(thenJSON))
+	}
+
+	return nil
+}
+
+// scenarioFromTripleMap reconstructs a Scenario from a predicate→value map.
+func scenarioFromTripleMap(entityID string, triples map[string]string) Scenario {
+	s := Scenario{
+		ID: extractScenarioID(entityID),
+	}
+
+	if v := triples[semspec.ScenarioGiven]; v != "" {
+		s.Given = v
+	}
+	if v := triples[semspec.ScenarioWhen]; v != "" {
+		s.When = v
+	}
+	if v := triples[semspec.ScenarioStatus]; v != "" {
+		s.Status = ScenarioStatus(v)
+	}
+	if v := triples[semspec.ScenarioCreatedAt]; v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			s.CreatedAt = t
+		}
+	}
+	// RequirementID stored as full entity ID; extract raw ID.
+	if v := triples[semspec.ScenarioRequirement]; v != "" {
+		s.RequirementID = extractRequirementID(v)
+	}
+	if v := triples[semspec.ScenarioThen]; v != "" {
+		_ = json.Unmarshal([]byte(v), &s.Then)
+	}
+	if s.Then == nil {
+		s.Then = []string{}
+	}
+
+	return s
+}
+
+// extractScenarioID extracts the raw scenario ID from the entity ID.
+// Entity ID format: {prefix}.wf.plan.scenario.{id}
+func extractScenarioID(entityID string) string {
+	prefix := EntityPrefix() + ".wf.plan.scenario."
+	if len(entityID) > len(prefix) {
+		return entityID[len(prefix):]
+	}
+	return entityID
+}
+
+// LoadScenarios loads scenarios for a plan from ENTITY_STATES triples.
 // Scans all scenario entities by prefix and filters by plan's requirements.
-func LoadScenarios(ctx context.Context, kv *natsclient.KVStore, slug string) ([]Scenario, error) {
+func LoadScenarios(ctx context.Context, tw *graphutil.TripleWriter, slug string) ([]Scenario, error) {
 	if err := ValidateSlug(slug); err != nil {
 		return nil, err
 	}
 
-	if kv == nil {
+	if tw == nil {
 		return []Scenario{}, nil
 	}
 
@@ -45,8 +122,8 @@ func LoadScenarios(ctx context.Context, kv *natsclient.KVStore, slug string) ([]
 		return nil, err
 	}
 
-	// First load requirements to know which requirement IDs belong to this plan
-	requirements, err := LoadRequirements(ctx, kv, slug)
+	// First load requirements to know which requirement IDs belong to this plan.
+	requirements, err := LoadRequirements(ctx, tw, slug)
 	if err != nil {
 		return nil, fmt.Errorf("load requirements for scenario filter: %w", err)
 	}
@@ -57,18 +134,14 @@ func LoadScenarios(ctx context.Context, kv *natsclient.KVStore, slug string) ([]
 	}
 
 	prefix := EntityPrefix() + ".wf.plan.scenario."
-	keys, err := kv.KeysByPrefix(ctx, prefix)
+	entities, err := tw.ReadEntitiesByPrefix(ctx, prefix, 500)
 	if err != nil {
 		return []Scenario{}, nil
 	}
 
 	var scenarios []Scenario
-	for _, key := range keys {
-		var s Scenario
-		if err := kvGet(ctx, kv, key, &s); err != nil {
-			continue
-		}
-
+	for entityID, triples := range entities {
+		s := scenarioFromTripleMap(entityID, triples)
 		if reqIDs[s.RequirementID] {
 			scenarios = append(scenarios, s)
 		}

@@ -2,9 +2,12 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
-	"github.com/c360studio/semstreams/natsclient"
+	"github.com/c360studio/semspec/vocabulary/semspec"
+	"github.com/c360studio/semspec/workflow/graphutil"
 )
 
 // RequirementsJSONFile is the filename for machine-readable requirement storage (JSON format).
@@ -82,9 +85,10 @@ func ValidateRequirementDAG(requirements []Requirement) error {
 	return nil
 }
 
-// SaveRequirements saves requirements to ENTITY_STATES KV bucket.
+// SaveRequirements saves requirements to ENTITY_STATES as triples.
 // Each requirement is stored as a separate entity keyed by RequirementEntityID.
-func SaveRequirements(ctx context.Context, kv *natsclient.KVStore, requirements []Requirement, slug string) error {
+// Multi-valued fields (DependsOn) are stored as JSON arrays.
+func SaveRequirements(ctx context.Context, tw *graphutil.TripleWriter, requirements []Requirement, slug string) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
 	}
@@ -97,11 +101,12 @@ func SaveRequirements(ctx context.Context, kv *natsclient.KVStore, requirements 
 		return fmt.Errorf("invalid requirement DAG: %w", err)
 	}
 
+	planEntityID := PlanEntityID(slug)
 	for i := range requirements {
 		if requirements[i].PlanID == "" {
-			requirements[i].PlanID = PlanEntityID(slug)
+			requirements[i].PlanID = planEntityID
 		}
-		if err := kvPut(ctx, kv, RequirementEntityID(requirements[i].ID), requirements[i]); err != nil {
+		if err := writeRequirementTriples(ctx, tw, &requirements[i]); err != nil {
 			return fmt.Errorf("save requirement %s: %w", requirements[i].ID, err)
 		}
 	}
@@ -109,14 +114,87 @@ func SaveRequirements(ctx context.Context, kv *natsclient.KVStore, requirements 
 	return nil
 }
 
-// LoadRequirements loads requirements for a plan from ENTITY_STATES KV bucket.
+// writeRequirementTriples writes all Requirement fields as individual triples.
+func writeRequirementTriples(ctx context.Context, tw *graphutil.TripleWriter, req *Requirement) error {
+	if tw == nil {
+		return nil
+	}
+	entityID := RequirementEntityID(req.ID)
+
+	_ = tw.WriteTriple(ctx, entityID, semspec.RequirementTitle, req.Title)
+	_ = tw.WriteTriple(ctx, entityID, semspec.DCTitle, req.Title)
+	if err := tw.WriteTriple(ctx, entityID, semspec.RequirementStatus, string(req.Status)); err != nil {
+		return fmt.Errorf("write requirement status: %w", err)
+	}
+	_ = tw.WriteTriple(ctx, entityID, semspec.RequirementPlan, req.PlanID)
+	_ = tw.WriteTriple(ctx, entityID, semspec.RequirementCreatedAt, req.CreatedAt.Format(time.RFC3339))
+	_ = tw.WriteTriple(ctx, entityID, semspec.RequirementUpdatedAt, req.UpdatedAt.Format(time.RFC3339))
+	if req.Description != "" {
+		_ = tw.WriteTriple(ctx, entityID, semspec.RequirementDescription, req.Description)
+	}
+
+	// Store DependsOn as JSON array to avoid multi-value collapse.
+	if dependsJSON, err := json.Marshal(req.DependsOn); err == nil {
+		_ = tw.WriteTriple(ctx, entityID, semspec.RequirementDependsOn, string(dependsJSON))
+	}
+
+	return nil
+}
+
+// requirementFromTripleMap reconstructs a Requirement from a predicate→value map.
+func requirementFromTripleMap(entityID string, triples map[string]string) Requirement {
+	req := Requirement{
+		ID:     extractRequirementID(entityID),
+		PlanID: triples[semspec.RequirementPlan],
+	}
+
+	if v := triples[semspec.RequirementTitle]; v != "" {
+		req.Title = v
+	}
+	if v := triples[semspec.RequirementStatus]; v != "" {
+		req.Status = RequirementStatus(v)
+	}
+	if v := triples[semspec.RequirementDescription]; v != "" {
+		req.Description = v
+	}
+	if v := triples[semspec.RequirementCreatedAt]; v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			req.CreatedAt = t
+		}
+	}
+	if v := triples[semspec.RequirementUpdatedAt]; v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			req.UpdatedAt = t
+		}
+	}
+	if v := triples[semspec.RequirementDependsOn]; v != "" {
+		_ = json.Unmarshal([]byte(v), &req.DependsOn)
+	}
+	if req.DependsOn == nil {
+		req.DependsOn = []string{}
+	}
+
+	return req
+}
+
+// extractRequirementID extracts the raw requirement ID from the entity ID.
+// Entity ID format: {prefix}.wf.plan.req.{id}
+func extractRequirementID(entityID string) string {
+	prefix := EntityPrefix() + ".wf.plan.req."
+	if len(entityID) > len(prefix) {
+		return entityID[len(prefix):]
+	}
+	return entityID
+}
+
+// LoadRequirements loads requirements for a plan from ENTITY_STATES triples.
 // Scans all requirement entities by prefix and filters by plan.
-func LoadRequirements(ctx context.Context, kv *natsclient.KVStore, slug string) ([]Requirement, error) {
+func LoadRequirements(ctx context.Context, tw *graphutil.TripleWriter, slug string) ([]Requirement, error) {
 	if err := ValidateSlug(slug); err != nil {
 		return nil, err
 	}
 
-	if kv == nil {
+	if tw == nil {
 		return []Requirement{}, nil
 	}
 
@@ -125,7 +203,7 @@ func LoadRequirements(ctx context.Context, kv *natsclient.KVStore, slug string) 
 	}
 
 	prefix := EntityPrefix() + ".wf.plan.req."
-	keys, err := kv.KeysByPrefix(ctx, prefix)
+	entities, err := tw.ReadEntitiesByPrefix(ctx, prefix, 500)
 	if err != nil {
 		return []Requirement{}, nil
 	}
@@ -133,12 +211,8 @@ func LoadRequirements(ctx context.Context, kv *natsclient.KVStore, slug string) 
 	planEntityID := PlanEntityID(slug)
 	var requirements []Requirement
 
-	for _, key := range keys {
-		var req Requirement
-		if err := kvGet(ctx, kv, key, &req); err != nil {
-			continue
-		}
-
+	for entityID, triples := range entities {
+		req := requirementFromTripleMap(entityID, triples)
 		if req.PlanID == planEntityID {
 			requirements = append(requirements, req)
 		}

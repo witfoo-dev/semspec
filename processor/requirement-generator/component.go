@@ -17,6 +17,7 @@ import (
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -118,8 +119,8 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient llmCompleter
-	kvStore   *natsclient.KVStore
+	llmClient    llmCompleter
+	tripleWriter *graphutil.TripleWriter
 
 	// Lifecycle
 	running   bool
@@ -205,12 +206,11 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	// Initialize ENTITY_STATES KV store for workflow Manager operations.
-	if entityBucket, kvErr := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES"); kvErr != nil {
-		c.logger.Warn("ENTITY_STATES bucket not available — workflow state operations will use disk fallback",
-			"error", kvErr)
-	} else {
-		c.kvStore = c.natsClient.NewKVStore(entityBucket)
+	// Initialize TripleWriter for workflow state operations.
+	c.tripleWriter = &graphutil.TripleWriter{
+		NATSClient:    c.natsClient,
+		Logger:        c.logger,
+		ComponentName: "requirement-generator",
 	}
 
 	// Push-based consumption — messages arrive via callback, no polling delay.
@@ -360,7 +360,7 @@ func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.
 	var plan *workflow.Plan
 	if goal == "" {
 		// Fallback: load from disk when trigger doesn't carry content.
-		loadedPlan, err := workflow.LoadPlan(ctx, c.kvStore, trigger.Slug)
+		loadedPlan, err := workflow.LoadPlan(ctx, c.tripleWriter, trigger.Slug)
 		if err != nil {
 			return nil, fmt.Errorf("load plan %q: %w", trigger.Slug, err)
 		}
@@ -387,7 +387,7 @@ func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.
 	// Partial regeneration: prepend context about approved requirements and rejection
 	// reasons so the LLM generates only replacements for the rejected ones.
 	if len(trigger.ReplaceRequirementIDs) > 0 {
-		existing, _ := workflow.LoadRequirements(ctx, c.kvStore, trigger.Slug)
+		existing, _ := workflow.LoadRequirements(ctx, c.tripleWriter, trigger.Slug)
 
 		var sb strings.Builder
 		sb.WriteString("## Existing Approved Requirements (DO NOT regenerate these)\n\n")
@@ -417,7 +417,7 @@ func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.
 	// Determine the starting sequence offset from the current requirements count.
 	seqOffset := 0
 	if len(trigger.ReplaceRequirementIDs) > 0 {
-		existing, _ := workflow.LoadRequirements(ctx, c.kvStore, trigger.Slug)
+		existing, _ := workflow.LoadRequirements(ctx, c.tripleWriter, trigger.Slug)
 		seqOffset = len(existing)
 	}
 
@@ -556,7 +556,7 @@ func (c *Component) saveAndPublish(ctx context.Context, trigger *payloads.Requir
 	// than replacing it wholesale. Deprecated entries from the prior round are
 	// already persisted; we only append the freshly generated replacements.
 	if len(trigger.ReplaceRequirementIDs) > 0 {
-		existing, err := workflow.LoadRequirements(ctx, c.kvStore, trigger.Slug)
+		existing, err := workflow.LoadRequirements(ctx, c.tripleWriter, trigger.Slug)
 		if err == nil {
 			requirements = append(existing, requirements...)
 		} else {
@@ -566,17 +566,17 @@ func (c *Component) saveAndPublish(ctx context.Context, trigger *payloads.Requir
 	}
 
 	// Persist requirements to .semspec/projects/default/plans/{slug}/requirements.json.
-	if err := workflow.SaveRequirements(ctx, c.kvStore, requirements, trigger.Slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, c.tripleWriter, requirements, trigger.Slug); err != nil {
 		return fmt.Errorf("save requirements: %w", err)
 	}
 
 	// Transition plan status to requirements_generated.
-	plan, err := workflow.LoadPlan(ctx, c.kvStore, trigger.Slug)
+	plan, err := workflow.LoadPlan(ctx, c.tripleWriter, trigger.Slug)
 	if err != nil {
 		return fmt.Errorf("load plan for status transition: %w", err)
 	}
 
-	if err := workflow.SetPlanStatus(ctx, c.kvStore, plan, workflow.StatusRequirementsGenerated); err != nil {
+	if err := workflow.SetPlanStatus(ctx, c.tripleWriter, plan, workflow.StatusRequirementsGenerated); err != nil {
 		// Log and continue — the requirements are saved; status update is best-effort.
 		c.logger.Warn("Failed to transition plan status to requirements_generated",
 			"slug", trigger.Slug, "error", err)

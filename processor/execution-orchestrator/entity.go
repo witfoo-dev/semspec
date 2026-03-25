@@ -5,6 +5,7 @@ import (
 	"time"
 
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/message"
 )
 
@@ -74,10 +75,10 @@ func NewTaskExecutionEntity(exec *taskExecution) *TaskExecutionEntity {
 }
 
 // EntityID returns the 6-part canonical graph entity ID.
-// Format: local.semspec.workflow.task-execution.execution.<slug>-<taskID>
+// Format: {prefix}.exec.task.run.<slug>-<taskID>
 // This must match the format used in handleTrigger.
 func (e *TaskExecutionEntity) EntityID() string {
-	return fmt.Sprintf("local.semspec.workflow.task-execution.execution.%s-%s", e.Slug, e.TaskID)
+	return fmt.Sprintf("%s.exec.task.run.%s-%s", workflow.EntityPrefix(), e.Slug, e.TaskID)
 }
 
 // WithPhase sets the current lifecycle phase and returns the entity for chaining.

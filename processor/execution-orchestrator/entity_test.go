@@ -18,13 +18,13 @@ func TestTaskExecutionEntity_EntityID(t *testing.T) {
 			name:   "basic",
 			slug:   "my-feature",
 			taskID: "task-001",
-			want:   "local.semspec.workflow.task-execution.execution.my-feature-task-001",
+			want:   "semspec.local.exec.task.run.my-feature-task-001",
 		},
 		{
 			name:   "auth-task",
 			slug:   "auth-refresh",
 			taskID: "impl-jwt",
-			want:   "local.semspec.workflow.task-execution.execution.auth-refresh-impl-jwt",
+			want:   "semspec.local.exec.task.run.auth-refresh-impl-jwt",
 		},
 	}
 
@@ -194,7 +194,7 @@ func TestTaskExecutionEntity_Triples_SubjectMatchesEntityID(t *testing.T) {
 
 func TestNewTaskExecutionEntity_FromState(t *testing.T) {
 	exec := &taskExecution{
-		EntityID:         "local.semspec.workflow.task-execution.execution.my-slug-task-1",
+		EntityID:         "semspec.local.exec.task.run.my-slug-task-1",
 		Slug:             "my-slug",
 		TaskID:           "task-1",
 		Iteration:        1,
@@ -232,7 +232,7 @@ func TestNewTaskExecutionEntity_FromState(t *testing.T) {
 	}
 
 	// EntityID should match what handleTrigger produces.
-	expectedID := "local.semspec.workflow.task-execution.execution.my-slug-task-1"
+	expectedID := "semspec.local.exec.task.run.my-slug-task-1"
 	if got := entity.EntityID(); got != expectedID {
 		t.Errorf("EntityID() = %q, want %q", got, expectedID)
 	}

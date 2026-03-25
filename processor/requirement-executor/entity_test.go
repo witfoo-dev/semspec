@@ -19,13 +19,13 @@ func TestRequirementExecutionEntity_EntityID(t *testing.T) {
 			name:          "basic",
 			slug:          "my-feature",
 			requirementID: "requirement-001",
-			want:          "local.semspec.workflow.requirement-execution.execution.my-feature-requirement-001",
+			want:          "semspec.local.exec.req.run.my-feature-requirement-001",
 		},
 		{
 			name:          "auth",
 			slug:          "auth-refresh",
 			requirementID: "user-login",
-			want:          "local.semspec.workflow.requirement-execution.execution.auth-refresh-user-login",
+			want:          "semspec.local.exec.req.run.auth-refresh-user-login",
 		},
 	}
 
@@ -184,7 +184,7 @@ func TestNewRequirementExecutionEntity_FromState(t *testing.T) {
 	}
 
 	exec := &requirementExecution{
-		EntityID:      "local.semspec.workflow.requirement-execution.execution.my-slug-req-1",
+		EntityID:      "semspec.local.exec.req.run.my-slug-req-1",
 		Slug:          "my-slug",
 		RequirementID: "req-1",
 		TraceID:       "trace-xyz",
@@ -206,7 +206,7 @@ func TestNewRequirementExecutionEntity_FromState(t *testing.T) {
 		t.Errorf("NodeCount = %d, want %d", entity.NodeCount, len(dag.Nodes))
 	}
 
-	expectedID := "local.semspec.workflow.requirement-execution.execution.my-slug-req-1"
+	expectedID := "semspec.local.exec.req.run.my-slug-req-1"
 	if got := entity.EntityID(); got != expectedID {
 		t.Errorf("EntityID() = %q, want %q", got, expectedID)
 	}

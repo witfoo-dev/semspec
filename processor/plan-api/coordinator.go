@@ -160,7 +160,6 @@ type coordinator struct {
 	natsClient   *natsclient.Client
 	logger       *slog.Logger
 	tripleWriter *graphutil.TripleWriter
-	kvStore      *natsclient.KVStore
 
 	llmClient     coordinatorLLMCompleter
 	modelRegistry *model.Registry
@@ -258,14 +257,6 @@ func (co *coordinator) Start(ctx context.Context) error {
 	co.mu.RUnlock()
 
 	co.logger.Info("Starting plan-coordinator")
-
-	// Initialize ENTITY_STATES KV store for workflow Manager operations.
-	if entityBucket, kvErr := co.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES"); kvErr != nil {
-		co.logger.Warn("ENTITY_STATES bucket not available — workflow state operations will use disk fallback",
-			"error", kvErr)
-	} else {
-		co.kvStore = co.natsClient.NewKVStore(entityBucket)
-	}
 
 	// Reconcile: recover in-flight coordinations from graph state.
 	co.reconcileFromGraph(ctx)
@@ -873,11 +864,11 @@ func (co *coordinator) finishSynthesisLocked(ctx context.Context, exec *coordina
 
 	// Write synthesized plan content to plan.json (single writer for Goal/Context/Scope).
 	// The coordinator is the authoritative writer for these fields; the planner no longer writes to disk.
-	if plan, err := workflow.LoadPlan(ctx, co.kvStore, exec.Slug); err == nil {
+	if plan, err := workflow.LoadPlan(ctx, co.tripleWriter, exec.Slug); err == nil {
 		plan.Goal = synthesized.Goal
 		plan.Context = synthesized.Context
 		plan.Scope = synthesized.Scope
-		if saveErr := workflow.SavePlan(ctx, co.kvStore, plan); saveErr != nil {
+		if saveErr := workflow.SavePlan(ctx, co.tripleWriter, plan); saveErr != nil {
 			co.logger.Warn("Failed to save synthesized plan to disk",
 				"slug", exec.Slug, "error", saveErr)
 		}
@@ -1071,7 +1062,7 @@ func (co *coordinator) dispatchScenarioGeneratorLocked(ctx context.Context, exec
 	co.advancePhase(ctx, exec, phaseGeneratingScenarios)
 
 	// Load requirements from disk to fan out one scenario-generator per requirement.
-	requirements, err := workflow.LoadRequirements(ctx, co.kvStore, exec.Slug)
+	requirements, err := workflow.LoadRequirements(ctx, co.tripleWriter, exec.Slug)
 	if err != nil {
 		co.markErrorLocked(ctx, exec, fmt.Sprintf("load requirements for scenario generation: %v", err))
 		return
@@ -1324,8 +1315,8 @@ func (co *coordinator) handleReviewApprovalLocked(ctx context.Context, exec *coo
 		co.advancePhase(ctx, exec, phaseApproved)
 		co.publishPlanApprovedEvent(ctx, exec, verdict, summary)
 
-		if plan, err := workflow.LoadPlan(ctx, co.kvStore, exec.Slug); err == nil {
-			if err := workflow.SetPlanStatus(ctx, co.kvStore, plan, workflow.StatusReadyForExecution); err != nil {
+		if plan, err := workflow.LoadPlan(ctx, co.tripleWriter, exec.Slug); err == nil {
+			if err := workflow.SetPlanStatus(ctx, co.tripleWriter, plan, workflow.StatusReadyForExecution); err != nil {
 				co.logger.Warn("Failed to set plan to ready_for_execution",
 					"slug", exec.Slug, "error", err)
 			} else {

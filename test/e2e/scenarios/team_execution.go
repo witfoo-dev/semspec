@@ -458,8 +458,8 @@ func (s *TeamExecutionScenario) stageVerifyExecutionState(ctx context.Context, r
 	defer ticker.Stop()
 
 	// The execution-orchestrator writes entity IDs of the form:
-	// local.semspec.workflow.task-execution.execution.{slug}-{taskID}
-	entityPrefix := "local.semspec.workflow.task-execution.execution." + slug
+	// semspec.local.exec.task.run.{slug}-{taskID}
+	entityPrefix := "semspec.local.exec.task.run." + slug
 
 	for {
 		select {

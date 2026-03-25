@@ -16,10 +16,10 @@ func (c *Component) handleExportSpecs(w http.ResponseWriter, r *http.Request, sl
 	}
 
 	c.mu.RLock()
-	kv := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
-	files, err := workflow.ExportSpecFiles(r.Context(), kv, repoRoot, slug)
+	files, err := workflow.ExportSpecFiles(r.Context(), tw, repoRoot, slug)
 	if err != nil {
 		c.logger.Error("Failed to export specs", "slug", slug, "error", err)
 		writeJSONError(w, "Failed to export specs: "+err.Error(), http.StatusInternalServerError)
@@ -45,10 +45,10 @@ func (c *Component) handleGenerateArchive(w http.ResponseWriter, r *http.Request
 	}
 
 	c.mu.RLock()
-	kv := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
-	filePath, err := workflow.GenerateArchive(r.Context(), kv, repoRoot, slug)
+	filePath, err := workflow.GenerateArchive(r.Context(), tw, repoRoot, slug)
 	if err != nil {
 		c.logger.Error("Failed to generate archive", "slug", slug, "error", err)
 		writeJSONError(w, "Failed to generate archive: "+err.Error(), http.StatusInternalServerError)

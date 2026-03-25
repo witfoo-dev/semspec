@@ -8,6 +8,7 @@ import (
 	"time"
 
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 )
@@ -99,10 +100,10 @@ func NewCoordinationEntity(exec *coordinationExecution) *CoordinationEntity {
 }
 
 // EntityID returns the 6-part canonical graph entity ID.
-// Format: local.semspec.workflow.plan.execution.<slug>
+// Format: {prefix}.exec.plan.run.<slug>
 // This must match the format used in handleTrigger and the rule entity patterns.
 func (e *CoordinationEntity) EntityID() string {
-	return fmt.Sprintf("local.semspec.workflow.plan.execution.%s", e.Slug)
+	return fmt.Sprintf("%s.exec.plan.run.%s", workflow.EntityPrefix(), e.Slug)
 }
 
 // WithPhase sets the current lifecycle phase and returns the entity for chaining.

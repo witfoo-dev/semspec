@@ -211,8 +211,6 @@ type ChangeProposalAcceptedEvent struct {
 	TraceID                string   `json:"trace_id,omitempty"`
 	AffectedRequirementIDs []string `json:"affected_requirement_ids"`
 	AffectedScenarioIDs    []string `json:"affected_scenario_ids"`
-	AffectedTaskIDs        []string `json:"affected_task_ids"`
-	TasksDirtied           int      `json:"tasks_dirtied"`
 }
 
 // Schema implements message.Payload.

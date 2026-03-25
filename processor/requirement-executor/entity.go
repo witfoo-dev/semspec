@@ -49,12 +49,12 @@ func NewRequirementExecutionEntity(exec *requirementExecution) *RequirementExecu
 }
 
 // EntityID returns the 6-part canonical graph entity ID.
-// Format: local.semspec.workflow.requirement-execution.execution.<slug>-<requirementID>
+// Format: {prefix}.exec.req.run.<slug>-<requirementID>
 // Dots in slug or requirementID are replaced with hyphens so the result has
 // exactly 6 dot-separated parts.  This must match the format used in handleTrigger.
 func (e *RequirementExecutionEntity) EntityID() string {
 	instance := strings.ReplaceAll(e.Slug+"-"+e.RequirementID, ".", "-")
-	return fmt.Sprintf("local.semspec.workflow.requirement-execution.execution.%s", instance)
+	return fmt.Sprintf("%s.exec.req.run.%s", workflow.EntityPrefix(), instance)
 }
 
 // WithPhase sets the current lifecycle phase and returns the entity for chaining.
@@ -178,7 +178,7 @@ func (e *DAGNodeEntity) withStatus(status string) *DAGNodeEntity {
 }
 
 // EntityID returns the canonical graph entity ID for this DAG node.
-// Format: local.semspec.workflow.dag-node.node.{executionID}-{nodeID}
+// Format: semspec.local.workflow.dag-node.node.{executionID}-{nodeID}
 func (e *DAGNodeEntity) EntityID() string {
 	return workflow.DAGNodeEntityID(e.executionID, e.node.ID)
 }

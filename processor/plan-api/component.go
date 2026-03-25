@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
@@ -31,8 +32,8 @@ type Component struct {
 	// coordinator is the embedded plan-coordinator pipeline.
 	coordinator *coordinator
 
-	// kvStore is the ENTITY_STATES KV store for workflow state operations.
-	kvStore *natsclient.KVStore
+	// tripleWriter is used for workflow state operations (read/write graph triples).
+	tripleWriter *graphutil.TripleWriter
 
 	// Question HTTP handler for Q&A endpoints
 	questionHandler *workflow.QuestionHTTPHandler
@@ -150,15 +151,11 @@ func (c *Component) Start(ctx context.Context) error {
 			"error", err)
 	}
 
-	// Get ENTITY_STATES KV store for workflow state operations.
-	var kvStore *natsclient.KVStore
-	if entityBucket, kvErr := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES"); kvErr != nil {
-		c.logger.Warn("ENTITY_STATES bucket not available — workflow state operations will use disk fallback",
-			"error", kvErr)
-	} else {
-		kvStore = c.natsClient.NewKVStore(entityBucket)
-		// Wire ENTITY_STATES for write-through side-effect publishing
-		workflow.SetEntityStatesKV(kvStore)
+	// Initialize TripleWriter for workflow state operations.
+	tw := &graphutil.TripleWriter{
+		NATSClient:    c.natsClient,
+		Logger:        c.logger,
+		ComponentName: "plan-api",
 	}
 
 	// Create cancellation context
@@ -167,7 +164,7 @@ func (c *Component) Start(ctx context.Context) error {
 	// Update state atomically with lock for complex state
 	c.mu.Lock()
 	c.execBucket = execBucket
-	c.kvStore = kvStore
+	c.tripleWriter = tw
 	c.cancel = cancel
 	c.startTime = time.Now()
 	c.mu.Unlock()

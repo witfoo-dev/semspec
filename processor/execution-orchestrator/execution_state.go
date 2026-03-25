@@ -9,7 +9,7 @@ import (
 )
 
 // taskExecution holds in-memory state for a single task execution pipeline.
-// Keyed by entityID (local.semspec.workflow.task-execution.execution.<slug>-<taskID>) in the
+// Keyed by entityID (semspec.local.exec.task.run.<slug>-<taskID>) in the
 // component's activeExecutions sync.Map.
 //
 // All field access must be guarded by mu. The sync.Map protects map operations,
@@ -23,7 +23,7 @@ type taskExecution struct {
 	terminated bool
 
 	// EntityID is the canonical graph entity ID:
-	// local.semspec.workflow.task-execution.execution.<slug>-<taskID>
+	// semspec.local.exec.task.run.<slug>-<taskID>
 	EntityID string
 
 	// Slug is the plan slug.

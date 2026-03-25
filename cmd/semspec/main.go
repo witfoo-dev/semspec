@@ -149,6 +149,9 @@ func run(configPath, repoPath, logLevel string) error {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
+	// Initialize entity ID prefix from .semspec/project.json if it exists.
+	initEntityPrefixFromProject(absRepoPath)
+
 	ctx := context.Background()
 	_, manager, cleanup, err := setupInfrastructure(ctx, cfg, logger, absRepoPath)
 	if err != nil {
@@ -180,6 +183,29 @@ func run(configPath, repoPath, logLevel string) error {
 
 	slog.Info("Semspec shutdown complete")
 	return nil
+}
+
+// initEntityPrefixFromProject reads .semspec/project.json (if it exists) and
+// initializes the entity ID prefix from its org/platform/name fields.
+// Best-effort: if the file doesn't exist or can't be parsed, defaults apply.
+func initEntityPrefixFromProject(repoPath string) {
+	path := filepath.Join(repoPath, ".semspec", workflow.ProjectConfigFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return // No project.json yet — defaults are fine.
+	}
+	var pc workflow.ProjectConfig
+	if err := json.Unmarshal(data, &pc); err != nil {
+		slog.Warn("Failed to parse project.json for entity prefix", "error", err)
+		return
+	}
+	workflow.InitEntityPrefix(pc.Org, pc.Platform, pc.Name)
+	slog.Info("Entity prefix initialized",
+		"prefix", workflow.EntityPrefix(),
+		"org", pc.Org,
+		"platform", pc.Platform,
+		"project_name", pc.Name,
+	)
 }
 
 func printBanner() {

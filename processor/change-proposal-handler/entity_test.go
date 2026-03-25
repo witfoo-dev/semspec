@@ -18,13 +18,13 @@ func TestCascadeEntity_EntityID(t *testing.T) {
 			name:       "basic",
 			slug:       "my-feature",
 			proposalID: "prop-abc-123",
-			want:       "local.semspec.workflow.cascade.execution.my-feature-prop-abc-123",
+			want:       "semspec.local.exec.cascade.run.my-feature-prop-abc-123",
 		},
 		{
 			name:       "auth",
 			slug:       "auth-refresh",
 			proposalID: "cp-001",
-			want:       "local.semspec.workflow.cascade.execution.auth-refresh-cp-001",
+			want:       "semspec.local.exec.cascade.run.auth-refresh-cp-001",
 		},
 	}
 
@@ -53,7 +53,6 @@ func TestCascadeEntity_Triples_RequiredPredicates(t *testing.T) {
 		ProposalID:                "prop-1",
 		AffectedRequirementsCount: 0,
 		AffectedScenariosCount:    0,
-		TasksDirtied:              0,
 	}
 
 	triples := e.Triples()
@@ -66,7 +65,6 @@ func TestCascadeEntity_Triples_RequiredPredicates(t *testing.T) {
 		wf.Type, wf.Slug,
 		wf.CascadeAffectedRequirements,
 		wf.CascadeAffectedScenarios,
-		wf.CascadeTasksDirtied,
 	}
 	for _, pred := range required {
 		if !predicates[pred] {
@@ -196,7 +194,7 @@ func TestCascadeEntity_Triples_SubjectMatchesEntityID(t *testing.T) {
 }
 
 func TestNewCascadeEntity_Fields(t *testing.T) {
-	entity := NewCascadeEntity("prop-xyz", "my-slug", "trace-abc", 3, 2, 5)
+	entity := NewCascadeEntity("prop-xyz", "my-slug", "trace-abc", 3, 2)
 
 	if entity.ProposalID != "prop-xyz" {
 		t.Errorf("ProposalID = %q, want %q", entity.ProposalID, "prop-xyz")
@@ -213,23 +211,20 @@ func TestNewCascadeEntity_Fields(t *testing.T) {
 	if entity.AffectedScenariosCount != 2 {
 		t.Errorf("AffectedScenariosCount = %d, want 2", entity.AffectedScenariosCount)
 	}
-	if entity.TasksDirtied != 5 {
-		t.Errorf("TasksDirtied = %d, want 5", entity.TasksDirtied)
-	}
 
-	expectedID := "local.semspec.workflow.cascade.execution.my-slug-prop-xyz"
+	expectedID := "semspec.local.exec.cascade.run.my-slug-prop-xyz"
 	if got := entity.EntityID(); got != expectedID {
 		t.Errorf("EntityID() = %q, want %q", got, expectedID)
 	}
 }
 
 func TestCascadeEntity_Triples_MetricValues(t *testing.T) {
-	e := NewCascadeEntity("prop-1", "slug", "", 4, 7, 12)
+	e := NewCascadeEntity("prop-1", "slug", "", 4, 7)
 
 	metricValues := make(map[string]any)
 	for _, tr := range e.Triples() {
 		switch tr.Predicate {
-		case wf.CascadeAffectedRequirements, wf.CascadeAffectedScenarios, wf.CascadeTasksDirtied:
+		case wf.CascadeAffectedRequirements, wf.CascadeAffectedScenarios:
 			metricValues[tr.Predicate] = tr.Object
 		}
 	}
@@ -239,8 +234,5 @@ func TestCascadeEntity_Triples_MetricValues(t *testing.T) {
 	}
 	if got := metricValues[wf.CascadeAffectedScenarios]; got != 7 {
 		t.Errorf("CascadeAffectedScenarios = %v, want 7", got)
-	}
-	if got := metricValues[wf.CascadeTasksDirtied]; got != 12 {
-		t.Errorf("CascadeTasksDirtied = %v, want 12", got)
 	}
 }

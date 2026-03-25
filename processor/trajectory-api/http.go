@@ -440,16 +440,16 @@ func (c *Component) handleGetWorkflowTrajectory(w http.ResponseWriter, r *http.R
 
 	// Get KV store for workflow state operations
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
-	if kvStore == nil {
+	if tw == nil {
 		http.Error(w, "Workflow state not available", http.StatusServiceUnavailable)
 		return
 	}
 
 	// Load plan to get trace IDs
-	plan, err := workflow.LoadPlan(r.Context(), kvStore, slug)
+	plan, err := workflow.LoadPlan(r.Context(), tw, slug)
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
 			http.Error(w, "Workflow not found", http.StatusNotFound)
@@ -549,15 +549,15 @@ func (c *Component) handleGetContextStats(w http.ResponseWriter, r *http.Request
 		}
 	} else {
 		c.mu.RLock()
-		kvStore := c.kvStore
+		tw := c.tripleWriter
 		c.mu.RUnlock()
 
-		if kvStore == nil {
+		if tw == nil {
 			http.Error(w, "Workflow state not available", http.StatusServiceUnavailable)
 			return
 		}
 
-		plan, loadErr := workflow.LoadPlan(r.Context(), kvStore, workflowSlug)
+		plan, loadErr := workflow.LoadPlan(r.Context(), tw, workflowSlug)
 		if loadErr != nil {
 			if errors.Is(loadErr, workflow.ErrPlanNotFound) {
 				http.Error(w, "Workflow not found", http.StatusNotFound)

@@ -99,10 +99,10 @@ func (c *Component) handleRequirementByID(w http.ResponseWriter, r *http.Request
 // handleListRequirements handles GET /plans/{slug}/requirements.
 func (c *Component) handleListRequirements(w http.ResponseWriter, r *http.Request, slug string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
-	requirements, err := workflow.LoadRequirements(r.Context(), kvStore, slug)
+	requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load requirements", "slug", slug, "error", err)
 		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
@@ -118,10 +118,10 @@ func (c *Component) handleListRequirements(w http.ResponseWriter, r *http.Reques
 // handleGetRequirement handles GET /plans/{slug}/requirements/{reqId}.
 func (c *Component) handleGetRequirement(w http.ResponseWriter, r *http.Request, slug, requirementID string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
-	requirements, err := workflow.LoadRequirements(r.Context(), kvStore, slug)
+	requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load requirements", "slug", slug, "error", err)
 		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
@@ -144,7 +144,7 @@ func (c *Component) handleGetRequirement(w http.ResponseWriter, r *http.Request,
 // handleCreateRequirement handles POST /plans/{slug}/requirements.
 func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Request, slug string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
@@ -160,7 +160,7 @@ func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	requirements, err := workflow.LoadRequirements(r.Context(), kvStore, slug)
+	requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load requirements", "slug", slug, "error", err)
 		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
@@ -188,7 +188,7 @@ func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := workflow.SaveRequirements(r.Context(), kvStore, requirements, slug); err != nil {
+	if err := workflow.SaveRequirements(r.Context(), tw, requirements, slug); err != nil {
 		c.logger.Error("Failed to save requirements", "slug", slug, "error", err)
 		http.Error(w, "Failed to save requirement", http.StatusInternalServerError)
 		return
@@ -206,7 +206,7 @@ func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Reque
 // handleUpdateRequirement handles PATCH /plans/{slug}/requirements/{reqId}.
 func (c *Component) handleUpdateRequirement(w http.ResponseWriter, r *http.Request, slug, requirementID string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
@@ -217,7 +217,7 @@ func (c *Component) handleUpdateRequirement(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	requirements, err := workflow.LoadRequirements(r.Context(), kvStore, slug)
+	requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load requirements", "slug", slug, "error", err)
 		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
@@ -252,7 +252,7 @@ func (c *Component) handleUpdateRequirement(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := workflow.SaveRequirements(r.Context(), kvStore, requirements, slug); err != nil {
+	if err := workflow.SaveRequirements(r.Context(), tw, requirements, slug); err != nil {
 		c.logger.Error("Failed to save requirements", "slug", slug, "error", err)
 		http.Error(w, "Failed to save requirement", http.StatusInternalServerError)
 		return
@@ -269,10 +269,10 @@ func (c *Component) handleUpdateRequirement(w http.ResponseWriter, r *http.Reque
 // scenarios belonging to removed requirements.
 func (c *Component) handleDeleteRequirement(w http.ResponseWriter, r *http.Request, slug, requirementID string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
-	requirements, err := workflow.LoadRequirements(r.Context(), kvStore, slug)
+	requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load requirements", "slug", slug, "error", err)
 		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
@@ -303,14 +303,14 @@ func (c *Component) handleDeleteRequirement(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	if err := workflow.SaveRequirements(r.Context(), kvStore, kept, slug); err != nil {
+	if err := workflow.SaveRequirements(r.Context(), tw, kept, slug); err != nil {
 		c.logger.Error("Failed to save requirements", "slug", slug, "error", err)
 		http.Error(w, "Failed to delete requirement", http.StatusInternalServerError)
 		return
 	}
 
 	// Cascade: remove scenarios for all removed requirements.
-	scenarios, err := workflow.LoadScenarios(r.Context(), kvStore, slug)
+	scenarios, err := workflow.LoadScenarios(r.Context(), tw, slug)
 	if err == nil && len(scenarios) > 0 {
 		var keptScenarios []workflow.Scenario
 		for _, s := range scenarios {
@@ -319,7 +319,7 @@ func (c *Component) handleDeleteRequirement(w http.ResponseWriter, r *http.Reque
 			}
 		}
 		if len(keptScenarios) != len(scenarios) {
-			_ = workflow.SaveScenarios(r.Context(), kvStore, keptScenarios, slug)
+			_ = workflow.SaveScenarios(r.Context(), tw, keptScenarios, slug)
 		}
 	}
 
@@ -361,10 +361,10 @@ func requirementBlastRadius(requirements []workflow.Requirement, rootID string) 
 // handleDeprecateRequirement handles POST /plans/{slug}/requirements/{reqId}/deprecate.
 func (c *Component) handleDeprecateRequirement(w http.ResponseWriter, r *http.Request, slug, requirementID string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
-	requirements, err := workflow.LoadRequirements(r.Context(), kvStore, slug)
+	requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load requirements", "slug", slug, "error", err)
 		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
@@ -398,14 +398,14 @@ func (c *Component) handleDeprecateRequirement(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	if err := workflow.SaveRequirements(r.Context(), kvStore, requirements, slug); err != nil {
+	if err := workflow.SaveRequirements(r.Context(), tw, requirements, slug); err != nil {
 		c.logger.Error("Failed to save requirements", "slug", slug, "error", err)
 		http.Error(w, "Failed to deprecate requirement", http.StatusInternalServerError)
 		return
 	}
 
 	// Cascade: remove scenarios for deprecated requirements.
-	scenarios, loadErr := workflow.LoadScenarios(r.Context(), kvStore, slug)
+	scenarios, loadErr := workflow.LoadScenarios(r.Context(), tw, slug)
 	if loadErr == nil && len(scenarios) > 0 {
 		var keptScenarios []workflow.Scenario
 		for _, s := range scenarios {
@@ -414,7 +414,7 @@ func (c *Component) handleDeprecateRequirement(w http.ResponseWriter, r *http.Re
 			}
 		}
 		if len(keptScenarios) != len(scenarios) {
-			_ = workflow.SaveScenarios(r.Context(), kvStore, keptScenarios, slug)
+			_ = workflow.SaveScenarios(r.Context(), tw, keptScenarios, slug)
 		}
 	}
 

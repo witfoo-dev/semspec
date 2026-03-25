@@ -313,7 +313,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	instance := strings.ReplaceAll(trigger.Slug+"-"+trigger.RequirementID, ".", "-")
-	entityID := fmt.Sprintf("local.semspec.workflow.requirement-execution.execution.%s", instance)
+	entityID := fmt.Sprintf("%s.exec.req.run.%s", workflow.EntityPrefix(), instance)
 
 	c.logger.Info("Requirement execution trigger received",
 		"slug", trigger.Slug,
@@ -619,6 +619,10 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageDecompose,
 		Prompt:       c.buildDecomposerPrompt(exec),
+		Metadata: map[string]any{
+			"requirement_id": exec.RequirementID,
+			"plan_slug":      exec.Slug,
+		},
 	}
 
 	if err := c.publishTask(ctx, subjectDecomposer, task); err != nil {
@@ -780,6 +784,10 @@ func (c *Component) dispatchRequirementRedTeamLocked(ctx context.Context, exec *
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
+		Metadata: map[string]any{
+			"requirement_id": exec.RequirementID,
+			"plan_slug":      exec.Slug,
+		},
 	}
 	if err := c.publishTask(ctx, "agent.task.red-team", task); err != nil {
 		c.logger.Error("Failed to dispatch requirement red team, falling back to reviewer", "error", err)
@@ -845,6 +853,10 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 		Prompt:       c.buildDecomposerPrompt(exec),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
+		},
+		Metadata: map[string]any{
+			"requirement_id": exec.RequirementID,
+			"plan_slug":      exec.Slug,
 		},
 	}
 	if err := c.publishTask(ctx, "agent.task.reviewer", task); err != nil {

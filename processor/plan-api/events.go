@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/message"
-	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -164,9 +164,9 @@ func (c *Component) handleRequirementExecutionCompleteEvent(ctx context.Context,
 		"files_modified", len(event.FilesModified),
 	)
 
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 
-	plan, err := workflow.LoadPlan(ctx, kvStore, event.Slug)
+	plan, err := workflow.LoadPlan(ctx, tw, event.Slug)
 	if err != nil {
 		c.logger.Warn("Failed to load plan for requirement completion check",
 			"slug", event.Slug, "error", err)
@@ -177,7 +177,7 @@ func (c *Component) handleRequirementExecutionCompleteEvent(ctx context.Context,
 		return
 	}
 
-	requirements, err := workflow.LoadRequirements(ctx, kvStore, event.Slug)
+	requirements, err := workflow.LoadRequirements(ctx, tw, event.Slug)
 	if err != nil {
 		c.logger.Warn("Failed to load requirements for completion check",
 			"slug", event.Slug, "error", err)
@@ -224,20 +224,20 @@ func (c *Component) handleRequirementExecutionCompleteEvent(ctx context.Context,
 		"requirements", len(requirements),
 	)
 
-	if err := workflow.SetPlanStatus(ctx, kvStore, plan, workflow.StatusReviewingRollup); err != nil {
+	if err := workflow.SetPlanStatus(ctx, tw, plan, workflow.StatusReviewingRollup); err != nil {
 		c.logger.Error("Failed to set plan status to reviewing_rollup",
 			"slug", event.Slug, "error", err)
 		return
 	}
 
-	scenarios, err := workflow.LoadScenarios(ctx, kvStore, event.Slug)
+	scenarios, err := workflow.LoadScenarios(ctx, tw, event.Slug)
 	if err != nil {
 		c.logger.Warn("Failed to load scenarios for rollup review",
 			"slug", event.Slug, "error", err)
 		scenarios = nil
 	}
 
-	c.dispatchPlanRollupReview(ctx, plan, scenarios, kvStore)
+	c.dispatchPlanRollupReview(ctx, plan, scenarios, tw)
 }
 
 // workflowSlugRollupReview is the workflow slug written into dispatched rollup
@@ -256,9 +256,9 @@ func (c *Component) handleScenarioExecutionCompleteEvent(ctx context.Context, ev
 		"files_modified", len(event.FilesModified),
 	)
 
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 
-	plan, err := workflow.LoadPlan(ctx, kvStore, event.Slug)
+	plan, err := workflow.LoadPlan(ctx, tw, event.Slug)
 	if err != nil {
 		c.logger.Warn("Failed to load plan for scenario completion check",
 			"slug", event.Slug, "error", err)
@@ -270,7 +270,7 @@ func (c *Component) handleScenarioExecutionCompleteEvent(ctx context.Context, ev
 		return
 	}
 
-	scenarios, err := workflow.LoadScenarios(ctx, kvStore, event.Slug)
+	scenarios, err := workflow.LoadScenarios(ctx, tw, event.Slug)
 	if err != nil {
 		c.logger.Warn("Failed to load scenarios for completion check",
 			"slug", event.Slug, "error", err)
@@ -348,20 +348,20 @@ func (c *Component) handleScenarioExecutionCompleteEvent(ctx context.Context, ev
 		"scenarios", len(scenarios),
 	)
 
-	if err := workflow.SetPlanStatus(ctx, kvStore, plan, workflow.StatusReviewingRollup); err != nil {
+	if err := workflow.SetPlanStatus(ctx, tw, plan, workflow.StatusReviewingRollup); err != nil {
 		c.logger.Error("Failed to set plan status to reviewing_rollup",
 			"slug", event.Slug, "error", err)
 		return
 	}
 
-	c.dispatchPlanRollupReview(ctx, plan, scenarios, kvStore)
+	c.dispatchPlanRollupReview(ctx, plan, scenarios, tw)
 }
 
 // dispatchPlanRollupReview dispatches the plan-level rollup review through the
 // existing plan-reviewer component. It builds a PlanReviewRequest with the
 // rollup context (requirements + scenario outcomes) as the plan content.
-func (c *Component) dispatchPlanRollupReview(ctx context.Context, plan *workflow.Plan, scenarios []workflow.Scenario, kvStore *natsclient.KVStore) {
-	requirements, _ := workflow.LoadRequirements(ctx, kvStore, plan.Slug)
+func (c *Component) dispatchPlanRollupReview(ctx context.Context, plan *workflow.Plan, scenarios []workflow.Scenario, tw *graphutil.TripleWriter) {
+	requirements, _ := workflow.LoadRequirements(ctx, tw, plan.Slug)
 
 	// Build rollup content summarizing requirements and scenario outcomes.
 	var rollupContent strings.Builder
@@ -518,9 +518,9 @@ func (c *Component) processRollupCompletionMsg(ctx context.Context, msg jetstrea
 // transitions the plan to complete (or leaves it in reviewing_rollup for
 // human attention when the verdict is "needs_attention").
 func (c *Component) handlePlanRollupCompleteEvent(ctx context.Context, slug string, event *agentic.LoopCompletedEvent) {
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 
-	plan, err := workflow.LoadPlan(ctx, kvStore, slug)
+	plan, err := workflow.LoadPlan(ctx, tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load plan for rollup completion", "slug", slug, "error", err)
 		return
@@ -548,7 +548,7 @@ func (c *Component) handlePlanRollupCompleteEvent(ctx context.Context, slug stri
 		if result.Summary != "" {
 			plan.ReviewSummary = result.Summary
 		}
-		if err := workflow.SetPlanStatus(ctx, kvStore, plan, workflow.StatusComplete); err != nil {
+		if err := workflow.SetPlanStatus(ctx, tw, plan, workflow.StatusComplete); err != nil {
 			c.logger.Error("Failed to complete plan after rollup approval",
 				"slug", slug, "error", err)
 			return
@@ -577,9 +577,9 @@ func (c *Component) handlePlanApprovedEvent(ctx context.Context, event *workflow
 		return
 	}
 
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 
-	plan, err := workflow.LoadPlan(ctx, kvStore, event.Slug)
+	plan, err := workflow.LoadPlan(ctx, tw, event.Slug)
 	if err != nil {
 		c.logger.Error("Failed to load plan for approval",
 			"slug", event.Slug,
@@ -617,7 +617,7 @@ func (c *Component) handlePlanApprovedEvent(ctx context.Context, event *workflow
 		})
 	}
 
-	if err := workflow.ApprovePlan(ctx, kvStore, plan); err != nil {
+	if err := workflow.ApprovePlan(ctx, tw, plan); err != nil {
 		// ErrAlreadyApproved is not an error — idempotent
 		if errors.Is(err, workflow.ErrAlreadyApproved) {
 			c.logger.Debug("Plan already approved",
@@ -742,9 +742,9 @@ func (c *Component) handlePlanRevisionNeededEvent(ctx context.Context, event *wo
 		return
 	}
 
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 
-	plan, err := workflow.LoadPlan(ctx, kvStore, event.Slug)
+	plan, err := workflow.LoadPlan(ctx, tw, event.Slug)
 	if err != nil {
 		c.logger.Error("Failed to load plan for revision",
 			"slug", event.Slug,
@@ -773,7 +773,7 @@ func (c *Component) handlePlanRevisionNeededEvent(ctx context.Context, event *wo
 		})
 	}
 
-	if err := workflow.SavePlan(ctx, kvStore, plan); err != nil {
+	if err := workflow.SavePlan(ctx, tw, plan); err != nil {
 		c.logger.Error("Failed to save plan with revision findings",
 			"slug", event.Slug,
 			"error", err)
@@ -802,9 +802,9 @@ func (c *Component) handleEscalationEvent(ctx context.Context, event *workflow.E
 // exhausts its retry budget. This ensures the operator sees a terminal state
 // with the escalation reason instead of an indefinite "in progress" status.
 func (c *Component) handlePlanEscalation(ctx context.Context, event *workflow.EscalationEvent) {
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 
-	plan, err := workflow.LoadPlan(ctx, kvStore, event.Slug)
+	plan, err := workflow.LoadPlan(ctx, tw, event.Slug)
 	if err != nil {
 		c.logger.Error("Failed to load plan for escalation",
 			"slug", event.Slug,
@@ -838,7 +838,7 @@ func (c *Component) handlePlanEscalation(ctx context.Context, event *workflow.Es
 	}
 
 	plan.Status = workflow.StatusRejected
-	if err := workflow.SavePlan(ctx, kvStore, plan); err != nil {
+	if err := workflow.SavePlan(ctx, tw, plan); err != nil {
 		c.logger.Error("Failed to save escalated plan",
 			"slug", event.Slug,
 			"error", err)
@@ -869,7 +869,7 @@ func (c *Component) handleErrorEvent(ctx context.Context, event *workflow.UserSi
 		slug = workflow.ExtractSlugFromTaskID(event.TaskID)
 	}
 	if slug != "" {
-		plan, err := workflow.LoadPlan(ctx, c.kvStore, slug)
+		plan, err := workflow.LoadPlan(ctx, c.tripleWriter, slug)
 		if err != nil {
 			c.logger.Warn("Failed to load plan for error annotation",
 				"slug", slug, "error", err)
@@ -877,7 +877,7 @@ func (c *Component) handleErrorEvent(ctx context.Context, event *workflow.UserSi
 		}
 		plan.LastError = event.Error
 		plan.LastErrorAt = &now
-		if err := workflow.SavePlan(ctx, c.kvStore, plan); err != nil {
+		if err := workflow.SavePlan(ctx, c.tripleWriter, plan); err != nil {
 			c.logger.Warn("Failed to save plan error annotation",
 				"slug", slug, "error", err)
 		}

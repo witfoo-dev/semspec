@@ -14,13 +14,13 @@ import (
 // teamEntityPrefix is the KV key prefix for team entities. It ends with a dot
 // so that "team-insight." entries (which start with "team-insight", not "team.")
 // are naturally excluded by the HasPrefix check.
-const teamEntityPrefix = "semspec.local.agentic.orchestrator.team."
+const teamEntityPrefix = "semspec.local.agent.team.team."
 
 // teamInsightEntityPrefix is excluded from team counts.
-const teamInsightEntityPrefix = "semspec.local.agentic.orchestrator.team-insight."
+const teamInsightEntityPrefix = "semspec.local.agent.team.insight."
 
 // agentEntityPrefix is the KV key prefix for agent entities.
-const agentEntityPrefix = "semspec.local.agentic.orchestrator.agent."
+const agentEntityPrefix = "semspec.local.agent.roster.agent."
 
 // kvEntityState mirrors the structure stored in the ENTITY_STATES KV bucket.
 // Each value is a JSON object with a "triples" array of predicate/object pairs.

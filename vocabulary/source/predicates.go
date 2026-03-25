@@ -236,7 +236,7 @@ const (
 	SourceStatus = "source.meta.status"
 
 	// SourceProject is the project entity ID for grouping related sources.
-	// Format: c360.semspec.workflow.project.project.{project-slug}
+	// Format: {prefix}.wf.project.project.{project-slug}
 	// Multiple sources (repos + docs) can belong to a project for coordinated context assembly.
 	SourceProject = "source.meta.project"
 

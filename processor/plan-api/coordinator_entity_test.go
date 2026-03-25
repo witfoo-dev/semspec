@@ -17,12 +17,12 @@ func TestCoordinationEntity_EntityID(t *testing.T) {
 		{
 			name: "basic",
 			slug: "my-feature",
-			want: "local.semspec.workflow.plan.execution.my-feature",
+			want: "semspec.local.exec.plan.run.my-feature",
 		},
 		{
 			name: "auth",
 			slug: "auth-refresh",
-			want: "local.semspec.workflow.plan.execution.auth-refresh",
+			want: "semspec.local.exec.plan.run.auth-refresh",
 		},
 	}
 
@@ -162,7 +162,7 @@ func TestCoordinationEntity_Triples_SubjectMatchesEntityID(t *testing.T) {
 
 func TestNewCoordinationEntity_FromState(t *testing.T) {
 	exec := &coordinationExecution{
-		EntityID:         "local.semspec.workflow.plan.execution.my-plan",
+		EntityID:         "semspec.local.exec.plan.run.my-plan",
 		Slug:             "my-plan",
 		TraceID:          "trace-xyz",
 		ExpectedPlanners: 3,
@@ -181,7 +181,7 @@ func TestNewCoordinationEntity_FromState(t *testing.T) {
 		t.Errorf("PlannerCount = %d, want %d", entity.PlannerCount, exec.ExpectedPlanners)
 	}
 
-	expectedID := "local.semspec.workflow.plan.execution.my-plan"
+	expectedID := "semspec.local.exec.plan.run.my-plan"
 	if got := entity.EntityID(); got != expectedID {
 		t.Errorf("EntityID() = %q, want %q", got, expectedID)
 	}

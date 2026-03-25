@@ -13,14 +13,10 @@ func GetManifestClient() *ManifestClient {
 	return manifestClient
 }
 
-func init() {
-	// Initialize manifest client for graph knowledge summaries.
+// Register initializes the manifest client and registers graph tools
+// (graph_search, graph_query, graph_summary).
+func Register() {
 	manifestClient = NewManifestClient(getGatewayURL(), nil)
-
-	// Register graph tools only (graph_search, graph_query, graph_summary).
-	// Document, constitution, and grep tools are dropped — bash handles these.
 	graphExec := NewGraphExecutor()
-	for _, tool := range graphExec.ListTools() {
-		_ = agentictools.RegisterTool(tool.Name, graphExec)
-	}
+	_ = agentictools.RegisterTool("graph", graphExec)
 }

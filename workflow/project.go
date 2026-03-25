@@ -10,7 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c360studio/semstreams/natsclient"
+	"github.com/c360studio/semspec/vocabulary/semspec"
+	"github.com/c360studio/semspec/workflow/graphutil"
 )
 
 // DefaultProjectSlug is the slug for the auto-created default project.
@@ -351,14 +352,14 @@ func DeleteProject(ctx context.Context, repoRoot, slug string) error {
 	return nil
 }
 
-// ListProjectPlans returns all plans for a specific project from ENTITY_STATES KV.
-func ListProjectPlans(ctx context.Context, kv *natsclient.KVStore, projectSlug string) (*ListPlansResult, error) {
+// ListProjectPlans returns all plans for a specific project from ENTITY_STATES triples.
+func ListProjectPlans(ctx context.Context, tw *graphutil.TripleWriter, projectSlug string) (*ListPlansResult, error) {
 	result := &ListPlansResult{
 		Plans:  []*Plan{},
 		Errors: []error{},
 	}
 
-	if kv == nil {
+	if tw == nil {
 		return result, nil
 	}
 
@@ -367,37 +368,38 @@ func ListProjectPlans(ctx context.Context, kv *natsclient.KVStore, projectSlug s
 	}
 
 	prefix := EntityPrefix() + ".wf.plan.plan."
-	keys, err := kv.KeysByPrefix(ctx, prefix)
+	entities, err := tw.ReadEntitiesByPrefix(ctx, prefix, 500)
 	if err != nil {
 		return result, nil
 	}
 
 	projectEntityID := ProjectEntityID(projectSlug)
-	for _, key := range keys {
+	for entityID, triples := range entities {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
-		var plan Plan
-		if err := kvGet(ctx, kv, key, &plan); err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("failed to load plan %s: %w", key, err))
+		// Skip tombstoned plans.
+		if triples[semspec.PredicatePlanStatus] == "deleted" {
 			continue
 		}
+
+		plan := planFromTripleMap(entityID, triples)
 
 		// Filter by project
 		if projectSlug != "" && plan.ProjectID != "" && plan.ProjectID != projectEntityID {
 			continue
 		}
 
-		result.Plans = append(result.Plans, &plan)
+		result.Plans = append(result.Plans, plan)
 	}
 
 	return result, nil
 }
 
 // CreateProjectPlan creates a new plan within a project.
-// Uses KV existence check (fails if entity already exists).
-func CreateProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug, planSlug, title string) (*Plan, error) {
+// Uses triple existence check (fails if entity already has triples).
+func CreateProjectPlan(ctx context.Context, tw *graphutil.TripleWriter, projectSlug, planSlug, title string) (*Plan, error) {
 	if err := ValidateSlug(projectSlug); err != nil {
 		return nil, err
 	}
@@ -412,10 +414,13 @@ func CreateProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug,
 		return nil, err
 	}
 
-	// Check if plan already exists via KV
+	// Check if plan already exists via triple read.
 	entityID := PlanEntityID(planSlug)
-	if kvExists(ctx, kv, entityID) {
-		return nil, fmt.Errorf("%w: %s", ErrPlanExists, planSlug)
+	if tw != nil {
+		triples, err := tw.ReadEntity(ctx, entityID)
+		if err == nil && len(triples) > 0 && triples[semspec.PredicatePlanStatus] != "deleted" {
+			return nil, fmt.Errorf("%w: %s", ErrPlanExists, planSlug)
+		}
 	}
 
 	now := time.Now()
@@ -433,20 +438,20 @@ func CreateProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug,
 		},
 	}
 
-	if err := SaveProjectPlan(ctx, kv, projectSlug, plan); err != nil {
+	if err := SaveProjectPlan(ctx, tw, projectSlug, plan); err != nil {
 		return nil, err
 	}
 
 	return plan, nil
 }
 
-// LoadProjectPlan loads a plan from ENTITY_STATES KV bucket.
-func LoadProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug, planSlug string) (*Plan, error) {
+// LoadProjectPlan loads a plan from ENTITY_STATES triples.
+func LoadProjectPlan(ctx context.Context, tw *graphutil.TripleWriter, projectSlug, planSlug string) (*Plan, error) {
 	if err := ValidateSlug(planSlug); err != nil {
 		return nil, err
 	}
 
-	if kv == nil {
+	if tw == nil {
 		return nil, fmt.Errorf("%w: %s", ErrPlanNotFound, planSlug)
 	}
 
@@ -454,16 +459,16 @@ func LoadProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug, p
 		return nil, err
 	}
 
-	var plan Plan
-	if err := kvGet(ctx, kv, PlanEntityID(planSlug), &plan); err != nil {
+	triples, err := tw.ReadEntity(ctx, PlanEntityID(planSlug))
+	if err != nil || len(triples) == 0 {
 		return nil, fmt.Errorf("%w: %s", ErrPlanNotFound, planSlug)
 	}
 
-	return &plan, nil
+	return planFromTripleMap(PlanEntityID(planSlug), triples), nil
 }
 
-// SaveProjectPlan saves a plan to ENTITY_STATES KV bucket.
-func SaveProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug string, plan *Plan) error {
+// SaveProjectPlan saves a plan as triples in ENTITY_STATES.
+func SaveProjectPlan(ctx context.Context, tw *graphutil.TripleWriter, projectSlug string, plan *Plan) error {
 	if err := ValidateSlug(plan.Slug); err != nil {
 		return err
 	}
@@ -472,5 +477,5 @@ func SaveProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug st
 		return err
 	}
 
-	return kvPut(ctx, kv, PlanEntityID(plan.Slug), plan)
+	return writePlanTriples(ctx, tw, plan)
 }

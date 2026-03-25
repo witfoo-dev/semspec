@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c360studio/semstreams/natsclient"
+	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/vocabulary/semspec"
 )
 
 // PlanFile is the filename for plan metadata within a plan directory.
@@ -51,15 +52,15 @@ func ValidateSlug(slug string) error {
 
 // CreatePlan creates a new plan in draft mode (Approved=false).
 // Plans are created in the default project at .semspec/projects/default/plans/{slug}/.
-func CreatePlan(ctx context.Context, kv *natsclient.KVStore, slug, title string) (*Plan, error) {
+func CreatePlan(ctx context.Context, tw *graphutil.TripleWriter, slug, title string) (*Plan, error) {
 	// Delegate to project-based function with default project
-	return CreateProjectPlan(ctx, kv, DefaultProjectSlug, slug, title)
+	return CreateProjectPlan(ctx, tw, DefaultProjectSlug, slug, title)
 }
 
-// LoadPlan loads a plan from ENTITY_STATES KV bucket (default project).
-func LoadPlan(ctx context.Context, kv *natsclient.KVStore, slug string) (*Plan, error) {
+// LoadPlan loads a plan from ENTITY_STATES triples (default project).
+func LoadPlan(ctx context.Context, tw *graphutil.TripleWriter, slug string) (*Plan, error) {
 	// Delegate to project-based function with default project
-	return LoadProjectPlan(ctx, kv, DefaultProjectSlug, slug)
+	return LoadProjectPlan(ctx, tw, DefaultProjectSlug, slug)
 }
 
 // LoadPlanFromDisk loads a plan from its plan.json file on the filesystem.
@@ -85,15 +86,15 @@ func LoadPlanFromDisk(repoRoot, slug string) (*Plan, error) {
 	return &plan, nil
 }
 
-// SavePlan saves a plan to ENTITY_STATES KV bucket.
+// SavePlan saves a plan to ENTITY_STATES triples.
 // The project is determined from plan.ProjectID, defaulting to "default" project.
-func SavePlan(ctx context.Context, kv *natsclient.KVStore, plan *Plan) error {
+func SavePlan(ctx context.Context, tw *graphutil.TripleWriter, plan *Plan) error {
 	// Extract project slug from ProjectID or use default
 	projectSlug := ExtractProjectSlug(plan.ProjectID)
 	if projectSlug == "" {
 		projectSlug = DefaultProjectSlug
 	}
-	return SaveProjectPlan(ctx, kv, projectSlug, plan)
+	return SaveProjectPlan(ctx, tw, projectSlug, plan)
 }
 
 // ExtractProjectSlug extracts the project slug from an entity ID.
@@ -110,7 +111,7 @@ func ExtractProjectSlug(projectID string) string {
 
 // ApprovePlan transitions a plan from draft to approved status.
 // Sets Approved=true, Status=StatusApproved, and records ApprovedAt timestamp.
-func ApprovePlan(ctx context.Context, kv *natsclient.KVStore, plan *Plan) error {
+func ApprovePlan(ctx context.Context, tw *graphutil.TripleWriter, plan *Plan) error {
 	if plan.Approved {
 		return fmt.Errorf("%w: %s", ErrAlreadyApproved, plan.Slug)
 	}
@@ -120,26 +121,30 @@ func ApprovePlan(ctx context.Context, kv *natsclient.KVStore, plan *Plan) error 
 	plan.ApprovedAt = &now
 	plan.Status = StatusApproved
 
-	return SavePlan(ctx, kv, plan)
+	return SavePlan(ctx, tw, plan)
 }
 
 // SetPlanStatus transitions a plan to a new status, validating the transition.
 // This is the low-level function for status changes that don't have dedicated functions.
-func SetPlanStatus(ctx context.Context, kv *natsclient.KVStore, plan *Plan, target Status) error {
+func SetPlanStatus(ctx context.Context, tw *graphutil.TripleWriter, plan *Plan, target Status) error {
 	current := plan.EffectiveStatus()
 	if !current.CanTransitionTo(target) {
 		return fmt.Errorf("%w: %s → %s", ErrInvalidTransition, current, target)
 	}
 	plan.Status = target
-	return SavePlan(ctx, kv, plan)
+	return SavePlan(ctx, tw, plan)
 }
 
-// PlanExists checks if a plan exists for the given slug via ENTITY_STATES KV.
-func PlanExists(ctx context.Context, kv *natsclient.KVStore, slug string) bool {
+// PlanExists checks if a plan exists for the given slug via ENTITY_STATES triples.
+func PlanExists(ctx context.Context, tw *graphutil.TripleWriter, slug string) bool {
 	if err := ValidateSlug(slug); err != nil {
 		return false
 	}
-	return kvExists(ctx, kv, PlanEntityID(slug))
+	if tw == nil {
+		return false
+	}
+	triples, err := tw.ReadEntity(ctx, PlanEntityID(slug))
+	return err == nil && len(triples) > 0 && triples[semspec.PredicatePlanStatus] != "deleted"
 }
 
 // ListPlansResult contains the results of listing plans, including any
@@ -155,9 +160,9 @@ type ListPlansResult struct {
 
 // ListPlans returns all plans in the default project.
 // Returns partial results along with any errors encountered loading individual plans.
-func ListPlans(ctx context.Context, kv *natsclient.KVStore) (*ListPlansResult, error) {
+func ListPlans(ctx context.Context, tw *graphutil.TripleWriter) (*ListPlansResult, error) {
 	// Delegate to project-based function with default project
-	return ListProjectPlans(ctx, kv, DefaultProjectSlug)
+	return ListProjectPlans(ctx, tw, DefaultProjectSlug)
 }
 
 // UpdatePlanRequest contains parameters for updating a plan.
@@ -172,7 +177,7 @@ type UpdatePlanRequest struct {
 // Can update: Title, Goal, Context
 // State guard: Cannot update if Status >= StatusImplementing
 // Returns the updated plan.
-func UpdatePlan(ctx context.Context, kv *natsclient.KVStore, slug string, req UpdatePlanRequest) (*Plan, error) {
+func UpdatePlan(ctx context.Context, tw *graphutil.TripleWriter, slug string, req UpdatePlanRequest) (*Plan, error) {
 	if err := ValidateSlug(slug); err != nil {
 		return nil, err
 	}
@@ -183,7 +188,7 @@ func UpdatePlan(ctx context.Context, kv *natsclient.KVStore, slug string, req Up
 	}
 
 	// Load the plan
-	plan, err := LoadPlan(ctx, kv, slug)
+	plan, err := LoadPlan(ctx, tw, slug)
 	if err != nil {
 		return nil, err
 	}
@@ -206,16 +211,16 @@ func UpdatePlan(ctx context.Context, kv *natsclient.KVStore, slug string, req Up
 	}
 
 	// Save the updated plan
-	if err := SavePlan(ctx, kv, plan); err != nil {
+	if err := SavePlan(ctx, tw, plan); err != nil {
 		return nil, err
 	}
 
 	return plan, nil
 }
 
-// DeletePlan permanently deletes a plan by removing its entity from KV.
+// DeletePlan soft-deletes a plan by writing a "deleted" status tombstone.
 // State guard: Cannot delete if Status >= StatusImplementing
-func DeletePlan(ctx context.Context, kv *natsclient.KVStore, slug string) error {
+func DeletePlan(ctx context.Context, tw *graphutil.TripleWriter, slug string) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
 	}
@@ -226,7 +231,7 @@ func DeletePlan(ctx context.Context, kv *natsclient.KVStore, slug string) error 
 	}
 
 	// Verify plan exists
-	plan, err := LoadPlan(ctx, kv, slug)
+	plan, err := LoadPlan(ctx, tw, slug)
 	if err != nil {
 		return err
 	}
@@ -237,17 +242,13 @@ func DeletePlan(ctx context.Context, kv *natsclient.KVStore, slug string) error 
 		return fmt.Errorf("%w: cannot delete plan with status %s", ErrPlanNotDeletable, effectiveStatus)
 	}
 
-	// Delete plan entity from KV
-	if err := kv.Delete(ctx, PlanEntityID(slug)); err != nil && !natsclient.IsKVNotFoundError(err) {
-		return fmt.Errorf("failed to delete plan: %w", err)
-	}
-
-	return nil
+	// Write tombstone status triple — LoadPlan treats "deleted" as not found.
+	return tw.WriteTriple(ctx, PlanEntityID(slug), semspec.PredicatePlanStatus, "deleted")
 }
 
 // ArchivePlan soft deletes a plan by setting status to archived.
 // Note: Unlike DeletePlan, archiving is allowed from any non-terminal state.
-func ArchivePlan(ctx context.Context, kv *natsclient.KVStore, slug string) error {
+func ArchivePlan(ctx context.Context, tw *graphutil.TripleWriter, slug string) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
 	}
@@ -258,7 +259,7 @@ func ArchivePlan(ctx context.Context, kv *natsclient.KVStore, slug string) error
 	}
 
 	// Load the plan
-	plan, err := LoadPlan(ctx, kv, slug)
+	plan, err := LoadPlan(ctx, tw, slug)
 	if err != nil {
 		return err
 	}
@@ -273,12 +274,12 @@ func ArchivePlan(ctx context.Context, kv *natsclient.KVStore, slug string) error
 	plan.Status = StatusArchived
 
 	// Save the updated plan
-	return SavePlan(ctx, kv, plan)
+	return SavePlan(ctx, tw, plan)
 }
 
 // UnarchivePlan restores an archived plan to complete status.
-func UnarchivePlan(ctx context.Context, kv *natsclient.KVStore, slug string) error {
-	plan, err := LoadPlan(ctx, kv, slug)
+func UnarchivePlan(ctx context.Context, tw *graphutil.TripleWriter, slug string) error {
+	plan, err := LoadPlan(ctx, tw, slug)
 	if err != nil {
 		return err
 	}
@@ -288,14 +289,14 @@ func UnarchivePlan(ctx context.Context, kv *natsclient.KVStore, slug string) err
 	}
 
 	plan.Status = StatusComplete
-	return SavePlan(ctx, kv, plan)
+	return SavePlan(ctx, tw, plan)
 }
 
 // ResetPlan returns a failed/rejected plan to approved status and clears
 // generated artifacts (requirements, scenarios) so the pipeline can retry
 // from scratch. The plan's goal, context, and scope are preserved.
-func ResetPlan(ctx context.Context, kv *natsclient.KVStore, slug string) error {
-	plan, err := LoadPlan(ctx, kv, slug)
+func ResetPlan(ctx context.Context, tw *graphutil.TripleWriter, slug string) error {
+	plan, err := LoadPlan(ctx, tw, slug)
 	if err != nil {
 		return err
 	}
@@ -311,5 +312,5 @@ func ResetPlan(ctx context.Context, kv *natsclient.KVStore, slug string) error {
 	plan.ReviewSummary = ""
 	plan.ReviewedAt = nil
 
-	return SavePlan(ctx, kv, plan)
+	return SavePlan(ctx, tw, plan)
 }

@@ -122,7 +122,7 @@ func (s *AgentRosterScenario) stageVerifyEntityStatesBucket(ctx context.Context,
 
 // stageVerifyErrorCategoriesSeeded checks that error category entities were
 // seeded on startup. These are stored with prefix
-// "semspec.local.agentic.orchestrator.error-category." in ENTITY_STATES.
+// "semspec.local.agent.roster.errcat." in ENTITY_STATES.
 func (s *AgentRosterScenario) stageVerifyErrorCategoriesSeeded(ctx context.Context, result *Result) error {
 	kvResp, err := s.http.GetKVEntries(ctx, "ENTITY_STATES")
 	if err != nil {
@@ -132,7 +132,7 @@ func (s *AgentRosterScenario) stageVerifyErrorCategoriesSeeded(ctx context.Conte
 	}
 
 	// Count entities with the error-category prefix.
-	prefix := "semspec.local.agentic.orchestrator.error-category."
+	prefix := "semspec.local.agent.roster.errcat."
 	count := 0
 	for _, entry := range kvResp.Entries {
 		if len(entry.Key) > len(prefix) && entry.Key[:len(prefix)] == prefix {

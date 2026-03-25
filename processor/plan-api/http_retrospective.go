@@ -49,17 +49,17 @@ type RetrospectiveResponse struct {
 func (c *Component) handlePhasesRetrospective(w http.ResponseWriter, r *http.Request, slug string) {
 	ctx := r.Context()
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
 	// Verify the plan exists.
-	if !workflow.PlanExists(ctx, kvStore, slug) {
+	if !workflow.PlanExists(ctx, tw, slug) {
 		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
 	// Load requirements.
-	requirements, err := workflow.LoadRequirements(ctx, kvStore, slug)
+	requirements, err := workflow.LoadRequirements(ctx, tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load requirements for retrospective", "slug", slug, "error", err)
 		http.Error(w, "Failed to load requirements", http.StatusInternalServerError)
@@ -67,7 +67,7 @@ func (c *Component) handlePhasesRetrospective(w http.ResponseWriter, r *http.Req
 	}
 
 	// Load scenarios and build a lookup: requirementID → []Scenario.
-	scenarios, err := workflow.LoadScenarios(ctx, kvStore, slug)
+	scenarios, err := workflow.LoadScenarios(ctx, tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load scenarios for retrospective", "slug", slug, "error", err)
 		http.Error(w, "Failed to load scenarios", http.StatusInternalServerError)

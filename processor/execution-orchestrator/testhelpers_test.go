@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 	nats "github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -73,7 +74,7 @@ func newTestComponent(t *testing.T) *Component {
 // ---------------------------------------------------------------------------
 
 func newTestExec(slug, taskID string) *taskExecution {
-	entityID := fmt.Sprintf("local.semspec.workflow.task-execution.execution.%s-%s", slug, taskID)
+	entityID := fmt.Sprintf("%s.exec.task.run.%s-%s", workflow.EntityPrefix(), slug, taskID)
 	return &taskExecution{
 		EntityID:      entityID,
 		Slug:          slug,

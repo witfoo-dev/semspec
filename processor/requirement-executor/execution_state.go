@@ -16,7 +16,7 @@ type NodeResult struct {
 }
 
 // requirementExecution holds in-memory state for a single requirement execution.
-// Keyed by entityID (local.semspec.workflow.requirement-execution.execution.<slug>-<requirementID>)
+// Keyed by entityID (semspec.local.exec.req.run.<slug>-<requirementID>)
 // in the component's activeExecutions sync.Map.
 //
 // All field access must be guarded by mu. The sync.Map protects map operations,
@@ -30,7 +30,7 @@ type requirementExecution struct {
 	terminated bool
 
 	// EntityID is the canonical graph entity ID:
-	// local.semspec.workflow.requirement-execution.execution.<slug>-<requirementID>
+	// semspec.local.exec.req.run.<slug>-<requirementID>
 	EntityID string
 
 	// Slug is the plan slug.

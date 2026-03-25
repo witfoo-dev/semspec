@@ -18,6 +18,7 @@ import (
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -43,8 +44,8 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient llmCompleter
-	kvStore   *natsclient.KVStore
+	llmClient    llmCompleter
+	tripleWriter *graphutil.TripleWriter
 
 	// Lifecycle
 	running   bool
@@ -187,12 +188,11 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	// Initialize ENTITY_STATES KV store for workflow Manager operations.
-	if entityBucket, kvErr := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES"); kvErr != nil {
-		c.logger.Warn("ENTITY_STATES bucket not available — workflow state operations will use disk fallback",
-			"error", kvErr)
-	} else {
-		c.kvStore = c.natsClient.NewKVStore(entityBucket)
+	// Initialize TripleWriter for workflow state operations.
+	c.tripleWriter = &graphutil.TripleWriter{
+		NATSClient:    c.natsClient,
+		Logger:        c.logger,
+		ComponentName: "scenario-generator",
 	}
 
 	// Push-based consumption — messages arrive via callback, no polling delay.
@@ -367,7 +367,7 @@ func (c *Component) generateScenarios(ctx context.Context, trigger *payloads.Sce
 		}
 	} else {
 		// Fallback: load from disk when trigger doesn't carry plan content.
-		loadedPlan, err := workflow.LoadPlan(ctx, c.kvStore, trigger.Slug)
+		loadedPlan, err := workflow.LoadPlan(ctx, c.tripleWriter, trigger.Slug)
 		if err != nil {
 			return nil, fmt.Errorf("load plan: %w", err)
 		}
@@ -375,7 +375,7 @@ func (c *Component) generateScenarios(ctx context.Context, trigger *payloads.Sce
 	}
 
 	// Load and find the specific requirement.
-	requirements, err := workflow.LoadRequirements(ctx, c.kvStore, trigger.Slug)
+	requirements, err := workflow.LoadRequirements(ctx, c.tripleWriter, trigger.Slug)
 	if err != nil {
 		return nil, fmt.Errorf("load requirements: %w", err)
 	}
@@ -635,7 +635,7 @@ func (c *Component) saveAndCheckCompletion(ctx context.Context, trigger *payload
 	}
 
 	// Load existing scenarios so we can append (or replace for this requirement).
-	existing, err := workflow.LoadScenarios(ctx, c.kvStore, trigger.Slug)
+	existing, err := workflow.LoadScenarios(ctx, c.tripleWriter, trigger.Slug)
 	if err != nil {
 		return fmt.Errorf("load existing scenarios: %w", err)
 	}
@@ -649,7 +649,7 @@ func (c *Component) saveAndCheckCompletion(ctx context.Context, trigger *payload
 	}
 	merged = append(merged, newScenarios...)
 
-	if err := workflow.SaveScenarios(ctx, c.kvStore, merged, trigger.Slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, c.tripleWriter, merged, trigger.Slug); err != nil {
 		return fmt.Errorf("save scenarios: %w", err)
 	}
 
@@ -660,7 +660,7 @@ func (c *Component) saveAndCheckCompletion(ctx context.Context, trigger *payload
 		"total_scenario_count", len(merged))
 
 	// Check whether every requirement now has at least one scenario.
-	requirements, err := workflow.LoadRequirements(ctx, c.kvStore, trigger.Slug)
+	requirements, err := workflow.LoadRequirements(ctx, c.tripleWriter, trigger.Slug)
 	if err != nil {
 		return fmt.Errorf("load requirements for coverage check: %w", err)
 	}
@@ -694,12 +694,12 @@ func (c *Component) saveAndCheckCompletion(ctx context.Context, trigger *payload
 		"slug", trigger.Slug,
 		"scenario_count", len(merged))
 
-	plan, err := workflow.LoadPlan(ctx, c.kvStore, trigger.Slug)
+	plan, err := workflow.LoadPlan(ctx, c.tripleWriter, trigger.Slug)
 	if err != nil {
 		return fmt.Errorf("load plan for status transition: %w", err)
 	}
 
-	if err := workflow.SetPlanStatus(ctx, c.kvStore, plan, workflow.StatusScenariosGenerated); err != nil {
+	if err := workflow.SetPlanStatus(ctx, c.tripleWriter, plan, workflow.StatusScenariosGenerated); err != nil {
 		// Log and continue — event publication is more important than status update.
 		c.logger.Warn("Failed to transition plan status to scenarios_generated",
 			"slug", trigger.Slug, "error", err)

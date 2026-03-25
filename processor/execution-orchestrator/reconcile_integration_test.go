@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	sgraph "github.com/c360studio/semstreams/graph"
@@ -52,7 +53,7 @@ func TestIntegration_ReconcileFromGraph(t *testing.T) {
 	}
 
 	// Write execution entity triples directly — simulates state from a prior run.
-	entityID := "local.semspec.workflow.task-execution.execution.test-reconcile-abc123"
+	entityID := workflow.EntityPrefix() + ".exec.task.run.test-reconcile-abc123"
 	slug := "test-reconcile"
 
 	_ = tw.WriteTriple(ctx, entityID, wf.Type, "task-execution")
@@ -145,13 +146,13 @@ func TestIntegration_ReconcileSkipsTerminal(t *testing.T) {
 	}
 
 	// Write a terminal (approved) execution.
-	terminalID := "local.semspec.workflow.task-execution.execution.test-terminal-xyz"
+	terminalID := workflow.EntityPrefix() + ".exec.task.run.test-terminal-xyz"
 	_ = tw.WriteTriple(ctx, terminalID, wf.Type, "task-execution")
 	_ = tw.WriteTriple(ctx, terminalID, wf.Phase, phaseApproved)
 	_ = tw.WriteTriple(ctx, terminalID, wf.Slug, "test-terminal")
 
 	// Write an active (building) execution.
-	activeID := "local.semspec.workflow.task-execution.execution.test-active-xyz"
+	activeID := workflow.EntityPrefix() + ".exec.task.run.test-active-xyz"
 	_ = tw.WriteTriple(ctx, activeID, wf.Type, "task-execution")
 	_ = tw.WriteTriple(ctx, activeID, wf.Phase, phaseBuilding)
 	_ = tw.WriteTriple(ctx, activeID, wf.Slug, "test-active")

@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
@@ -37,8 +38,8 @@ type Component struct {
 	// Graph querier for trajectory step entities
 	stepQuerier *StepQuerier
 
-	// KV store for workflow state operations
-	kvStore *natsclient.KVStore
+	// tripleWriter for workflow state operations
+	tripleWriter *graphutil.TripleWriter
 
 	// Lifecycle state machine
 	// States: 0=stopped, 1=starting, 2=running, 3=stopping
@@ -157,13 +158,11 @@ func (c *Component) Start(ctx context.Context) error {
 			repoRoot = "."
 		}
 	}
-	// Get ENTITY_STATES KV store for workflow state operations.
-	var kvStore *natsclient.KVStore
-	if entityBucket, kvErr := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES"); kvErr != nil {
-		c.logger.Warn("ENTITY_STATES bucket not available — workflow state operations will use disk fallback",
-			"error", kvErr)
-	} else {
-		kvStore = c.natsClient.NewKVStore(entityBucket)
+	// Initialize TripleWriter for workflow state operations.
+	tw := &graphutil.TripleWriter{
+		NATSClient:    c.natsClient,
+		Logger:        c.logger,
+		ComponentName: "trajectory-api",
 	}
 
 	// Initialize graph querier for step entity queries.
@@ -181,7 +180,7 @@ func (c *Component) Start(ctx context.Context) error {
 	c.loopsBucket = loopsBucket
 	c.contentStore = contentStore
 	c.stepQuerier = stepQuerier
-	c.kvStore = kvStore
+	c.tripleWriter = tw
 	c.cancel = cancel
 	c.startTime = time.Now()
 	c.mu.Unlock()

@@ -137,10 +137,10 @@ func (c *Component) handleChangeProposalByID(w http.ResponseWriter, r *http.Requ
 // handleListChangeProposals handles GET /plans/{slug}/change-proposals.
 func (c *Component) handleListChangeProposals(w http.ResponseWriter, r *http.Request, slug string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
-	proposals, err := workflow.LoadChangeProposals(r.Context(), kvStore, slug)
+	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
@@ -167,10 +167,10 @@ func (c *Component) handleListChangeProposals(w http.ResponseWriter, r *http.Req
 // handleGetChangeProposal handles GET /plans/{slug}/change-proposals/{proposalId}.
 func (c *Component) handleGetChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
-	proposals, err := workflow.LoadChangeProposals(r.Context(), kvStore, slug)
+	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
@@ -193,7 +193,7 @@ func (c *Component) handleGetChangeProposal(w http.ResponseWriter, r *http.Reque
 // handleCreateChangeProposal handles POST /plans/{slug}/change-proposals.
 func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Request, slug string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
@@ -209,7 +209,7 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	proposals, err := workflow.LoadChangeProposals(r.Context(), kvStore, slug)
+	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
@@ -218,7 +218,7 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 
 	// Validate that all affected requirement IDs exist in this plan
 	if len(req.AffectedReqIDs) > 0 {
-		requirements, err := workflow.LoadRequirements(r.Context(), kvStore, slug)
+		requirements, err := workflow.LoadRequirements(r.Context(), tw, slug)
 		if err != nil {
 			c.logger.Error("Failed to load requirements for validation", "slug", slug, "error", err)
 			http.Error(w, "Failed to validate requirement IDs", http.StatusInternalServerError)
@@ -257,7 +257,7 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 
 	proposals = append(proposals, newProposal)
 
-	if err := workflow.SaveChangeProposals(r.Context(), kvStore, proposals, slug); err != nil {
+	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
 		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to save change proposal", http.StatusInternalServerError)
 		return
@@ -276,12 +276,12 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 				break
 			}
 		}
-		if err := workflow.SaveChangeProposals(r.Context(), kvStore, proposals, slug); err != nil {
+		if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
 			c.logger.Error("Failed to save auto-accepted proposal status", "slug", slug, "error", err)
 		}
 
 		// Deprecate affected requirements.
-		existingReqs, err := workflow.LoadRequirements(r.Context(), kvStore, slug)
+		existingReqs, err := workflow.LoadRequirements(r.Context(), tw, slug)
 		if err == nil {
 			affected := make(map[string]bool, len(req.AffectedReqIDs))
 			for _, id := range req.AffectedReqIDs {
@@ -292,7 +292,7 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 					existingReqs[i].Status = workflow.RequirementStatusDeprecated
 				}
 			}
-			if saveErr := workflow.SaveRequirements(r.Context(), kvStore, existingReqs, slug); saveErr != nil {
+			if saveErr := workflow.SaveRequirements(r.Context(), tw, existingReqs, slug); saveErr != nil {
 				c.logger.Error("Failed to save deprecated requirements", "slug", slug, "error", saveErr)
 			}
 		} else {
@@ -300,7 +300,7 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 		}
 
 		// Delete scenarios for deprecated requirements.
-		existingScenarios, err := workflow.LoadScenarios(r.Context(), kvStore, slug)
+		existingScenarios, err := workflow.LoadScenarios(r.Context(), tw, slug)
 		if err == nil {
 			affected := make(map[string]bool, len(req.AffectedReqIDs))
 			for _, id := range req.AffectedReqIDs {
@@ -312,7 +312,7 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 					kept = append(kept, s)
 				}
 			}
-			if saveErr := workflow.SaveScenarios(r.Context(), kvStore, kept, slug); saveErr != nil {
+			if saveErr := workflow.SaveScenarios(r.Context(), tw, kept, slug); saveErr != nil {
 				c.logger.Error("Failed to save pruned scenarios", "slug", slug, "error", saveErr)
 			}
 		} else {
@@ -325,7 +325,7 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 			rejectionReasons[reqID] = detail.Reason
 		}
 
-		plan, planErr := workflow.LoadPlan(r.Context(), kvStore, slug)
+		plan, planErr := workflow.LoadPlan(r.Context(), tw, slug)
 		if planErr != nil {
 			c.logger.Error("Failed to load plan for partial requirement regeneration", "slug", slug, "error", planErr)
 		} else {
@@ -343,7 +343,7 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 // handleUpdateChangeProposal handles PATCH /plans/{slug}/change-proposals/{proposalId}.
 func (c *Component) handleUpdateChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
@@ -354,7 +354,7 @@ func (c *Component) handleUpdateChangeProposal(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	proposals, err := workflow.LoadChangeProposals(r.Context(), kvStore, slug)
+	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
@@ -390,7 +390,7 @@ func (c *Component) handleUpdateChangeProposal(w http.ResponseWriter, r *http.Re
 		proposals[idx].AffectedReqIDs = req.AffectedReqIDs
 	}
 
-	if err := workflow.SaveChangeProposals(r.Context(), kvStore, proposals, slug); err != nil {
+	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
 		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to save change proposal", http.StatusInternalServerError)
 		return
@@ -405,10 +405,10 @@ func (c *Component) handleUpdateChangeProposal(w http.ResponseWriter, r *http.Re
 // handleDeleteChangeProposal handles DELETE /plans/{slug}/change-proposals/{proposalId}.
 func (c *Component) handleDeleteChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
-	proposals, err := workflow.LoadChangeProposals(r.Context(), kvStore, slug)
+	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
@@ -435,7 +435,7 @@ func (c *Component) handleDeleteChangeProposal(w http.ResponseWriter, r *http.Re
 
 	proposals = append(proposals[:idx], proposals[idx+1:]...)
 
-	if err := workflow.SaveChangeProposals(r.Context(), kvStore, proposals, slug); err != nil {
+	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
 		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to delete change proposal", http.StatusInternalServerError)
 		return
@@ -448,10 +448,10 @@ func (c *Component) handleDeleteChangeProposal(w http.ResponseWriter, r *http.Re
 // Transitions proposal from proposed → under_review.
 func (c *Component) handleSubmitChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
-	proposals, err := workflow.LoadChangeProposals(r.Context(), kvStore, slug)
+	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
@@ -479,7 +479,7 @@ func (c *Component) handleSubmitChangeProposal(w http.ResponseWriter, r *http.Re
 	proposals[idx].Status = workflow.ChangeProposalStatusUnderReview
 	proposals[idx].ReviewedAt = &now
 
-	if err := workflow.SaveChangeProposals(r.Context(), kvStore, proposals, slug); err != nil {
+	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
 		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to submit change proposal", http.StatusInternalServerError)
 		return
@@ -495,7 +495,7 @@ func (c *Component) handleSubmitChangeProposal(w http.ResponseWriter, r *http.Re
 // Transitions proposal to accepted and archives it.
 func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
@@ -504,7 +504,7 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 	// Body is optional
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	proposals, err := workflow.LoadChangeProposals(r.Context(), kvStore, slug)
+	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
@@ -532,7 +532,7 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 	proposals[idx].Status = workflow.ChangeProposalStatusAccepted
 	proposals[idx].DecidedAt = &now
 
-	if err := workflow.SaveChangeProposals(r.Context(), kvStore, proposals, slug); err != nil {
+	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
 		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to accept change proposal", http.StatusInternalServerError)
 		return
@@ -571,7 +571,7 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 // handleRejectChangeProposal handles POST /plans/{slug}/change-proposals/{proposalId}/reject.
 func (c *Component) handleRejectChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
 	c.mu.RLock()
-	kvStore := c.kvStore
+	tw := c.tripleWriter
 	c.mu.RUnlock()
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
@@ -580,7 +580,7 @@ func (c *Component) handleRejectChangeProposal(w http.ResponseWriter, r *http.Re
 	// Body is optional for reject
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	proposals, err := workflow.LoadChangeProposals(r.Context(), kvStore, slug)
+	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
 	if err != nil {
 		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
@@ -608,7 +608,7 @@ func (c *Component) handleRejectChangeProposal(w http.ResponseWriter, r *http.Re
 	proposals[idx].Status = workflow.ChangeProposalStatusRejected
 	proposals[idx].DecidedAt = &now
 
-	if err := workflow.SaveChangeProposals(r.Context(), kvStore, proposals, slug); err != nil {
+	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
 		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
 		http.Error(w, "Failed to reject change proposal", http.StatusInternalServerError)
 		return

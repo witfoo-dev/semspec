@@ -42,7 +42,6 @@ type Component struct {
 	logger       *slog.Logger
 	repoRoot     string
 	tripleWriter *graphutil.TripleWriter
-	kvStore      *natsclient.KVStore
 
 	// Lifecycle
 	running   bool
@@ -142,14 +141,6 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	// Initialize ENTITY_STATES KV store for workflow Manager operations.
-	if entityBucket, kvErr := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES"); kvErr != nil {
-		c.logger.Warn("ENTITY_STATES bucket not available — workflow state operations will use disk fallback",
-			"error", kvErr)
-	} else {
-		c.kvStore = c.natsClient.NewKVStore(entityBucket)
-	}
-
 	// Push-based consumption — messages arrive via callback, no polling delay.
 	cfg := natsclient.StreamConsumerConfig{
 		StreamName:    c.config.StreamName,
@@ -245,7 +236,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 // handleCascadeRequest executes the cascade and publishes the accepted event.
 func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.ChangeProposalCascadeRequest) error {
 	// Load all proposals for the plan and find the one we need.
-	proposals, err := workflow.LoadChangeProposals(ctx, c.kvStore, req.Slug)
+	proposals, err := workflow.LoadChangeProposals(ctx, c.tripleWriter, req.Slug)
 	if err != nil {
 		return fmt.Errorf("load change proposals for slug %q: %w", req.Slug, err)
 	}
@@ -262,7 +253,7 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 	}
 
 	// Run the cascade: dirty-mark scenarios and tasks.
-	result, err := cascade.ChangeProposal(ctx, c.kvStore, req.Slug, target)
+	result, err := cascade.ChangeProposal(ctx, c.tripleWriter, req.Slug, target)
 	if err != nil {
 		return fmt.Errorf("cascade change proposal: %w", err)
 	}

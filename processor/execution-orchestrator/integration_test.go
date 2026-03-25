@@ -216,7 +216,7 @@ func TestIntegration_DuplicateTriggerIdempotent(t *testing.T) {
 	}, "triggersProcessed should reach 2")
 
 	// Only one active execution must be registered for the entity.
-	entityID := "local.semspec.workflow.task-execution.execution.dup-plan-dup-task-001"
+	entityID := workflow.EntityPrefix() + ".exec.task.run.dup-plan-dup-task-001"
 	activeCount := 0
 	comp.activeExecutions.Range(func(k, _ any) bool {
 		if k.(string) == entityID {

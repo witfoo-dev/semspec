@@ -114,7 +114,7 @@ func TestIntegration_TeamPipelineFullCycle(t *testing.T) {
 		return comp.triggersProcessed.Load() >= 1
 	}, "triggersProcessed should reach 1")
 
-	entityID := "local.semspec.workflow.task-execution.execution.team-plan-feat-001"
+	entityID := workflow.EntityPrefix() + ".exec.task.run.team-plan-feat-001"
 
 	// Wait for TesterTaskID to be assigned — this confirms the tester was dispatched.
 	testerTaskID := waitForExecField(t, ctx, comp, entityID, 20*time.Second, func(exec *taskExecution) string {
@@ -297,7 +297,7 @@ func TestIntegration_TeamPipeline_RedTeamFallback(t *testing.T) {
 	}
 	publishExecTrigger(t, tc, ctx, trigger)
 
-	entityID := "local.semspec.workflow.task-execution.execution.fallback-plan-fallback-001"
+	entityID := workflow.EntityPrefix() + ".exec.task.run.fallback-plan-fallback-001"
 
 	waitForExecCondition(t, ctx, 20*time.Second, func() bool {
 		return comp.triggersProcessed.Load() >= 1

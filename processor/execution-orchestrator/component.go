@@ -558,7 +558,7 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 	defer cancel()
 
 	entities, err := c.tripleWriter.ReadEntitiesByPrefix(reconcileCtx,
-		"local.semspec.workflow.task-execution.execution.", 200)
+		workflow.EntityPrefix()+".exec.task.run.", 200)
 	if err != nil {
 		c.logger.Info("No graph state to reconcile (expected on first start)",
 			"error", err)
@@ -639,7 +639,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	// The full taskID is preserved in exec.TaskID for routing.
 	h := sha256.Sum256([]byte(trigger.Slug + "-" + trigger.TaskID))
 	shortID := hex.EncodeToString(h[:8]) // 16 hex chars
-	entityID := fmt.Sprintf("local.semspec.workflow.task-execution.execution.%s", shortID)
+	entityID := fmt.Sprintf("%s.exec.task.run.%s", workflow.EntityPrefix(), shortID)
 
 	c.logger.Info("Task execution trigger received",
 		"slug", trigger.Slug,
@@ -1537,6 +1537,10 @@ func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecutio
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
+		Metadata: map[string]any{
+			"plan_slug": exec.Slug,
+			"task_id":   exec.TaskID,
+		},
 	}
 	c.publishTask(ctx, subjectTesterTask, task)
 
@@ -1579,6 +1583,10 @@ func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecuti
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
+		Metadata: map[string]any{
+			"plan_slug": exec.Slug,
+			"task_id":   exec.TaskID,
+		},
 	}
 	c.publishTask(ctx, subjectBuilderTask, task)
 
@@ -1618,6 +1626,10 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 		Prompt:       userPrompt,
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
+		},
+		Metadata: map[string]any{
+			"plan_slug": exec.Slug,
+			"task_id":   exec.TaskID,
 		},
 	}
 	c.publishTask(ctx, "agent.task.development", task)
@@ -1843,6 +1855,10 @@ func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecuti
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
+		Metadata: map[string]any{
+			"plan_slug": exec.Slug,
+			"task_id":   exec.TaskID,
+		},
 	}
 	c.publishTask(ctx, subjectRedTeamTask, task)
 
@@ -1931,6 +1947,10 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 		Prompt:       exec.Prompt,
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
+		},
+		Metadata: map[string]any{
+			"plan_slug": exec.Slug,
+			"task_id":   exec.TaskID,
 		},
 	}
 	c.publishTask(ctx, "agent.task.reviewer", task)

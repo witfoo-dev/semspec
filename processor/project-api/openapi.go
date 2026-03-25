@@ -151,6 +151,99 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
+			"/api/project/config": {
+				PATCH: &service.OperationSpec{
+					Summary:     "Update project config",
+					Description: "Updates project.json fields. Org and platform changes are only allowed before the first plan is created to prevent entity ID divergence.",
+					Tags:        []string{"Project"},
+					RequestBody: &service.RequestBodySpec{
+						Description: "Fields to update (all optional)",
+						Required:    true,
+						ContentType: "application/json",
+						SchemaRef:   "#/components/schemas/ConfigUpdateRequest",
+					},
+					Responses: map[string]service.ResponseSpec{
+						"200": {
+							Description: "Updated project config",
+							ContentType: "application/json",
+							SchemaRef:   "#/components/schemas/ProjectConfig",
+						},
+						"400": {Description: "Invalid request body"},
+						"404": {Description: "project.json not found — run init first"},
+						"409": {Description: "Cannot change org/platform after plans exist"},
+					},
+				},
+			},
+			"/api/project/checklist": {
+				GET: &service.OperationSpec{
+					Summary:     "Get checklist",
+					Description: "Returns the current checklist.json with quality gate checks",
+					Tags:        []string{"Project"},
+					Responses: map[string]service.ResponseSpec{
+						"200": {
+							Description: "Current checklist",
+							ContentType: "application/json",
+							SchemaRef:   "#/components/schemas/Checklist",
+						},
+						"404": {Description: "checklist.json not found"},
+					},
+				},
+				PATCH: &service.OperationSpec{
+					Summary:     "Update checklist",
+					Description: "Replaces the checks array in checklist.json. Preserves version, timestamps, and approval state.",
+					Tags:        []string{"Project"},
+					RequestBody: &service.RequestBodySpec{
+						Description: "New checks array",
+						Required:    true,
+						ContentType: "application/json",
+						SchemaRef:   "#/components/schemas/ChecklistUpdateRequest",
+					},
+					Responses: map[string]service.ResponseSpec{
+						"200": {
+							Description: "Updated checklist",
+							ContentType: "application/json",
+							SchemaRef:   "#/components/schemas/Checklist",
+						},
+						"400": {Description: "Invalid request body"},
+						"404": {Description: "checklist.json not found — run init first"},
+					},
+				},
+			},
+			"/api/project/standards": {
+				GET: &service.OperationSpec{
+					Summary:     "Get standards",
+					Description: "Returns the current standards.json with project rules",
+					Tags:        []string{"Project"},
+					Responses: map[string]service.ResponseSpec{
+						"200": {
+							Description: "Current standards",
+							ContentType: "application/json",
+							SchemaRef:   "#/components/schemas/Standards",
+						},
+						"404": {Description: "standards.json not found"},
+					},
+				},
+				PATCH: &service.OperationSpec{
+					Summary:     "Update standards",
+					Description: "Replaces the rules array in standards.json. Recalculates token estimate. Preserves version, timestamps, and approval state.",
+					Tags:        []string{"Project"},
+					RequestBody: &service.RequestBodySpec{
+						Description: "New rules array",
+						Required:    true,
+						ContentType: "application/json",
+						SchemaRef:   "#/components/schemas/StandardsUpdateRequest",
+					},
+					Responses: map[string]service.ResponseSpec{
+						"200": {
+							Description: "Updated standards",
+							ContentType: "application/json",
+							SchemaRef:   "#/components/schemas/Standards",
+						},
+						"400": {Description: "Invalid request body"},
+						"404": {Description: "standards.json not found — run init first"},
+					},
+				},
+			},
 		},
 		ResponseTypes: []reflect.Type{
 			reflect.TypeOf(workflow.InitStatus{}),
@@ -168,6 +261,9 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 			reflect.TypeOf(workflow.Rule{}),
 			reflect.TypeOf(InitResponse{}),
 			reflect.TypeOf(ApproveResponse{}),
+			reflect.TypeOf(workflow.ProjectConfig{}),
+			reflect.TypeOf(workflow.Checklist{}),
+			reflect.TypeOf(workflow.Standards{}),
 		},
 		RequestBodyTypes: []reflect.Type{
 			reflect.TypeOf(ScaffoldRequest{}),
@@ -176,6 +272,9 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 			reflect.TypeOf(ProjectInitInput{}),
 			reflect.TypeOf(StandardsInput{}),
 			reflect.TypeOf(ApproveRequest{}),
+			reflect.TypeOf(ConfigUpdateRequest{}),
+			reflect.TypeOf(ChecklistUpdateRequest{}),
+			reflect.TypeOf(StandardsUpdateRequest{}),
 		},
 	}
 }

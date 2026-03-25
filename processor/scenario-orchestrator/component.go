@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -38,8 +39,8 @@ type Component struct {
 
 	// repoRoot is resolved once at construction from SEMSPEC_REPO_PATH or cwd.
 	// It is used to load requirement and scenario data fresh from disk each dispatch cycle.
-	repoRoot string
-	kvStore  *natsclient.KVStore
+	repoRoot     string
+	tripleWriter *graphutil.TripleWriter
 
 	// completedRequirements caches RequirementExecutionCompleteEvent data keyed
 	// by RequirementID. Populated by subscribing to requirement execution
@@ -152,12 +153,11 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	// Initialize ENTITY_STATES KV store for workflow Manager operations.
-	if entityBucket, kvErr := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES"); kvErr != nil {
-		c.logger.Warn("ENTITY_STATES bucket not available — workflow state operations will use disk fallback",
-			"error", kvErr)
-	} else {
-		c.kvStore = c.natsClient.NewKVStore(entityBucket)
+	// Initialize TripleWriter for workflow state operations.
+	c.tripleWriter = &graphutil.TripleWriter{
+		NATSClient:    c.natsClient,
+		Logger:        c.logger,
+		ComponentName: "scenario-orchestrator",
 	}
 
 	// Push-based consumption — messages arrive via callback, no polling delay.
@@ -292,11 +292,11 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 //  3. A requirement is "ready" when all its DependsOn requirements are complete
 //     AND it has at least one non-terminal scenario.
 func (c *Component) dispatchRequirements(ctx context.Context, trigger OrchestratorTrigger) error {
-	if c.kvStore == nil {
+	if c.tripleWriter == nil {
 		c.logger.Info("no KV store configured, skipping requirement dispatch", "plan_slug", trigger.PlanSlug)
 		return nil
 	}
-	requirements, err := workflow.LoadRequirements(ctx, c.kvStore, trigger.PlanSlug)
+	requirements, err := workflow.LoadRequirements(ctx, c.tripleWriter, trigger.PlanSlug)
 	if err != nil {
 		return fmt.Errorf("load requirements for %s: %w", trigger.PlanSlug, err)
 	}
@@ -305,7 +305,7 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger Orchestrat
 		return nil
 	}
 
-	allScenarios, err := workflow.LoadScenarios(ctx, c.kvStore, trigger.PlanSlug)
+	allScenarios, err := workflow.LoadScenarios(ctx, c.tripleWriter, trigger.PlanSlug)
 	if err != nil {
 		return fmt.Errorf("load scenarios for %s: %w", trigger.PlanSlug, err)
 	}

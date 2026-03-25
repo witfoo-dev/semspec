@@ -8,7 +8,7 @@ import (
 )
 
 // coordinationExecution holds in-memory state for a single coordination pipeline.
-// Keyed by entityID (local.semspec.workflow.coordination.execution.<slug>) in the component's
+// Keyed by entityID (semspec.local.exec.coord.run.<slug>) in the component's
 // activeCoordinations sync.Map.
 //
 // All field access must be guarded by mu. The sync.Map protects map operations,
@@ -22,7 +22,7 @@ type coordinationExecution struct {
 	terminated bool
 
 	// EntityID is the canonical graph entity ID:
-	// local.semspec.workflow.plan.execution.<slug>
+	// semspec.local.exec.plan.run.<slug>
 	EntityID string
 
 	// CurrentPhase tracks the current pipeline phase in memory.

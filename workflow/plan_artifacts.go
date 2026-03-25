@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c360studio/semstreams/natsclient"
+	"github.com/c360studio/semspec/workflow/graphutil"
 )
 
 // ExportSpecFiles generates per-requirement spec Markdown files in .semspec/specs/.
 // Each file contains the requirement description and its scenarios in Given/When/Then format.
 // Returns the list of file paths written.
-func ExportSpecFiles(ctx context.Context, kv *natsclient.KVStore, repoRoot, slug string) ([]string, error) {
+func ExportSpecFiles(ctx context.Context, tw *graphutil.TripleWriter, repoRoot, slug string) ([]string, error) {
 	if err := ValidateSlug(slug); err != nil {
 		return nil, err
 	}
@@ -22,17 +22,17 @@ func ExportSpecFiles(ctx context.Context, kv *natsclient.KVStore, repoRoot, slug
 		return nil, err
 	}
 
-	plan, err := LoadPlan(ctx, kv, slug)
+	plan, err := LoadPlan(ctx, tw, slug)
 	if err != nil {
 		return nil, fmt.Errorf("load plan: %w", err)
 	}
 
-	requirements, err := LoadRequirements(ctx, kv, slug)
+	requirements, err := LoadRequirements(ctx, tw, slug)
 	if err != nil {
 		return nil, fmt.Errorf("load requirements: %w", err)
 	}
 
-	scenarios, err := LoadScenarios(ctx, kv, slug)
+	scenarios, err := LoadScenarios(ctx, tw, slug)
 	if err != nil {
 		return nil, fmt.Errorf("load scenarios: %w", err)
 	}
@@ -128,7 +128,7 @@ func renderSpecFile(plan *Plan, req *Requirement, scenarios []Scenario) string {
 // GenerateArchive generates an archive Markdown document summarising a completed plan.
 // The document is written to .semspec/archive/{slug}.md.
 // Returns the file path written.
-func GenerateArchive(ctx context.Context, kv *natsclient.KVStore, repoRoot, slug string) (string, error) {
+func GenerateArchive(ctx context.Context, tw *graphutil.TripleWriter, repoRoot, slug string) (string, error) {
 	if err := ValidateSlug(slug); err != nil {
 		return "", err
 	}
@@ -136,22 +136,22 @@ func GenerateArchive(ctx context.Context, kv *natsclient.KVStore, repoRoot, slug
 		return "", err
 	}
 
-	plan, err := LoadPlan(ctx, kv, slug)
+	plan, err := LoadPlan(ctx, tw, slug)
 	if err != nil {
 		return "", fmt.Errorf("load plan: %w", err)
 	}
 
-	requirements, err := LoadRequirements(ctx, kv, slug)
+	requirements, err := LoadRequirements(ctx, tw, slug)
 	if err != nil {
 		return "", fmt.Errorf("load requirements: %w", err)
 	}
 
-	scenarios, err := LoadScenarios(ctx, kv, slug)
+	scenarios, err := LoadScenarios(ctx, tw, slug)
 	if err != nil {
 		return "", fmt.Errorf("load scenarios: %w", err)
 	}
 
-	changeProposals, err := LoadChangeProposals(ctx, kv, slug)
+	changeProposals, err := LoadChangeProposals(ctx, tw, slug)
 	if err != nil {
 		return "", fmt.Errorf("load change proposals: %w", err)
 	}
