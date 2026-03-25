@@ -436,7 +436,7 @@
         "trigger_subject": "workflow.async.scenario-generator",
         "default_capability": "scenario_generation"
       }
-    }
+    },
     "plan-manager": {
       "name": "plan-manager",
       "type": "processor",

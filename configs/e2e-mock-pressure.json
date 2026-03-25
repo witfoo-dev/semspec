@@ -470,7 +470,7 @@
         "trigger_subject": "workflow.async.task-generator",
         "default_capability": "planning"
       }
-    }
+    },
     "plan-manager": {
       "name": "plan-manager",
       "type": "processor",

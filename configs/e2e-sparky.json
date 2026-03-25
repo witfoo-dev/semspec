@@ -384,7 +384,7 @@
         "execution_timeout": "300s",
         "workflow_trigger_subject": "workflow.trigger.task-execution-loop"
       }
-    }
+    },
     "plan-manager": {
       "name": "plan-manager",
       "type": "processor",
