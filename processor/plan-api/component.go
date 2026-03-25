@@ -157,6 +157,8 @@ func (c *Component) Start(ctx context.Context) error {
 			"error", kvErr)
 	} else {
 		kvStore = c.natsClient.NewKVStore(entityBucket)
+		// Wire ENTITY_STATES for write-through side-effect publishing
+		workflow.SetEntityStatesKV(kvStore)
 	}
 
 	// Create cancellation context
