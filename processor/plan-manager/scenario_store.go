@@ -43,6 +43,9 @@ func (s *scenarioStore) reconcile(ctx context.Context) {
 
 	recovered := 0
 	for entityID, triples := range entities {
+		if triples[semspec.ScenarioStatus] == "deleted" {
+			continue
+		}
 		sc := scenarioFromTripleMap(entityID, triples)
 		if sc.ID == "" {
 			continue
@@ -56,13 +59,15 @@ func (s *scenarioStore) reconcile(ctx context.Context) {
 	}
 }
 
-// get returns a scenario by ID from the cache.
+// get returns a shallow copy of a scenario by ID from the cache.
+// Returns a copy to prevent data races on concurrent mutations.
 func (s *scenarioStore) get(id string) (*workflow.Scenario, bool) {
 	val, ok := s.cache.Load(id)
 	if !ok {
 		return nil, false
 	}
-	return val.(*workflow.Scenario), true
+	sc := *val.(*workflow.Scenario)
+	return &sc, true
 }
 
 // listByRequirement returns all scenarios for a requirement ID.

@@ -178,11 +178,6 @@ func (c *Component) handleRequirementExecutionCompleteEvent(ctx context.Context,
 	}
 
 	requirements := c.requirements.listByPlan(event.Slug)
-	if err != nil {
-		c.logger.Warn("Failed to load requirements for completion check",
-			"slug", event.Slug, "error", err)
-		return
-	}
 
 	if len(requirements) == 0 {
 		c.logger.Debug("No requirements found for plan, skipping rollup check",
@@ -231,11 +226,6 @@ func (c *Component) handleRequirementExecutionCompleteEvent(ctx context.Context,
 	}
 
 	scenarios := c.scenarios.listByPlan(event.Slug, c.requirements)
-	if err != nil {
-		c.logger.Warn("Failed to load scenarios for rollup review",
-			"slug", event.Slug, "error", err)
-		scenarios = nil
-	}
 
 	c.dispatchPlanRollupReview(ctx, plan, scenarios, tw)
 }
@@ -271,11 +261,6 @@ func (c *Component) handleScenarioExecutionCompleteEvent(ctx context.Context, ev
 	}
 
 	scenarios := c.scenarios.listByPlan(event.Slug, c.requirements)
-	if err != nil {
-		c.logger.Warn("Failed to load scenarios for completion check",
-			"slug", event.Slug, "error", err)
-		return
-	}
 
 	if len(scenarios) == 0 {
 		c.logger.Debug("No scenarios found for plan, skipping rollup check",

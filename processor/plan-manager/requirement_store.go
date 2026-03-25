@@ -43,6 +43,9 @@ func (s *requirementStore) reconcile(ctx context.Context) {
 
 	recovered := 0
 	for entityID, triples := range entities {
+		if triples[semspec.RequirementStatus] == "deleted" {
+			continue
+		}
 		req := requirementFromTripleMap(entityID, triples)
 		if req.ID == "" {
 			continue
@@ -56,13 +59,15 @@ func (s *requirementStore) reconcile(ctx context.Context) {
 	}
 }
 
-// get returns a requirement by ID from the cache.
+// get returns a shallow copy of a requirement by ID from the cache.
+// Returns a copy to prevent data races on concurrent mutations.
 func (s *requirementStore) get(id string) (*workflow.Requirement, bool) {
 	val, ok := s.cache.Load(id)
 	if !ok {
 		return nil, false
 	}
-	return val.(*workflow.Requirement), true
+	r := *val.(*workflow.Requirement)
+	return &r, true
 }
 
 // listByPlan returns all requirements for a plan slug, sorted by creation time.
