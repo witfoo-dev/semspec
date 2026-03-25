@@ -35,9 +35,11 @@ type Component struct {
 	// tripleWriter is used for workflow state operations (read/write graph triples).
 	tripleWriter *graphutil.TripleWriter
 
-	// plans is the component-owned cache for plan data entities (wf.plan.plan.*).
-	// All HTTP reads go through here. Writes update cache + WriteTriple.
-	plans *planStore
+	// Entity stores — component-owned caches following the execution-manager pattern.
+	// All HTTP reads go through cache. Writes update cache + WriteTriple.
+	plans        *planStore
+	requirements *requirementStore
+	scenarios    *scenarioStore
 
 	// Question HTTP handler for Q&A endpoints
 	questionHandler *workflow.QuestionHTTPHandler
@@ -225,14 +227,18 @@ func (c *Component) Start(ctx context.Context) error {
 		ComponentName: "plan-manager",
 	}
 
-	// Initialize plan store and reconcile from graph.
+	// Initialize entity stores and reconcile from graph.
 	ps := newPlanStore(tw, c.logger)
+	rs := newRequirementStore(tw, c.logger)
+	ss := newScenarioStore(tw, c.logger)
 	ps.reconcile(ctx)
+	rs.reconcile(ctx)
+	ss.reconcile(ctx)
 
 	// Create cancellation context
 	childCtx, cancel := context.WithCancel(ctx)
 
-	// Wire plan store into coordinator so it can read/write plan state.
+	// Wire stores into coordinator so it can read/write plan state.
 	c.coordinator.plans = ps
 
 	// Update state atomically with lock for complex state
@@ -240,6 +246,8 @@ func (c *Component) Start(ctx context.Context) error {
 	c.execBucket = execBucket
 	c.tripleWriter = tw
 	c.plans = ps
+	c.requirements = rs
+	c.scenarios = ss
 	c.cancel = cancel
 	c.startTime = time.Now()
 	c.mu.Unlock()
