@@ -214,6 +214,9 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 	rs := newRequirementStore(tw, c.logger)
 	ss := newScenarioStore(tw, c.logger)
+	// Wire sibling stores so KV writes include requirements/scenarios.
+	ps.requirements = rs
+	ps.scenarios = ss
 	ps.reconcile(ctx)
 	rs.reconcile(ctx)
 	ss.reconcile(ctx)

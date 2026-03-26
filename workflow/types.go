@@ -333,6 +333,12 @@ type Plan struct {
 	// enabling the UI to drill down from any loop iteration to the
 	// complete prompt/response via the /calls/ endpoint.
 	LLMCallHistory *LLMCallHistory `json:"llm_call_history,omitempty"`
+
+	// Requirements and Scenarios are populated when the plan is written to
+	// the PLAN_STATES KV bucket so downstream watchers have everything they
+	// need without follow-up queries. Not persisted to graph triples.
+	Requirements []Requirement `json:"requirements,omitempty"`
+	Scenarios    []Scenario    `json:"scenarios,omitempty"`
 }
 
 // LLMCallHistory tracks LLM request IDs per review iteration for both

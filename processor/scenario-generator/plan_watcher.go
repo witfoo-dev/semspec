@@ -1,112 +1,90 @@
 package scenariogenerator
 
-// plan_watcher.go — KV twofer self-trigger for scenario generation.
-//
-// The scenario-generator watches PLAN_STATES for any plan that transitions to
-// "requirements_generated" status. This means the plan-manager's KV write IS
-// the trigger: no separate NATS publish or workflow step is needed to kick off
-// generation.
-//
-// The existing JetStream consumer (workflow.async.scenario-generator) is kept
-// as the primary trigger path and as a backward-compatible fallback for any
-// direct dispatches. The KV watcher is additive — it fires when the plan-manager
-// KV twofer fires, without needing an explicit downstream publish.
-//
-// TODO(scenario-kv-trigger): generateFromKVTrigger currently logs a warning
-// and returns without dispatching LLM calls because scenario generation
-// requires per-requirement data (ID, title, description) that is not carried
-// in the PLAN_STATES KV value — only aggregate plan metadata lives there.
-//
-// Completing the dispatch requires one of:
-//   a. A plan.query.requirements NATS request/reply subject served by
-//      plan-manager that returns cached requirements for a given slug.
-//   b. Enriching the PLAN_STATES KV value with a requirements snapshot
-//      (breaks single-responsibility; preferred: option a).
-//
-// Once option (a) is implemented, replace the TODO block in
-// generateFromKVTrigger with a NATS request to plan.query.requirements
-// and fan-out one generateScenarios call per requirement.
-
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// watchPlanStates watches PLAN_STATES for plans transitioning to
-// "requirements_generated" and triggers scenario generation inline. Runs until
-// ctx is cancelled.
-//
-// js is obtained once in Start() and passed here to avoid a second JetStream()
-// call, matching the pattern used by requirement-generator's plan_watcher.go.
+// watchPlanStates watches PLAN_STATES for plans reaching requirements_generated.
+// The KV value carries plan.Requirements inline — no follow-up query needed.
 func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream) {
 	bucket, err := js.KeyValue(ctx, c.config.PlanStateBucket)
 	if err != nil {
-		c.logger.Warn("PLAN_STATES bucket not available, will rely on async triggers only",
+		c.logger.Warn("PLAN_STATES not available, relying on async triggers",
 			"bucket", c.config.PlanStateBucket, "error", err)
 		return
 	}
 
 	watcher, err := bucket.WatchAll(ctx)
 	if err != nil {
-		c.logger.Warn("Failed to watch PLAN_STATES, will rely on async triggers only",
-			"bucket", c.config.PlanStateBucket, "error", err)
+		c.logger.Warn("Failed to watch PLAN_STATES", "error", err)
 		return
 	}
 	defer watcher.Stop()
 
-	c.logger.Info("Watching PLAN_STATES for requirements_generated plans",
-		"bucket", c.config.PlanStateBucket)
+	c.logger.Info("Watching PLAN_STATES for requirements_generated")
 
 	for entry := range watcher.Updates() {
-		// nil entry signals end of initial values replay — skip silently.
 		if entry == nil {
 			continue
 		}
-
-		// Only react to puts; deletes and purges are irrelevant.
 		if entry.Operation() != jetstream.KeyValuePut {
 			continue
 		}
 
 		var plan workflow.Plan
-		if err := json.Unmarshal(entry.Value(), &plan); err != nil {
-			c.logger.Debug("Skipping unrecognised PLAN_STATES entry",
-				"key", entry.Key(), "error", err)
+		if json.Unmarshal(entry.Value(), &plan) != nil {
 			continue
 		}
-
 		if plan.Status != workflow.StatusRequirementsGenerated {
 			continue
 		}
-
-		if plan.Goal == "" {
-			c.logger.Debug("Plan has requirements_generated but goal not set, skipping KV trigger",
-				"slug", plan.Slug)
+		if len(plan.Requirements) == 0 {
 			continue
 		}
 
-		c.logger.Info("KV trigger: requirements generated, dispatching scenario generation",
-			"slug", plan.Slug)
+		c.logger.Info("KV trigger: generating scenarios",
+			"slug", plan.Slug,
+			"requirement_count", len(plan.Requirements))
 
-		// Dispatch in a goroutine so the watcher loop is never blocked.
-		go c.generateFromKVTrigger(ctx, &plan)
+		go c.generateScenariosFromKV(ctx, &plan)
 	}
 }
 
-// generateFromKVTrigger is called when the KV watcher sees a plan transition
-// to "requirements_generated". It needs per-requirement data (ID, title,
-// description) to dispatch individual scenario generation calls.
-//
-// TODO(scenario-kv-trigger): implement requirement fetch via
-// plan.query.requirements NATS request/reply once plan-manager exposes that
-// subject. Until then this logs a warning so the gap is visible in production
-// logs while the primary JetStream consumer continues to work normally.
-func (c *Component) generateFromKVTrigger(_ context.Context, plan *workflow.Plan) {
-	c.logger.Warn("KV-triggered scenario generation not yet implemented: "+
-		"requires plan.query.requirements subject from plan-manager",
-		"slug", plan.Slug,
-		"todo", "scenario-kv-trigger")
+// generateScenariosFromKV generates scenarios for each requirement in the plan.
+// Requirements are inline in the KV value — no additional query needed.
+func (c *Component) generateScenariosFromKV(ctx context.Context, plan *workflow.Plan) {
+	for _, req := range plan.Requirements {
+		trigger := &payloads.ScenarioGeneratorRequest{
+			Slug:                   plan.Slug,
+			RequirementID:          req.ID,
+			PlanGoal:               plan.Goal,
+			PlanContext:            plan.Context,
+			RequirementTitle:       req.Title,
+			RequirementDescription: req.Description,
+		}
+
+		scenarios, err := c.generateScenarios(ctx, trigger)
+		if err != nil {
+			c.logger.Error("KV-triggered scenario generation failed",
+				"slug", plan.Slug, "requirement_id", req.ID, "error", err)
+			failReq, _ := json.Marshal(map[string]string{
+				"slug": plan.Slug, "phase": "scenarios", "error": err.Error(),
+			})
+			_, _ = c.natsClient.RequestWithRetry(ctx, "plan.mutation.generation.failed",
+				failReq, 10*time.Second, natsclient.DefaultRetryConfig())
+			continue
+		}
+
+		if err := c.publishResults(ctx, trigger, scenarios); err != nil {
+			c.logger.Error("Failed to send scenario mutation",
+				"slug", plan.Slug, "requirement_id", req.ID, "error", err)
+		}
+	}
 }

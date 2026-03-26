@@ -31,6 +31,11 @@ type planStore struct {
 	kvBucket     jetstream.KeyValue // PLAN_STATES — may be nil (tests, no NATS)
 	tripleWriter *graphutil.TripleWriter
 	logger       *slog.Logger
+
+	// Sibling stores — set after initialization so KV writes can include
+	// requirements/scenarios in the payload for downstream watchers.
+	requirements *requirementStore
+	scenarios    *scenarioStore
 }
 
 // newPlanStore creates a plan store backed by a TTL in-memory cache.
@@ -200,8 +205,16 @@ func (s *planStore) save(ctx context.Context, plan *workflow.Plan) error {
 	s.cache.Set(plan.Slug, plan) //nolint:errcheck // cache set is best-effort
 
 	// 2. Write to KV bucket (observable — this IS the event).
+	// Populate requirements/scenarios so watchers have everything they need.
 	if s.kvBucket != nil {
-		data, err := json.Marshal(plan)
+		kvPlan := *plan // shallow copy — don't mutate the cached plan
+		if s.requirements != nil {
+			kvPlan.Requirements = s.requirements.listByPlan(plan.Slug)
+		}
+		if s.scenarios != nil {
+			kvPlan.Scenarios = s.scenarios.listByPlan(plan.Slug, s.requirements)
+		}
+		data, err := json.Marshal(&kvPlan)
 		if err != nil {
 			return fmt.Errorf("marshal plan for KV: %w", err)
 		}
