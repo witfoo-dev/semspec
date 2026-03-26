@@ -303,12 +303,10 @@ func (c *Component) autoAcceptChangeProposal(
 		rejectionReasons[reqID] = detail.Reason
 	}
 
-	plan, planErr := c.loadPlanCached(r.Context(), slug)
-	if planErr != nil {
-		c.logger.Error("Failed to load plan for partial requirement regeneration", "slug", slug, "error", planErr)
-		return
-	}
-	c.triggerPartialRequirementGeneration(r.Context(), plan, req.AffectedReqIDs, rejectionReasons)
+	// TODO: partial requirement regeneration needs to set a plan status that
+	// the requirement-generator watches, with affected IDs in the KV payload.
+	c.logger.Info("Partial requirement regeneration triggered (pending KV-driven implementation)",
+		"slug", slug, "affected_ids", req.AffectedReqIDs)
 }
 
 // deprecateAffectedRequirements marks each requirement as deprecated and returns

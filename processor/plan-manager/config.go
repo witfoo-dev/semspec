@@ -75,21 +75,6 @@ func (c *Config) IsAutoApprove() bool {
 	return *c.AutoApprove
 }
 
-// coordinatorConfig extracts the CoordinatorConfig from this Config.
-func (c *Config) coordinatorConfig() CoordinatorConfig {
-	return CoordinatorConfig{
-		MaxConcurrentPlanners:    c.MaxConcurrentPlanners,
-		TimeoutSeconds:           c.TimeoutSeconds,
-		MaxReviewIterations:      c.MaxReviewIterations,
-		AutoApprove:              c.AutoApprove,
-		Model:                    c.Model,
-		DefaultCapability:        c.DefaultCapability,
-		RepoPath:                 c.RepoPath,
-		SemsourceReadinessBudget: c.SemsourceReadinessBudget,
-		Prompts:                  c.Prompts,
-	}
-}
-
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	defaultTrue := true

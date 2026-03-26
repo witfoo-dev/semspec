@@ -597,15 +597,12 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	c.logger.Info("Created plan via REST API", "slug", slug, "plan_id", plan.ID)
 
-	// Start coordination pipeline directly (in-process, no NATS round-trip).
-	requestID := uuid.New().String()
-	c.coordinator.StartCoordination(ctx, plan.Slug, plan.Title, plan.Title, plan.ProjectID, tc.TraceID, "", requestID, nil)
-
+	// The KV write from ps.create() IS the event — the planner component
+	// watches PLAN_STATES for new plans and starts processing.
 	resp := &CreatePlanResponse{
-		Slug:      plan.Slug,
-		RequestID: requestID,
-		TraceID:   tc.TraceID,
-		Message:   "Plan created, generating Goal/Context/Scope",
+		Slug:    plan.Slug,
+		TraceID: tc.TraceID,
+		Message: "Plan created",
 	}
 
 	w.Header().Set("Content-Type", "application/json")

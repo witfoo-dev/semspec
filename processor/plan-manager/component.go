@@ -29,9 +29,6 @@ type Component struct {
 	// KV bucket for workflow executions
 	execBucket jetstream.KeyValue
 
-	// coordinator is the embedded plan-coordinator pipeline.
-	coordinator *coordinator
-
 	// tripleWriter is used for workflow state operations (read/write graph triples).
 	tripleWriter *graphutil.TripleWriter
 
@@ -158,15 +155,12 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 			"error", err)
 	}
 
-	// Create coordinator with plan-api config fields.
-	co := newCoordinator(config.coordinatorConfig(), deps.NATSClient, logger)
 
 	return &Component{
 		name:            "plan-manager",
 		config:          config,
 		natsClient:      deps.NATSClient,
 		logger:          logger,
-		coordinator:     co,
 		questionHandler: questionHandler,
 		workspace:       newWorkspaceProxy(config.SandboxURL),
 	}, nil
@@ -224,9 +218,6 @@ func (c *Component) Start(ctx context.Context) error {
 	rs.reconcile(ctx)
 	ss.reconcile(ctx)
 
-	// Wire stores into coordinator so it can read/write plan state.
-	c.coordinator.plans = ps
-	c.coordinator.requirements = rs
 
 	// Update state atomically with lock for complex state
 	c.mu.Lock()
@@ -239,22 +230,8 @@ func (c *Component) Start(ctx context.Context) error {
 	c.startTime = time.Now()
 	c.mu.Unlock()
 
-	// Start workflow events subscriber for plan auto-approval (ADR-005).
-	// Handles plan_approved events from the plan-review-loop workflow.
-	go c.handleWorkflowEvents(childCtx, js)
-
-	// Start user signal subscriber for escalation and error handling.
-	// Consumes user.signal.> from the USER stream to handle max-retry
-	// escalations and workflow step failures.
-	go c.handleUserSignals(childCtx, js)
-
 	// Start question graph publisher (watches QUESTIONS KV bucket).
-	// Publishes question entities to the graph on creation, answer, timeout.
 	go c.handleQuestionUpdates(childCtx, js)
-
-	// Start rollup review completion subscriber.
-	// Consumes agent.complete.> to route rollup review results back to the plan.
-	go c.handleRollupCompletions(childCtx, js)
 
 	// Start mutation request handlers (plan.mutation.* — generators return results here).
 	if err := c.startMutationHandler(childCtx); err != nil {
@@ -263,12 +240,6 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("start mutation handler: %w", err)
 	}
 
-	// Start the embedded coordinator (subscribes to NATS triggers + loop completions).
-	if err := c.coordinator.Start(childCtx); err != nil {
-		cancel()
-		c.state.Store(stateStopped)
-		return fmt.Errorf("start coordinator: %w", err)
-	}
 
 	// Transition to running
 	c.state.Store(stateRunning)
@@ -323,8 +294,6 @@ func (c *Component) Stop(_ time.Duration) error {
 		return fmt.Errorf("component in unexpected state: %d", currentState)
 	}
 
-	// Stop the embedded coordinator first (drains in-flight handlers).
-	c.coordinator.Stop()
 
 	// Get and clear cancel function
 	c.mu.Lock()
