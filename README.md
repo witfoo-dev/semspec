@@ -315,6 +315,7 @@ files, git, builds, and tests), `submit_work`, `ask_question`, `decompose_task`,
 | [Execution Pipeline](docs/11-execution-pipeline.md) | NATS subjects, consumers, payload types |
 | [Plan API](docs/12-plan-api.md) | REST API for plans, requirements, scenarios, change proposals |
 | [Sandbox Security](docs/13-sandbox-security.md) | Sandbox security model: isolation, env filtering, threat model |
+| [CQRS Patterns](docs/14-cqrs-patterns.md) | Payload registry, single-writer managers, KV Twofer |
 
 ## License
 

@@ -29,6 +29,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) | Execution pipeline: NATS subjects, consumers, payload types |
 | [docs/12-plan-api.md](docs/12-plan-api.md) | Plan API: requirements, scenarios, change proposals |
 | [docs/13-sandbox-security.md](docs/13-sandbox-security.md) | Sandbox security model: boundaries, isolation, threat model |
+| [docs/14-cqrs-patterns.md](docs/14-cqrs-patterns.md) | CQRS patterns: payload registry, single-writer managers, KV Twofer |
 
 ## Component Architecture — Manager Pattern
 
