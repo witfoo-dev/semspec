@@ -76,11 +76,14 @@ func newTestComponent(t *testing.T) *Component {
 func newTestExec(slug, taskID string) *taskExecution {
 	entityID := fmt.Sprintf("%s.exec.task.run.%s-%s", workflow.EntityPrefix(), slug, taskID)
 	return &taskExecution{
-		EntityID:      entityID,
-		Slug:          slug,
-		TaskID:        taskID,
-		Iteration:     0,
-		MaxIterations: 3,
+		key: workflow.TaskExecutionKey(slug, taskID),
+		TaskExecution: &workflow.TaskExecution{
+			EntityID:      entityID,
+			Slug:          slug,
+			TaskID:        taskID,
+			Iteration:     0,
+			MaxIterations: 3,
+		},
 	}
 }
 

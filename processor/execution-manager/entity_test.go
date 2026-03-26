@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
+	"github.com/c360studio/semspec/workflow"
 )
 
 func TestTaskExecutionEntity_EntityID(t *testing.T) {
@@ -194,17 +195,20 @@ func TestTaskExecutionEntity_Triples_SubjectMatchesEntityID(t *testing.T) {
 
 func TestNewTaskExecutionEntity_FromState(t *testing.T) {
 	exec := &taskExecution{
-		EntityID:         "semspec.local.exec.task.run.my-slug-task-1",
-		Slug:             "my-slug",
-		TaskID:           "task-1",
-		Iteration:        1,
-		MaxIterations:    3,
-		TraceID:          "trace-xyz",
-		Verdict:          "approved",
-		RejectionType:    "",
-		Feedback:         "Well done",
-		ValidationPassed: true,
-		FilesModified:    []string{"main.go"},
+		key: "task.my-slug.task-1",
+		TaskExecution: &workflow.TaskExecution{
+			EntityID:         "semspec.local.exec.task.run.my-slug-task-1",
+			Slug:             "my-slug",
+			TaskID:           "task-1",
+			Iteration:        1,
+			MaxIterations:    3,
+			TraceID:          "trace-xyz",
+			Verdict:          "approved",
+			RejectionType:    "",
+			Feedback:         "Well done",
+			ValidationPassed: true,
+			FilesModified:    []string{"main.go"},
+		},
 	}
 
 	entity := NewTaskExecutionEntity(exec)

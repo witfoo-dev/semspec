@@ -267,7 +267,16 @@ func (c *Component) Start(ctx context.Context) error {
 	c.initExecutionStore(ctx)
 
 	// Reconcile: recover in-flight executions from graph state.
+	// Also populates the execution store from KV or graph.
 	c.reconcileFromGraph(ctx)
+	if c.store != nil {
+		c.store.reconcile(ctx)
+	}
+
+	// Start mutation request/reply handlers (execution.mutation.*).
+	if err := c.startExecMutationHandler(ctx); err != nil {
+		c.logger.Warn("Failed to start execution mutation handlers", "error", err)
+	}
 
 	// shutdownCtx is used by awaitIndexing goroutines to detect component shutdown.
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -605,7 +614,7 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 			continue // Already complete — no recovery needed.
 		}
 
-		exec := &taskExecution{
+		state := &workflow.TaskExecution{
 			EntityID:       entityID,
 			Slug:           triples[wf.Slug],
 			TaskID:         triples[wf.TaskID],
@@ -618,22 +627,29 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 			BlueTeamID:     triples["workflow.execution.blue_team_id"],
 			WorktreePath:   triples[wf.WorktreePath],
 			WorktreeBranch: triples[wf.WorktreeBranch],
+			Stage:          phase,
 		}
-
 		if iter, ok := triples[wf.Iteration]; ok {
-			fmt.Sscanf(iter, "%d", &exec.Iteration)
+			fmt.Sscanf(iter, "%d", &state.Iteration)
 		}
 		if maxIter, ok := triples[wf.MaxIterations]; ok {
-			fmt.Sscanf(maxIter, "%d", &exec.MaxIterations)
+			fmt.Sscanf(maxIter, "%d", &state.MaxIterations)
+		}
+		exec := &taskExecution{
+			key:           workflow.TaskExecutionKey(state.Slug, state.TaskID),
+			TaskExecution: state,
 		}
 
 		c.activeExecutions.Store(entityID, exec)
+
+		// Also populate the execution store for KV observability.
+		c.syncToStore(reconcileCtx, exec)
 		recovered++
 
 		c.logger.Info("Recovered execution from graph",
 			"entity_id", entityID,
 			"slug", exec.Slug,
-			"phase", phase,
+			"stage", phase,
 			"iteration", exec.Iteration,
 		)
 	}
@@ -713,22 +729,25 @@ func (c *Component) buildExecution(ctx context.Context, trigger *workflow.Trigge
 	)
 
 	exec := &taskExecution{
-		EntityID:         entityID,
-		Slug:             trigger.Slug,
-		TaskID:           trigger.TaskID,
-		Iteration:        0,
-		MaxIterations:    c.config.MaxIterations,
-		Title:            trigger.Title,
-		Description:      trigger.Description,
-		ProjectID:        trigger.ProjectID,
-		Prompt:           trigger.Prompt,
-		Model:            trigger.Model,
+		key: workflow.TaskExecutionKey(trigger.Slug, trigger.TaskID),
+		TaskExecution: &workflow.TaskExecution{
+			EntityID:       entityID,
+			Slug:           trigger.Slug,
+			TaskID:         trigger.TaskID,
+			Iteration:      0,
+			MaxIterations:  c.config.MaxIterations,
+			Title:          trigger.Title,
+			Description:    trigger.Description,
+			ProjectID:      trigger.ProjectID,
+			Prompt:         trigger.Prompt,
+			Model:          trigger.Model,
+			TraceID:        trigger.TraceID,
+			LoopID:         trigger.LoopID,
+			RequestID:      trigger.RequestID,
+			ScenarioBranch: trigger.ScenarioBranch,
+			TaskType:       trigger.TaskType,
+		},
 		ContextRequestID: trigger.ContextRequestID,
-		TraceID:          trigger.TraceID,
-		LoopID:           trigger.LoopID,
-		RequestID:        trigger.RequestID,
-		ScenarioBranch:   trigger.ScenarioBranch,
-		TaskType:         trigger.TaskType,
 	}
 
 	// Resolve persistent agent for this execution (Phase B).
@@ -765,14 +784,12 @@ func (c *Component) buildExecution(ctx context.Context, trigger *workflow.Trigge
 // This provides observable state for downstream watchers and restart recovery.
 // Caller must hold exec.mu (or ensure exclusive access).
 func (c *Component) syncToStore(ctx context.Context, exec *taskExecution) {
-	if c.store == nil {
+	if c.store == nil || exec.TaskExecution == nil {
 		return
 	}
-	key := workflow.TaskExecutionKey(exec.Slug, exec.TaskID)
-	state := exec.toState()
-	if err := c.store.saveTask(ctx, key, state); err != nil {
+	if err := c.store.saveTask(ctx, exec.key, exec.TaskExecution); err != nil {
 		c.logger.Warn("Failed to sync execution to store",
-			"key", key, "stage", exec.Stage, "error", err)
+			"key", exec.key, "stage", exec.Stage, "error", err)
 	}
 }
 

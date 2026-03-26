@@ -8,184 +8,45 @@ import (
 	"github.com/c360studio/semspec/workflow/payloads"
 )
 
-// taskExecution holds in-memory state for a single task execution pipeline.
-// Keyed by entityID (semspec.local.exec.task.run.<slug>-<taskID>) in the
-// component's activeExecutions sync.Map.
+// taskExecution holds the live runtime state for a single task execution.
+// Embeds *workflow.TaskExecution for all persistent fields — the store
+// owns the embedded struct. Runtime-only fields (mu, terminated, timeout,
+// raw LLM outputs) live here and are not persisted to KV.
 //
-// All field access must be guarded by mu. The sync.Map protects map operations,
-// but the struct itself is shared across goroutines.
+// All field access must be guarded by mu.
 type taskExecution struct {
-	mu sync.Mutex
-
-	// terminated is set to true when the execution reaches a terminal state
-	// (approved, escalated, or error). Guards against double-terminal-writes
-	// when timeout and completion events race.
+	mu         sync.Mutex
 	terminated bool
+	key        string // EXECUTION_STATES KV key: task.<slug>.<taskID>
 
-	// EntityID is the canonical graph entity ID:
-	// semspec.local.exec.task.run.<slug>-<taskID>
-	EntityID string
+	// Persistent state — owned by the execution store.
+	// Field access via embedding: exec.Slug, exec.Stage, exec.Iteration, etc.
+	*workflow.TaskExecution
 
-	// Slug is the plan slug.
-	Slug string
+	// --- Runtime-only fields (not persisted to KV) ---
 
-	// TaskID is the task identifier from the plan.
-	TaskID string
-
-	// Iteration tracks how many developer→validate→review cycles have completed
-	// (0-based). Compared against MaxIterations to decide retry or escalate.
-	Iteration int
-
-	// MaxIterations is the per-execution budget from Config.MaxIterations.
-	MaxIterations int
-
-	// --- Fields from the original trigger ---
-
-	Title            string
-	Description      string
-	ProjectID        string
-	Prompt           string // Complete developer prompt with inline context
-	Model            string
+	// Context request ID from the original trigger.
 	ContextRequestID string
-	TraceID          string
-	LoopID           string
-	RequestID        string
 
-	// --- Tester output (populated after tester completes) ---
-
-	TesterTaskID string
-	TesterOutput json.RawMessage
-	TestsPassed  bool
-
-	// --- Builder output (populated after builder completes) ---
-
-	BuilderTaskID        string
-	BuilderOutput        json.RawMessage
-	BuilderLLMRequestIDs []string
-
-	// --- Developer output (populated after developer completes; kept for backward compat) ---
-
-	FilesModified          []string
+	// Raw LLM outputs (large blobs, not worth persisting to KV).
+	TesterOutput           json.RawMessage
+	BuilderOutput          json.RawMessage
+	BuilderLLMRequestIDs   []string
 	DeveloperOutput        json.RawMessage
 	DeveloperLLMRequestIDs []string
+	ValidationResults      []payloads.CheckResult
+	ReviewerLLMRequestIDs  []string
 
-	// --- Validator output (populated after validator completes) ---
-
-	ValidationPassed  bool
-	ValidationResults []payloads.CheckResult
-
-	// --- Reviewer output (populated after reviewer completes) ---
-
-	Verdict               string // "approved" or "rejected"
-	RejectionType         string // "fixable", "misscoped", "architectural", "too_big"
-	Feedback              string
-	ReviewerLLMRequestIDs []string
-
-	// --- Task IDs for routing loop-completion events ---
-
-	DeveloperTaskID string
-	ValidatorTaskID string
-	ReviewerTaskID  string
-
-	// --- Task type (pipeline selection) ---
-
-	// TaskType determines which execution pipeline to use.
-	// Default (empty or "implement"): Tester → Builder → Validator → Reviewer
-	TaskType workflow.TaskType
-
-	// --- Persistent agent identity (Phase B) ---
-
-	// AgentID is the persistent agent ID assigned to this execution.
-	// Set during initial trigger handling via SelectAgent; may change on
-	// benching if a replacement agent is selected.
-	AgentID string
-
-	// --- Sandbox worktree (persists across retries) ---
-
-	// WorktreePath is the filesystem path of the worktree on the sandbox server.
-	// Set once during initial dispatch; never cleared on retry.
-	WorktreePath string
-
-	// WorktreeBranch is the git branch name for this worktree (e.g. "agent/<taskID>").
-	// Set once during initial dispatch; never cleared on retry.
-	WorktreeBranch string
-
-	// ScenarioBranch is the scenario branch this task merges into
-	// (e.g. "semspec/scenario-auth-refresh"). Set from the trigger payload.
-	ScenarioBranch string
-
-	// --- Team-mode fields (populated when teams are enabled) ---
-
-	// BlueTeamID is the team that did the implementation.
-	BlueTeamID string
-
-	// RedTeamID is the team that challenges the implementation.
-	RedTeamID string
-
-	// RedTeamAgentID is the specific agent from the red team doing the critique.
-	RedTeamAgentID string
-
-	// RedTeamTaskID is used for routing red-team loop completion events.
-	RedTeamTaskID string
-
-	// RedTeamChallenge holds the parsed red team challenge result.
+	// Red team runtime state.
+	RedTeamAgentID   string
 	RedTeamChallenge *payloads.RedTeamChallengeResult
-
-	// RedTeamKnowledge holds the team knowledge block pre-built for red team
-	// dispatch. Stored here because agentic.TaskMessage has no prompt field;
-	// future wiring will pass this via a dedicated RedTeamRequest payload.
-	// TODO: introduce RedTeamRequest payload and inject RedTeamKnowledge there.
 	RedTeamKnowledge string
 
-	// Stage tracks the current TDD pipeline stage for this execution.
-	// Updated alongside the in-memory state transitions so toState() can extract it.
-	Stage string
-
-	// timeoutTimer holds the per-execution timeout.
+	// Timeout management.
 	timeoutTimer *timeoutHandle
 }
 
 // timeoutHandle wraps a timer reference so it can be stopped on completion.
 type timeoutHandle struct {
 	stop func()
-}
-
-// toState extracts persistent fields into a KV-serializable TaskExecution.
-// Must be called while holding exec.mu.
-func (e *taskExecution) toState() *workflow.TaskExecution {
-	return &workflow.TaskExecution{
-		EntityID:         e.EntityID,
-		Slug:             e.Slug,
-		TaskID:           e.TaskID,
-		Stage:            e.Stage,
-		Iteration:        e.Iteration,
-		MaxIterations:    e.MaxIterations,
-		Title:            e.Title,
-		Description:      e.Description,
-		ProjectID:        e.ProjectID,
-		Prompt:           e.Prompt,
-		Model:            e.Model,
-		TraceID:          e.TraceID,
-		LoopID:           e.LoopID,
-		RequestID:        e.RequestID,
-		TaskType:         e.TaskType,
-		AgentID:          e.AgentID,
-		BlueTeamID:       e.BlueTeamID,
-		RedTeamID:        e.RedTeamID,
-		WorktreePath:     e.WorktreePath,
-		WorktreeBranch:   e.WorktreeBranch,
-		ScenarioBranch:   e.ScenarioBranch,
-		FilesModified:    e.FilesModified,
-		TestsPassed:      e.TestsPassed,
-		ValidationPassed: e.ValidationPassed,
-		TesterTaskID:     e.TesterTaskID,
-		BuilderTaskID:    e.BuilderTaskID,
-		DeveloperTaskID:  e.DeveloperTaskID,
-		ValidatorTaskID:  e.ValidatorTaskID,
-		ReviewerTaskID:   e.ReviewerTaskID,
-		RedTeamTaskID:    e.RedTeamTaskID,
-		Verdict:          e.Verdict,
-		RejectionType:    e.RejectionType,
-		Feedback:         e.Feedback,
-	}
 }
