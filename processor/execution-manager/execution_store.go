@@ -243,55 +243,57 @@ func (s *executionStore) reconcile(ctx context.Context) {
 	if s.tripleWriter == nil {
 		return
 	}
+	s.reconcileTasksFromGraph(reconcileCtx)
+	s.reconcileReqsFromGraph(reconcileCtx)
+}
 
-	// Task executions
-	taskPrefix := workflow.EntityPrefix() + ".exec.task.run."
-	taskEntities, err := s.tripleWriter.ReadEntitiesByPrefix(reconcileCtx, taskPrefix, 500)
+// reconcileTasksFromGraph loads active task executions from graph triples.
+func (s *executionStore) reconcileTasksFromGraph(ctx context.Context) {
+	prefix := workflow.EntityPrefix() + ".exec.task.run."
+	entities, err := s.tripleWriter.ReadEntitiesByPrefix(ctx, prefix, 500)
 	if err != nil {
 		s.logger.Warn("Task execution reconciliation from graph failed", "error", err)
-	} else {
-		tasks := 0
-		for _, triples := range taskEntities {
-			phase := triples[wf.Phase]
-			if workflow.IsTerminalTaskStage(phase) {
-				continue
-			}
-			exec := taskFromTripleMap(triples)
-			if exec.Slug == "" || exec.TaskID == "" {
-				continue
-			}
-			key := workflow.TaskExecutionKey(exec.Slug, exec.TaskID)
-			s.taskCache.Set(key, exec) //nolint:errcheck
-			tasks++
-		}
-		if tasks > 0 {
-			s.logger.Info("Task executions reconciled from graph", "count", tasks)
-		}
+		return
 	}
+	count := 0
+	for _, triples := range entities {
+		if workflow.IsTerminalTaskStage(triples[wf.Phase]) {
+			continue
+		}
+		exec := taskFromTripleMap(triples)
+		if exec.Slug == "" || exec.TaskID == "" {
+			continue
+		}
+		s.taskCache.Set(workflow.TaskExecutionKey(exec.Slug, exec.TaskID), exec) //nolint:errcheck
+		count++
+	}
+	if count > 0 {
+		s.logger.Info("Task executions reconciled from graph", "count", count)
+	}
+}
 
-	// Requirement executions
-	reqPrefix := workflow.EntityPrefix() + ".exec.req.run."
-	reqEntities, err := s.tripleWriter.ReadEntitiesByPrefix(reconcileCtx, reqPrefix, 500)
+// reconcileReqsFromGraph loads active requirement executions from graph triples.
+func (s *executionStore) reconcileReqsFromGraph(ctx context.Context) {
+	prefix := workflow.EntityPrefix() + ".exec.req.run."
+	entities, err := s.tripleWriter.ReadEntitiesByPrefix(ctx, prefix, 500)
 	if err != nil {
 		s.logger.Warn("Req execution reconciliation from graph failed", "error", err)
-	} else {
-		reqs := 0
-		for _, triples := range reqEntities {
-			phase := triples[wf.Phase]
-			if workflow.IsTerminalReqStage(phase) {
-				continue
-			}
-			exec := reqFromTripleMap(triples)
-			if exec.Slug == "" || exec.RequirementID == "" {
-				continue
-			}
-			key := workflow.RequirementExecutionKey(exec.Slug, exec.RequirementID)
-			s.reqCache.Set(key, exec) //nolint:errcheck
-			reqs++
+		return
+	}
+	count := 0
+	for _, triples := range entities {
+		if workflow.IsTerminalReqStage(triples[wf.Phase]) {
+			continue
 		}
-		if reqs > 0 {
-			s.logger.Info("Req executions reconciled from graph", "count", reqs)
+		exec := reqFromTripleMap(triples)
+		if exec.Slug == "" || exec.RequirementID == "" {
+			continue
 		}
+		s.reqCache.Set(workflow.RequirementExecutionKey(exec.Slug, exec.RequirementID), exec) //nolint:errcheck
+		count++
+	}
+	if count > 0 {
+		s.logger.Info("Req executions reconciled from graph", "count", count)
 	}
 }
 
@@ -404,15 +406,15 @@ func (s *executionStore) writeReqTriples(ctx context.Context, exec *workflow.Req
 
 func taskFromTripleMap(triples map[string]string) *workflow.TaskExecution {
 	exec := &workflow.TaskExecution{
-		Slug:    triples[wf.Slug],
-		TaskID:  triples[wf.TaskID],
-		Stage:   triples[wf.Phase],
-		Title:   triples[wf.Title],
-		ProjectID: triples[wf.ProjectID],
-		TraceID:   triples[wf.TraceID],
-		Model:     triples["workflow.execution.model"],
-		AgentID:   triples["workflow.execution.agent_id"],
-		BlueTeamID: triples["workflow.execution.blue_team_id"],
+		Slug:           triples[wf.Slug],
+		TaskID:         triples[wf.TaskID],
+		Stage:          triples[wf.Phase],
+		Title:          triples[wf.Title],
+		ProjectID:      triples[wf.ProjectID],
+		TraceID:        triples[wf.TraceID],
+		Model:          triples["workflow.execution.model"],
+		AgentID:        triples["workflow.execution.agent_id"],
+		BlueTeamID:     triples["workflow.execution.blue_team_id"],
 		WorktreePath:   triples[wf.WorktreePath],
 		WorktreeBranch: triples[wf.WorktreeBranch],
 	}
