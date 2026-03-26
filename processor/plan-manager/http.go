@@ -754,42 +754,23 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 		}
 	}
 
-	// Determine which round this promote advances.
-	// Round 1: no requirements yet → trigger requirement/scenario generation.
-	// Round 2: requirements+scenarios exist → plan is ready for execution.
-	// This runs regardless of Approved flag since promote serves both rounds.
-	// Cancel any active coordination for this slug — the human has taken over.
-	c.coordinator.Cancel(slug, "plan promoted via REST API")
-
+	// The plan is now approved. The coordinator's KV watcher sees the status
+	// change and drives the pipeline forward (requirement generation → scenario
+	// generation → review). No manual dispatch needed — the KV write IS the event.
+	//
+	// For round 2 (requirements+scenarios already exist), check if we need to
+	// advance to ready_for_execution.
 	requirements := c.requirements.listByPlan(slug)
 	scenarios := c.scenarios.listByPlan(slug, c.requirements)
 
-	switch {
-	case len(requirements) == 0:
-		// Round 1 — plan approved, start requirement/scenario generation.
-		// Goal must be set (by coordinator synthesis or manual PATCH) before generation.
-		if plan.Goal == "" {
-			http.Error(w, "Plan must have a goal before requirement generation — wait for synthesis to complete or set goal via PATCH", http.StatusConflict)
-			return
-		}
-		c.logger.Info("Round 1 human approval: triggering requirement generation", "slug", slug)
-		c.triggerRequirementGeneration(r.Context(), plan)
-
-	case len(scenarios) == 0:
-		// Requirements exist but no scenarios — cascade in progress, nothing to do.
-		c.logger.Info("Requirements exist but scenarios pending — cascade in progress", "slug", slug)
-
-	case plan.Status == workflow.StatusReadyForExecution || plan.Status == workflow.StatusImplementing:
-		// Already advanced — idempotent.
-		c.logger.Debug("Plan already at or past ready_for_execution", "slug", slug)
-
-	default:
-		// Round 2 — requirements+scenarios exist, mark ready for execution.
-		c.logger.Info("Round 2 human approval: plan ready for execution", "slug", slug)
-		if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusReadyForExecution); err != nil {
-			c.logger.Error("Failed to set plan ready for execution", "slug", slug, "error", err)
-			http.Error(w, "Failed to update plan status", http.StatusInternalServerError)
-			return
+	if len(requirements) > 0 && len(scenarios) > 0 {
+		if plan.Status != workflow.StatusReadyForExecution && plan.Status != workflow.StatusImplementing {
+			c.logger.Info("Round 2 human approval: plan ready for execution", "slug", slug)
+			if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusReadyForExecution); err != nil {
+				c.logger.Error("Failed to set plan ready for execution", "slug", slug, "error", err)
+				http.Error(w, "Failed to update plan status", http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 

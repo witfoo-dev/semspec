@@ -503,6 +503,13 @@ func (co *coordinator) watchPlanStateForCoordination(ctx context.Context, exec *
 			}
 
 			switch plan.EffectiveStatus() {
+			case workflow.StatusApproved:
+				// Plan was approved (by coordinator review OR human promote).
+				// Dispatch requirement-generator if we haven't already.
+				if exec.CurrentPhase == phaseApproved || exec.CurrentPhase == phaseAwaitingHuman {
+					co.logger.Info("KV watch: plan approved, dispatching requirement generation", "slug", exec.Slug)
+					co.dispatchRequirementGeneratorLocked(ctx, exec)
+				}
 			case workflow.StatusRequirementsGenerated:
 				if exec.CurrentPhase == phaseGeneratingRequirements {
 					co.cancelPhaseTimerLocked(exec)

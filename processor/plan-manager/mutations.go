@@ -104,7 +104,7 @@ func (c *Component) handleRequirementsMutation(ctx context.Context, data []byte)
 	}
 
 	// Advance plan status → requirements_generated.
-	// The KV write in plan store triggers watchers (coordinator, SSE).
+	// The KV write IS the event — watchers (coordinator, SSE) react automatically.
 	if plan, ok := ps.get(req.Slug); ok {
 		if err := ps.setStatus(ctx, plan.Slug, workflow.StatusRequirementsGenerated); err != nil {
 			c.logger.Debug("Failed to advance plan to requirements_generated",
