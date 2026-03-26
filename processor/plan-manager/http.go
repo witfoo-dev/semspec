@@ -767,6 +767,11 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 	switch {
 	case len(requirements) == 0:
 		// Round 1 — plan approved, start requirement/scenario generation.
+		// Goal must be set (by coordinator synthesis or manual PATCH) before generation.
+		if plan.Goal == "" {
+			http.Error(w, "Plan must have a goal before requirement generation — wait for synthesis to complete or set goal via PATCH", http.StatusConflict)
+			return
+		}
 		c.logger.Info("Round 1 human approval: triggering requirement generation", "slug", slug)
 		c.triggerRequirementGeneration(r.Context(), plan)
 

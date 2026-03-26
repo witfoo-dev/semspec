@@ -351,13 +351,7 @@ func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.
 	}
 
 	if goal == "" {
-		// Fallback: use the plan title as the goal when the coordinator hasn't
-		// synthesized Goal/Context yet (e.g. human promote before synthesis).
-		goal = trigger.Title
-		if goal == "" {
-			return nil, fmt.Errorf("trigger missing both goal and title for plan %q", trigger.Slug)
-		}
-		c.logger.Debug("Using plan title as goal fallback", "slug", trigger.Slug)
+		return nil, fmt.Errorf("trigger missing goal for plan %q — plan must have Goal set before requirement generation", trigger.Slug)
 	}
 
 	// Build a minimal plan stub so the prompt functions work unchanged.
