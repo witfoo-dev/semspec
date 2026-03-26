@@ -49,9 +49,10 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 			continue
 		}
 
-		c.logger.Info("KV trigger: generating scenarios",
-			"slug", plan.Slug,
-			"requirement_count", len(plan.Requirements))
+		// Claim the plan to prevent re-trigger on partial scenario saves.
+		if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusGeneratingScenarios, c.logger) {
+			continue
+		}
 
 		go c.generateScenariosFromKV(ctx, &plan)
 	}

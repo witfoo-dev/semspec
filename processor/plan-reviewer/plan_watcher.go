@@ -85,8 +85,10 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 					"slug", plan.Slug)
 				continue
 			}
-			c.logger.Info("KV trigger: plan drafted, starting round 1 review",
-				"slug", plan.Slug)
+			// Claim the plan to prevent re-trigger on KV replay or concurrent watchers.
+			if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusReviewingDraft, c.logger) {
+				continue
+			}
 			go c.reviewFromKV(ctx, &plan, roundDraftReview)
 
 		case workflow.StatusScenariosGenerated:
@@ -95,10 +97,10 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 					"slug", plan.Slug)
 				continue
 			}
-			c.logger.Info("KV trigger: scenarios generated, starting round 2 review",
-				"slug", plan.Slug,
-				"requirement_count", len(plan.Requirements),
-				"scenario_count", len(plan.Scenarios))
+			// Claim the plan to prevent re-trigger on KV replay or concurrent watchers.
+			if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusReviewingScenarios, c.logger) {
+				continue
+			}
 			go c.reviewFromKV(ctx, &plan, roundScenariosReview)
 		}
 	}

@@ -74,8 +74,10 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 			continue
 		}
 
-		c.logger.Info("KV trigger: plan approved, generating requirements",
-			"slug", plan.Slug)
+		// Claim the plan to prevent re-trigger on KV replay or concurrent watchers.
+		if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusGeneratingRequirements, c.logger) {
+			continue
+		}
 
 		// Dispatch in a goroutine so the watcher loop is never blocked by LLM
 		// calls. The generation function handles its own error logging and

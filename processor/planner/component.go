@@ -239,8 +239,10 @@ func (c *Component) watchPlanStates(ctx context.Context) {
 				continue
 			}
 
-			c.logger.Info("PLAN_STATES trigger: new plan detected, starting planning pipeline",
-				"slug", plan.Slug, "title", plan.Title)
+			// Claim the plan to prevent re-trigger on KV replay or concurrent watchers.
+			if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusDrafting, c.logger) {
+				continue
+			}
 
 			go c.processNewPlan(ctx, plan.Slug, plan.Title)
 		}

@@ -20,6 +20,7 @@ const (
 	mutationScenariosGenerated    = "plan.mutation.scenarios.generated"
 	mutationReadyForExecution     = "plan.mutation.ready_for_execution"
 	mutationGenerationFailed      = "plan.mutation.generation.failed"
+	mutationClaim                 = "plan.mutation.claim"
 )
 
 // Mutation request types — these are the payloads generators send via request/reply.
@@ -76,6 +77,14 @@ type ReadyForExecutionMutationRequest struct {
 	TraceID string `json:"trace_id,omitempty"`
 }
 
+// ClaimMutationRequest is sent by watchers to atomically claim a plan for processing.
+// The target status must be an in-progress status (IsInProgress() == true).
+// Plan-manager's single-writer serialization ensures only one claim succeeds.
+type ClaimMutationRequest struct {
+	Slug   string          `json:"slug"`
+	Status workflow.Status `json:"status"`
+}
+
 // MutationResponse is the reply to all mutation requests.
 type MutationResponse struct {
 	Success bool   `json:"success"`
@@ -101,6 +110,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationScenariosGenerated, c.handleScenariosMutation},
 		{mutationReadyForExecution, c.handleReadyForExecutionMutation},
 		{mutationGenerationFailed, c.handleGenerationFailedMutation},
+		{mutationClaim, c.handleClaimMutation},
 	}
 
 	for _, s := range subjects {
@@ -353,6 +363,34 @@ func (c *Component) handleApprovedMutation(ctx context.Context, data []byte) Mut
 	}
 
 	c.logger.Info("Plan approved via mutation", "slug", req.Slug)
+	return MutationResponse{Success: true}
+}
+
+// handleClaimMutation atomically transitions a plan to an in-progress status.
+// Used by watchers to claim a plan before starting work. Only one claim succeeds
+// per transition — subsequent claims fail because the plan is already at the
+// intermediate status, making the transition invalid.
+func (c *Component) handleClaimMutation(ctx context.Context, data []byte) MutationResponse {
+	var req ClaimMutationRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" || req.Status == "" {
+		return MutationResponse{Success: false, Error: "slug and status required"}
+	}
+	if !req.Status.IsInProgress() {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("can only claim in-progress statuses, got %q", req.Status)}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	if err := ps.setStatus(ctx, req.Slug, req.Status); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("claim: %v", err)}
+	}
+
+	c.logger.Info("Plan claimed via mutation", "slug", req.Slug, "status", req.Status)
 	return MutationResponse{Success: true}
 }
 

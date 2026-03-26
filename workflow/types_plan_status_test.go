@@ -20,6 +20,12 @@ func TestPlanStatus_IsValid_NewStatuses(t *testing.T) {
 		{StatusComplete, true},
 		{StatusArchived, true},
 		{StatusRejected, true},
+		// In-progress statuses
+		{StatusDrafting, true},
+		{StatusReviewingDraft, true},
+		{StatusGeneratingRequirements, true},
+		{StatusGeneratingScenarios, true},
+		{StatusReviewingScenarios, true},
 		// Invalid
 		{"", false},
 		{"unknown", false},
@@ -69,12 +75,91 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		{StatusScenariosGenerated, StatusRejected, true},
 		// scenarios_generated -> requirements_generated (invalid)
 		{StatusScenariosGenerated, StatusRequirementsGenerated, false},
+
+		// In-progress claim transitions
+		// created -> drafting (planner claims)
+		{StatusCreated, StatusDrafting, true},
+		// drafting -> drafted (planner finishes)
+		{StatusDrafting, StatusDrafted, true},
+		// drafting -> rejected (planner fails)
+		{StatusDrafting, StatusRejected, true},
+		// drafting -> drafting (second claim — invalid)
+		{StatusDrafting, StatusDrafting, false},
+
+		// drafted -> reviewing_draft (plan-reviewer R1 claims)
+		{StatusDrafted, StatusReviewingDraft, true},
+		// reviewing_draft -> reviewed (review finishes)
+		{StatusReviewingDraft, StatusReviewed, true},
+		// reviewing_draft -> rejected (review fails)
+		{StatusReviewingDraft, StatusRejected, true},
+		// reviewing_draft -> reviewing_draft (second claim — invalid)
+		{StatusReviewingDraft, StatusReviewingDraft, false},
+
+		// approved -> generating_requirements (requirement-generator claims)
+		{StatusApproved, StatusGeneratingRequirements, true},
+		// generating_requirements -> requirements_generated
+		{StatusGeneratingRequirements, StatusRequirementsGenerated, true},
+		// generating_requirements -> rejected
+		{StatusGeneratingRequirements, StatusRejected, true},
+		// generating_requirements -> generating_requirements (second claim — invalid)
+		{StatusGeneratingRequirements, StatusGeneratingRequirements, false},
+
+		// requirements_generated -> generating_scenarios (scenario-generator claims)
+		{StatusRequirementsGenerated, StatusGeneratingScenarios, true},
+		// generating_scenarios -> scenarios_generated
+		{StatusGeneratingScenarios, StatusScenariosGenerated, true},
+		// generating_scenarios -> rejected
+		{StatusGeneratingScenarios, StatusRejected, true},
+		// generating_scenarios -> generating_scenarios (second claim — invalid)
+		{StatusGeneratingScenarios, StatusGeneratingScenarios, false},
+
+		// scenarios_generated -> reviewing_scenarios (plan-reviewer R2 claims)
+		{StatusScenariosGenerated, StatusReviewingScenarios, true},
+		// reviewing_scenarios -> reviewed
+		{StatusReviewingScenarios, StatusReviewed, true},
+		// reviewing_scenarios -> ready_for_execution
+		{StatusReviewingScenarios, StatusReadyForExecution, true},
+		// reviewing_scenarios -> rejected
+		{StatusReviewingScenarios, StatusRejected, true},
+		// reviewing_scenarios -> reviewing_scenarios (second claim — invalid)
+		{StatusReviewingScenarios, StatusReviewingScenarios, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(string(tt.from)+"->"+string(tt.to), func(t *testing.T) {
 			if got := tt.from.CanTransitionTo(tt.to); got != tt.want {
 				t.Errorf("(%q).CanTransitionTo(%q) = %v, want %v", tt.from, tt.to, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlanStatus_IsInProgress(t *testing.T) {
+	tests := []struct {
+		status Status
+		want   bool
+	}{
+		{StatusDrafting, true},
+		{StatusReviewingDraft, true},
+		{StatusGeneratingRequirements, true},
+		{StatusGeneratingScenarios, true},
+		{StatusReviewingScenarios, true},
+		// Non-in-progress statuses
+		{StatusCreated, false},
+		{StatusDrafted, false},
+		{StatusApproved, false},
+		{StatusRequirementsGenerated, false},
+		{StatusScenariosGenerated, false},
+		{StatusReadyForExecution, false},
+		{StatusImplementing, false},
+		{StatusComplete, false},
+		{StatusRejected, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			if got := tt.status.IsInProgress(); got != tt.want {
+				t.Errorf("Status(%q).IsInProgress() = %v, want %v", tt.status, got, tt.want)
 			}
 		})
 	}

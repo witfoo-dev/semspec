@@ -52,6 +52,21 @@ const (
 	StatusArchived Status = "archived"
 	// StatusRejected indicates the plan was rejected during review or approval.
 	StatusRejected Status = "rejected"
+
+	// In-progress statuses — claimed by watchers via plan.mutation.claim before
+	// starting work. Plan-manager's single-writer serialization ensures only one
+	// claim succeeds per transition. Prevents KV watcher re-triggers on partial saves.
+
+	// StatusDrafting indicates a planner has claimed plan creation.
+	StatusDrafting Status = "drafting"
+	// StatusReviewingDraft indicates plan-reviewer R1 has claimed the drafted plan.
+	StatusReviewingDraft Status = "reviewing_draft"
+	// StatusGeneratingRequirements indicates requirement-generator has claimed the approved plan.
+	StatusGeneratingRequirements Status = "generating_requirements"
+	// StatusGeneratingScenarios indicates scenario-generator has claimed requirements_generated.
+	StatusGeneratingScenarios Status = "generating_scenarios"
+	// StatusReviewingScenarios indicates plan-reviewer R2 has claimed scenarios_generated.
+	StatusReviewingScenarios Status = "reviewing_scenarios"
 )
 
 // String returns the string representation of the status.
@@ -65,7 +80,21 @@ func (s Status) IsValid() bool {
 	case StatusCreated, StatusDrafted, StatusReviewed, StatusApproved,
 		StatusRequirementsGenerated, StatusScenariosGenerated,
 		StatusReadyForExecution,
-		StatusImplementing, StatusReviewingRollup, StatusComplete, StatusArchived, StatusRejected:
+		StatusImplementing, StatusReviewingRollup, StatusComplete, StatusArchived, StatusRejected,
+		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
+		StatusGeneratingScenarios, StatusReviewingScenarios:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsInProgress returns true if the status is an intermediate in-progress state
+// claimed by a watcher before starting work.
+func (s Status) IsInProgress() bool {
+	switch s {
+	case StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
+		StatusGeneratingScenarios, StatusReviewingScenarios:
 		return true
 	default:
 		return false
@@ -76,27 +105,40 @@ func (s Status) IsValid() bool {
 func (s Status) CanTransitionTo(target Status) bool {
 	switch s {
 	case StatusCreated:
+		return target == StatusDrafting || target == StatusDrafted || target == StatusRejected
+	case StatusDrafting:
 		return target == StatusDrafted || target == StatusRejected
 	case StatusDrafted:
+		// drafted → reviewing_draft (plan-reviewer R1 claims)
 		// drafted → requirements_generated (new flow: req/scenario gen happens before review)
 		// drafted → reviewed (legacy: review directly after drafting)
 		// drafted → rejected (rejection at any stage)
-		return target == StatusRequirementsGenerated || target == StatusReviewed || target == StatusRejected
+		return target == StatusReviewingDraft || target == StatusRequirementsGenerated || target == StatusReviewed || target == StatusRejected
+	case StatusReviewingDraft:
+		return target == StatusReviewed || target == StatusRejected
 	case StatusReviewed:
 		return target == StatusApproved || target == StatusRejected
 	case StatusApproved:
+		// approved → generating_requirements (requirement-generator claims)
 		// approved → requirements_generated (auto-cascade: generate requirements)
 		// approved → scenarios_generated (auto-cascade race: requirements existed, skip to scenarios)
 		// approved → ready_for_execution (auto-approve skips req/scenario step)
 		// approved → rejected (review loop escalation)
-		return target == StatusRequirementsGenerated || target == StatusScenariosGenerated ||
+		return target == StatusGeneratingRequirements || target == StatusRequirementsGenerated || target == StatusScenariosGenerated ||
 			target == StatusReadyForExecution || target == StatusRejected
+	case StatusGeneratingRequirements:
+		return target == StatusRequirementsGenerated || target == StatusRejected
 	case StatusRequirementsGenerated:
+		return target == StatusGeneratingScenarios || target == StatusScenariosGenerated || target == StatusRejected
+	case StatusGeneratingScenarios:
 		return target == StatusScenariosGenerated || target == StatusRejected
 	case StatusScenariosGenerated:
+		// scenarios_generated → reviewing_scenarios (plan-reviewer R2 claims)
 		// scenarios_generated → reviewed (review happens after scenario generation)
 		// scenarios_generated → ready_for_execution (reactive mode — task-generator reactive_mode=true, review skipped)
 		// scenarios_generated → rejected (validation failure)
+		return target == StatusReviewingScenarios || target == StatusReviewed || target == StatusReadyForExecution || target == StatusRejected
+	case StatusReviewingScenarios:
 		return target == StatusReviewed || target == StatusReadyForExecution || target == StatusRejected
 	case StatusReadyForExecution:
 		// ready_for_execution → implementing (scenario orchestrator picks up the plan)
