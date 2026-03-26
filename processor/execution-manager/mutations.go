@@ -50,7 +50,7 @@ type TaskCreateRequest struct {
 // TaskPhaseRequest transitions a task execution to a new phase.
 type TaskPhaseRequest struct {
 	Key   string `json:"key"`   // KV key: task.<slug>.<taskID>
-	Phase string `json:"phase"` // target phase
+	Stage string `json:"stage"` // target phase
 	// Optional fields updated alongside the phase transition:
 	Iteration        *int     `json:"iteration,omitempty"`
 	Verdict          string   `json:"verdict,omitempty"`
@@ -73,7 +73,7 @@ type TaskPhaseRequest struct {
 // TaskCompleteRequest marks a task execution as terminally complete.
 type TaskCompleteRequest struct {
 	Key              string `json:"key"`
-	Phase            string `json:"phase"` // approved, escalated, error
+	Stage            string `json:"stage"` // approved, escalated, error
 	Verdict          string `json:"verdict,omitempty"`
 	Feedback         string `json:"feedback,omitempty"`
 	ErrorReason      string `json:"error_reason,omitempty"`
@@ -99,7 +99,7 @@ type ReqCreateRequest struct {
 // ReqPhaseRequest transitions a requirement execution to a new phase.
 type ReqPhaseRequest struct {
 	Key            string `json:"key"` // KV key: req.<slug>.<reqID>
-	Phase          string `json:"phase"`
+	Stage          string `json:"stage"`
 	NodeCount      *int   `json:"node_count,omitempty"`
 	CurrentNodeIdx *int   `json:"current_node_idx,omitempty"`
 	ReviewVerdict  string `json:"review_verdict,omitempty"`
@@ -126,7 +126,7 @@ type ReqNodeRequest struct {
 // ExecClaimRequest claims an execution for processing (intermediate status).
 type ExecClaimRequest struct {
 	Key    string `json:"key"`    // KV key
-	Phase  string `json:"phase"`  // target in-progress phase
+	Stage  string `json:"stage"`  // target in-progress stage
 }
 
 // ExecMutationResponse is the reply to all execution mutation requests.
@@ -204,7 +204,7 @@ func (c *Component) handleTaskCreateMutation(ctx context.Context, data []byte) E
 		EntityID:       workflow.TaskExecutionEntityID(req.Slug, req.TaskID),
 		Slug:           req.Slug,
 		TaskID:         req.TaskID,
-		Phase:          "testing", // initial phase
+		Stage:          "testing", // initial phase
 		Iteration:      0,
 		MaxIterations:  maxIter,
 		Title:          req.Title,
@@ -239,7 +239,7 @@ func (c *Component) handleTaskPhaseMutation(ctx context.Context, data []byte) Ex
 	if err := json.Unmarshal(data, &req); err != nil {
 		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
 	}
-	if req.Key == "" || req.Phase == "" {
+	if req.Key == "" || req.Stage == "" {
 		return ExecMutationResponse{Success: false, Error: "key and phase required"}
 	}
 
@@ -248,7 +248,7 @@ func (c *Component) handleTaskPhaseMutation(ctx context.Context, data []byte) Ex
 		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("task not found: %s", req.Key)}
 	}
 
-	exec.Phase = req.Phase
+	exec.Stage = req.Stage
 	if req.Iteration != nil {
 		exec.Iteration = *req.Iteration
 	}
@@ -300,7 +300,7 @@ func (c *Component) handleTaskPhaseMutation(ctx context.Context, data []byte) Ex
 		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
-	c.logger.Debug("Task phase updated via mutation", "key", req.Key, "phase", req.Phase)
+	c.logger.Debug("Task phase updated via mutation", "key", req.Key, "phase", req.Stage)
 	return ExecMutationResponse{Success: true}
 }
 
@@ -309,11 +309,11 @@ func (c *Component) handleTaskCompleteMutation(ctx context.Context, data []byte)
 	if err := json.Unmarshal(data, &req); err != nil {
 		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
 	}
-	if req.Key == "" || req.Phase == "" {
+	if req.Key == "" || req.Stage == "" {
 		return ExecMutationResponse{Success: false, Error: "key and phase required"}
 	}
-	if !workflow.IsTerminalTaskPhase(req.Phase) {
-		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("not a terminal phase: %s", req.Phase)}
+	if !workflow.IsTerminalTaskStage(req.Stage) {
+		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("not a terminal stage: %s", req.Stage)}
 	}
 
 	exec, ok := c.store.getTask(req.Key)
@@ -321,7 +321,7 @@ func (c *Component) handleTaskCompleteMutation(ctx context.Context, data []byte)
 		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("task not found: %s", req.Key)}
 	}
 
-	exec.Phase = req.Phase
+	exec.Stage = req.Stage
 	if req.Verdict != "" {
 		exec.Verdict = req.Verdict
 	}
@@ -340,7 +340,7 @@ func (c *Component) handleTaskCompleteMutation(ctx context.Context, data []byte)
 	}
 
 	c.logger.Info("Task execution completed via mutation",
-		"key", req.Key, "phase", req.Phase, "verdict", req.Verdict)
+		"key", req.Key, "phase", req.Stage, "verdict", req.Verdict)
 	return ExecMutationResponse{Success: true}
 }
 
@@ -368,7 +368,7 @@ func (c *Component) handleReqCreateMutation(ctx context.Context, data []byte) Ex
 		EntityID:       workflow.RequirementExecutionEntityID(req.Slug, req.RequirementID),
 		Slug:           req.Slug,
 		RequirementID:  req.RequirementID,
-		Phase:          "decomposing", // initial phase
+		Stage:          "decomposing", // initial phase
 		Title:          req.Title,
 		Description:    req.Description,
 		ProjectID:      req.ProjectID,
@@ -398,7 +398,7 @@ func (c *Component) handleReqPhaseMutation(ctx context.Context, data []byte) Exe
 	if err := json.Unmarshal(data, &req); err != nil {
 		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
 	}
-	if req.Key == "" || req.Phase == "" {
+	if req.Key == "" || req.Stage == "" {
 		return ExecMutationResponse{Success: false, Error: "key and phase required"}
 	}
 
@@ -407,7 +407,7 @@ func (c *Component) handleReqPhaseMutation(ctx context.Context, data []byte) Exe
 		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("req not found: %s", req.Key)}
 	}
 
-	exec.Phase = req.Phase
+	exec.Stage = req.Stage
 	if req.NodeCount != nil {
 		exec.NodeCount = *req.NodeCount
 	}
@@ -443,7 +443,7 @@ func (c *Component) handleReqPhaseMutation(ctx context.Context, data []byte) Exe
 		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
-	c.logger.Debug("Req phase updated via mutation", "key", req.Key, "phase", req.Phase)
+	c.logger.Debug("Req phase updated via mutation", "key", req.Key, "phase", req.Stage)
 	return ExecMutationResponse{Success: true}
 }
 
@@ -488,32 +488,32 @@ func (c *Component) handleExecClaimMutation(ctx context.Context, data []byte) Ex
 	if err := json.Unmarshal(data, &req); err != nil {
 		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
 	}
-	if req.Key == "" || req.Phase == "" {
+	if req.Key == "" || req.Stage == "" {
 		return ExecMutationResponse{Success: false, Error: "key and phase required"}
 	}
 
 	// Try task first, then req
 	if exec, ok := c.store.getTask(req.Key); ok {
-		if exec.Phase == req.Phase {
-			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("already at phase %s", req.Phase)}
+		if exec.Stage == req.Stage {
+			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("already at stage %s", req.Stage)}
 		}
-		exec.Phase = req.Phase
+		exec.Stage = req.Stage
 		if err := c.store.saveTask(ctx, req.Key, exec); err != nil {
 			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 		}
-		c.logger.Info("Execution claimed via mutation", "key", req.Key, "phase", req.Phase)
+		c.logger.Info("Execution claimed via mutation", "key", req.Key, "phase", req.Stage)
 		return ExecMutationResponse{Success: true}
 	}
 
 	if exec, ok := c.store.getReq(req.Key); ok {
-		if exec.Phase == req.Phase {
-			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("already at phase %s", req.Phase)}
+		if exec.Stage == req.Stage {
+			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("already at stage %s", req.Stage)}
 		}
-		exec.Phase = req.Phase
+		exec.Stage = req.Stage
 		if err := c.store.saveReq(ctx, req.Key, exec); err != nil {
 			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 		}
-		c.logger.Info("Execution claimed via mutation", "key", req.Key, "phase", req.Phase)
+		c.logger.Info("Execution claimed via mutation", "key", req.Key, "phase", req.Stage)
 		return ExecMutationResponse{Success: true}
 	}
 

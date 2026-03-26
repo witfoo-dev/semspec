@@ -217,13 +217,13 @@ func (s *executionStore) reconcile(ctx context.Context) {
 				}
 				if strings.HasPrefix(key, "task.") {
 					var exec workflow.TaskExecution
-					if json.Unmarshal(entry.Value, &exec) == nil && !workflow.IsTerminalTaskPhase(exec.Phase) {
+					if json.Unmarshal(entry.Value, &exec) == nil && !workflow.IsTerminalTaskStage(exec.Stage) {
 						s.taskCache.Set(key, &exec) //nolint:errcheck
 						tasks++
 					}
 				} else if strings.HasPrefix(key, "req.") {
 					var exec workflow.RequirementExecution
-					if json.Unmarshal(entry.Value, &exec) == nil && !workflow.IsTerminalReqPhase(exec.Phase) {
+					if json.Unmarshal(entry.Value, &exec) == nil && !workflow.IsTerminalReqStage(exec.Stage) {
 						s.reqCache.Set(key, &exec) //nolint:errcheck
 						reqs++
 					}
@@ -251,7 +251,7 @@ func (s *executionStore) reconcile(ctx context.Context) {
 		tasks := 0
 		for _, triples := range taskEntities {
 			phase := triples[wf.Phase]
-			if workflow.IsTerminalTaskPhase(phase) {
+			if workflow.IsTerminalTaskStage(phase) {
 				continue
 			}
 			exec := taskFromTripleMap(triples)
@@ -276,7 +276,7 @@ func (s *executionStore) reconcile(ctx context.Context) {
 		reqs := 0
 		for _, triples := range reqEntities {
 			phase := triples[wf.Phase]
-			if workflow.IsTerminalReqPhase(phase) {
+			if workflow.IsTerminalReqStage(phase) {
 				continue
 			}
 			exec := reqFromTripleMap(triples)
@@ -312,7 +312,7 @@ func (s *executionStore) writeTaskTriples(ctx context.Context, exec *workflow.Ta
 	_ = tw.WriteTriple(ctx, entityID, wf.TaskID, exec.TaskID)
 	_ = tw.WriteTriple(ctx, entityID, wf.Title, exec.Title)
 	_ = tw.WriteTriple(ctx, entityID, wf.ProjectID, exec.ProjectID)
-	if err := tw.WriteTriple(ctx, entityID, wf.Phase, exec.Phase); err != nil {
+	if err := tw.WriteTriple(ctx, entityID, wf.Phase, exec.Stage); err != nil {
 		return fmt.Errorf("write phase: %w", err)
 	}
 	_ = tw.WriteTriple(ctx, entityID, wf.Iteration, exec.Iteration)
@@ -377,7 +377,7 @@ func (s *executionStore) writeReqTriples(ctx context.Context, exec *workflow.Req
 	_ = tw.WriteTriple(ctx, entityID, wf.Slug, exec.Slug)
 	_ = tw.WriteTriple(ctx, entityID, wf.RequirementID, exec.RequirementID)
 	_ = tw.WriteTriple(ctx, entityID, wf.ProjectID, exec.ProjectID)
-	if err := tw.WriteTriple(ctx, entityID, wf.Phase, exec.Phase); err != nil {
+	if err := tw.WriteTriple(ctx, entityID, wf.Phase, exec.Stage); err != nil {
 		return fmt.Errorf("write phase: %w", err)
 	}
 	if exec.TraceID != "" {
@@ -404,7 +404,7 @@ func taskFromTripleMap(triples map[string]string) *workflow.TaskExecution {
 	exec := &workflow.TaskExecution{
 		Slug:    triples[wf.Slug],
 		TaskID:  triples[wf.TaskID],
-		Phase:   triples[wf.Phase],
+		Stage:   triples[wf.Phase],
 		Title:   triples[wf.Title],
 		ProjectID: triples[wf.ProjectID],
 		TraceID:   triples[wf.TraceID],
@@ -435,7 +435,7 @@ func reqFromTripleMap(triples map[string]string) *workflow.RequirementExecution 
 	exec := &workflow.RequirementExecution{
 		Slug:          triples[wf.Slug],
 		RequirementID: triples[wf.RequirementID],
-		Phase:         triples[wf.Phase],
+		Stage:         triples[wf.Phase],
 		ProjectID:     triples[wf.ProjectID],
 		TraceID:       triples[wf.TraceID],
 	}

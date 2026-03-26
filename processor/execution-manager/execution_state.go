@@ -137,9 +137,9 @@ type taskExecution struct {
 	// TODO: introduce RedTeamRequest payload and inject RedTeamKnowledge there.
 	RedTeamKnowledge string
 
-	// Phase tracks the current TDD pipeline phase for this execution.
+	// Stage tracks the current TDD pipeline stage for this execution.
 	// Updated alongside the in-memory state transitions so toState() can extract it.
-	Phase string
+	Stage string
 
 	// timeoutTimer holds the per-execution timeout.
 	timeoutTimer *timeoutHandle
@@ -157,7 +157,7 @@ func (e *taskExecution) toState() *workflow.TaskExecution {
 		EntityID:         e.EntityID,
 		Slug:             e.Slug,
 		TaskID:           e.TaskID,
-		Phase:            e.Phase,
+		Stage:            e.Stage,
 		Iteration:        e.Iteration,
 		MaxIterations:    e.MaxIterations,
 		Title:            e.Title,

@@ -772,7 +772,7 @@ func (c *Component) syncToStore(ctx context.Context, exec *taskExecution) {
 	state := exec.toState()
 	if err := c.store.saveTask(ctx, key, state); err != nil {
 		c.logger.Warn("Failed to sync execution to store",
-			"key", key, "phase", exec.Phase, "error", err)
+			"key", key, "stage", exec.Stage, "error", err)
 	}
 }
 
@@ -804,7 +804,7 @@ func (c *Component) writeInitialTriples(ctx context.Context, exec *taskExecution
 	}
 
 	// Also write to EXECUTION_STATES KV for observability.
-	exec.Phase = phaseTesting
+	exec.Stage = phaseTesting
 	c.syncToStore(ctx, exec)
 }
 
@@ -1234,7 +1234,7 @@ func (c *Component) markApprovedLocked(ctx context.Context, exec *taskExecution)
 	// Merge worktree back to main branch before marking approved.
 	c.mergeWorktree(exec)
 
-	exec.Phase = phaseApproved
+	exec.Stage = phaseApproved
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseApproved); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseApproved, "error", err)
 	}
@@ -1269,7 +1269,7 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 	// Discard worktree — work was not approved.
 	c.discardWorktree(exec)
 
-	exec.Phase = phaseEscalated
+	exec.Stage = phaseEscalated
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseEscalated); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseEscalated, "error", err)
 	}
@@ -1304,7 +1304,7 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *taskExecution, re
 	// Discard worktree — execution errored.
 	c.discardWorktree(exec)
 
-	exec.Phase = phaseError
+	exec.Stage = phaseError
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseError, "error", err)
 	}

@@ -20,7 +20,7 @@ type TaskExecution struct {
 	TaskID   string `json:"task_id"`
 
 	// Lifecycle
-	Phase         string `json:"phase"` // testing, building, validating, reviewing, approved, escalated, error
+	Stage         string `json:"stage"` // testing, building, validating, reviewing, approved, escalated, error
 	Iteration     int    `json:"iteration"`
 	MaxIterations int    `json:"max_iterations"`
 
@@ -83,8 +83,8 @@ func TaskExecutionEntityID(slug, taskID string) string {
 	return EntityPrefix() + ".exec.task.run." + slug + "-" + taskID
 }
 
-// IsTerminalTaskPhase returns true if the phase is a terminal state.
-func IsTerminalTaskPhase(phase string) bool {
+// IsTerminalTaskStage returns true if the stage is a terminal state.
+func IsTerminalTaskStage(phase string) bool {
 	switch phase {
 	case "approved", "escalated", "error", "rejected":
 		return true
@@ -109,7 +109,7 @@ type RequirementExecution struct {
 	RequirementID string `json:"requirement_id"`
 
 	// Lifecycle
-	Phase string `json:"phase"` // decomposing, executing, reviewing, completed, failed, error
+	Stage string `json:"stage"` // decomposing, executing, reviewing, completed, failed, error
 
 	// Context (from trigger)
 	Title       string     `json:"title"`
@@ -161,8 +161,8 @@ func RequirementExecutionEntityID(slug, requirementID string) string {
 	return EntityPrefix() + ".exec.req.run." + slug + "-" + requirementID
 }
 
-// IsTerminalReqPhase returns true if the phase is a terminal state.
-func IsTerminalReqPhase(phase string) bool {
+// IsTerminalReqStage returns true if the stage is a terminal state.
+func IsTerminalReqStage(phase string) bool {
 	switch phase {
 	case "completed", "failed", "error":
 		return true
