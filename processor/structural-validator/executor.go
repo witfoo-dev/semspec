@@ -11,15 +11,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 )
+
+// CommandRunner executes a shell command and returns stdout, stderr, exit code.
+// Implementations may run commands locally (os/exec) or remotely (sandbox).
+type CommandRunner interface {
+	Run(ctx context.Context, command string, workDir string, timeout time.Duration) (stdout, stderr string, exitCode int, err error)
+}
 
 // Executor runs checklist checks against a set of modified files.
 type Executor struct {
 	repoPath       string
 	checklistPath  string
 	defaultTimeout time.Duration
+	sandboxClient  *sandbox.Client // nil = local execution
 }
 
 // NewExecutor creates an Executor rooted at repoPath.
@@ -41,6 +49,10 @@ func NewExecutor(repoPath, checklistPath string, defaultTimeout time.Duration) *
 // When trigger.WorktreePath is set, checks execute against that directory
 // instead of the configured repoPath. The checklist is always loaded from
 // repoPath (project-level config), but commands run in the worktree.
+//
+// When trigger.TaskID is set and a sandbox client is configured, commands
+// execute inside the sandbox container rather than locally. This ensures
+// agent-generated code never runs outside the sandbox boundary.
 func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequest) (*payloads.ValidationResult, error) {
 	checklist, err := e.loadChecklist()
 	if err != nil {
@@ -62,6 +74,12 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 		workDir = trigger.WorktreePath
 	}
 
+	// Select command runner: sandbox for agent-generated code, local for manual validation.
+	runner, err := e.runnerForTrigger(trigger)
+	if err != nil {
+		return nil, err
+	}
+
 	// When FilesModified is empty, run all checks (full scan mode).
 	// This is the default for workflow-triggered validation where the
 	// developer agent doesn't report specific files modified.
@@ -73,7 +91,7 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 			continue
 		}
 
-		result := e.runCheckIn(ctx, check, workDir)
+		result := e.runCheckIn(ctx, check, workDir, runner)
 		results = append(results, result)
 	}
 
@@ -85,7 +103,7 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 	if !hasCheckNamed(results, "go-test") && !hasCheckNamed(results, "go-test-modified") &&
 		!checklistHasName(checklist, "go-test") && !checklistHasName(checklist, "go-test-modified") {
 		if hasGoFiles(trigger.FilesModified) && e.isGoProjectIn(workDir) {
-			goTestResult := e.runGoTestOnModifiedIn(ctx, trigger.FilesModified, workDir)
+			goTestResult := e.runGoTestOnModifiedIn(ctx, trigger.FilesModified, workDir, runner)
 			results = append(results, goTestResult)
 		}
 	}
@@ -105,6 +123,95 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 		CheckResults: results,
 	}, nil
 }
+
+// runnerForTrigger returns a sandbox runner when the sandbox is configured and
+// the trigger includes a TaskID. When a TaskID is present but no sandbox is
+// configured, it returns an error — agent-generated code must never execute
+// outside the sandbox boundary. The local runner is only used for triggers
+// without a TaskID (e.g., manual validation of the main workspace).
+func (e *Executor) runnerForTrigger(trigger *payloads.ValidationRequest) (CommandRunner, error) {
+	if trigger.TaskID != "" {
+		if e.sandboxClient == nil {
+			return nil, fmt.Errorf("sandbox_url not configured but TaskID %q present — "+
+				"refusing to run agent-generated code outside sandbox", trigger.TaskID)
+		}
+		return &sandboxRunner{client: e.sandboxClient, taskID: trigger.TaskID}, nil
+	}
+	return &localRunner{}, nil
+}
+
+// ---------------------------------------------------------------------------
+// CommandRunner implementations
+// ---------------------------------------------------------------------------
+
+// localRunner executes commands via os/exec on the local machine.
+type localRunner struct{}
+
+func (r *localRunner) Run(ctx context.Context, command, workDir string, timeout time.Duration) (string, string, int, error) {
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	args := splitCommand(command)
+	if len(args) == 0 {
+		return "", "empty command", -1, nil
+	}
+
+	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...)
+	cmd.Dir = workDir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	runErr := cmd.Run()
+
+	exitCode := 0
+	if runErr != nil {
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+
+	return stdout.String(), stderr.String(), exitCode, nil
+}
+
+// sandboxRunner delegates command execution to the sandbox container.
+// Commands run inside the worktree identified by taskID.
+type sandboxRunner struct {
+	client *sandbox.Client
+	taskID string
+}
+
+func (r *sandboxRunner) Run(ctx context.Context, command, workDir string, timeout time.Duration) (string, string, int, error) {
+	// The sandbox Exec routes to the worktree by taskID and sets cwd to the
+	// worktree root. For checks with a WorkingDir override (e.g., "api"),
+	// the caller passes the absolute path (baseDir + check.WorkingDir).
+	// We need to strip the worktree prefix to get the relative subdir, then
+	// prepend a cd so the sandbox runs in that subdirectory.
+	//
+	// However, runCheckIn already computes workDir as filepath.Join(baseDir, check.WorkingDir).
+	// For sandbox execution, we pass the command with a cd prefix when workDir
+	// differs from what the sandbox would use as default (worktree root).
+	// The sandbox always cds into the worktree root, so any additional WorkingDir
+	// is relative to that.
+	cmd := command
+	if workDir != "" {
+		// Wrap in shell to support cd + the original command.
+		cmd = fmt.Sprintf("cd %s && %s", workDir, command)
+	}
+
+	result, err := r.client.Exec(ctx, r.taskID, cmd, int(timeout.Milliseconds()))
+	if err != nil {
+		return "", "", -1, err
+	}
+	return result.Stdout, result.Stderr, result.ExitCode, nil
+}
+
+// ---------------------------------------------------------------------------
+// Check execution
+// ---------------------------------------------------------------------------
 
 // hasCheckNamed returns true if any result in the slice has the given name.
 func hasCheckNamed(results []payloads.CheckResult, name string) bool {
@@ -168,7 +275,7 @@ func (e *Executor) loadChecklist() (*workflow.Checklist, error) {
 }
 
 // runCheckIn executes a single check command against the given base directory.
-func (e *Executor) runCheckIn(ctx context.Context, check workflow.Check, baseDir string) payloads.CheckResult {
+func (e *Executor) runCheckIn(ctx context.Context, check workflow.Check, baseDir string, runner CommandRunner) payloads.CheckResult {
 	timeout := e.defaultTimeout
 	if check.Timeout != "" {
 		if d, err := time.ParseDuration(check.Timeout); err == nil {
@@ -181,56 +288,31 @@ func (e *Executor) runCheckIn(ctx context.Context, check workflow.Check, baseDir
 		workDir = filepath.Join(baseDir, check.WorkingDir)
 	}
 
-	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	start := time.Now()
 
-	// Split command into argv — support simple shell-style tokenisation without
-	// invoking a shell, which avoids shell-injection while handling quoted args.
-	args := splitCommand(check.Command)
-	if len(args) == 0 {
+	stdout, stderr, exitCode, err := runner.Run(ctx, check.Command, workDir, timeout)
+	duration := time.Since(start)
+
+	if err != nil {
 		return payloads.CheckResult{
 			Name:     check.Name,
 			Passed:   false,
 			Required: check.Required,
 			Command:  check.Command,
 			ExitCode: -1,
-			Stderr:   "empty command",
-			Duration: time.Since(start).String(),
+			Stderr:   fmt.Sprintf("runner error: %v", err),
+			Duration: duration.String(),
 		}
 	}
-
-	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...)
-	cmd.Dir = workDir
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-	duration := time.Since(start)
-
-	exitCode := 0
-	if runErr != nil {
-		if exitErr, ok := runErr.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			// Context deadline exceeded or other OS-level error.
-			exitCode = -1
-		}
-	}
-
-	passed := exitCode == 0
 
 	return payloads.CheckResult{
 		Name:     check.Name,
-		Passed:   passed,
+		Passed:   exitCode == 0,
 		Required: check.Required,
 		Command:  check.Command,
 		ExitCode: exitCode,
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
+		Stdout:   stdout,
+		Stderr:   stderr,
 		Duration: duration.String(),
 	}
 }
@@ -298,7 +380,7 @@ func DeriveGoTestPackages(filesModified []string) []string {
 
 // runGoTestOnModifiedIn runs `go test` on the packages derived from the modified
 // Go files against the given base directory.
-func (e *Executor) runGoTestOnModifiedIn(ctx context.Context, filesModified []string, baseDir string) payloads.CheckResult {
+func (e *Executor) runGoTestOnModifiedIn(ctx context.Context, filesModified []string, baseDir string, runner CommandRunner) payloads.CheckResult {
 	pkgs := DeriveGoTestPackages(filesModified)
 	if len(pkgs) == 0 {
 		return payloads.CheckResult{
@@ -314,27 +396,20 @@ func (e *Executor) runGoTestOnModifiedIn(ctx context.Context, filesModified []st
 	args := append([]string{"test"}, pkgs...)
 	cmd := "go " + strings.Join(args, " ")
 
-	cmdCtx, cancel := context.WithTimeout(ctx, e.defaultTimeout)
-	defer cancel()
-
 	start := time.Now()
 
-	goCmd := exec.CommandContext(cmdCtx, "go", args...)
-	goCmd.Dir = baseDir
-
-	var stdout, stderr strings.Builder
-	goCmd.Stdout = &stdout
-	goCmd.Stderr = &stderr
-
-	runErr := goCmd.Run()
+	stdout, stderr, exitCode, err := runner.Run(ctx, cmd, baseDir, e.defaultTimeout)
 	duration := time.Since(start)
 
-	exitCode := 0
-	if runErr != nil {
-		if exitErr, ok := runErr.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = -1
+	if err != nil {
+		return payloads.CheckResult{
+			Name:     "go-test-modified",
+			Passed:   false,
+			Required: true,
+			Command:  cmd,
+			ExitCode: -1,
+			Stderr:   fmt.Sprintf("runner error: %v", err),
+			Duration: duration.String(),
 		}
 	}
 
@@ -344,8 +419,8 @@ func (e *Executor) runGoTestOnModifiedIn(ctx context.Context, filesModified []st
 		Required: true,
 		Command:  cmd,
 		ExitCode: exitCode,
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
+		Stdout:   stdout,
+		Stderr:   stderr,
 		Duration: duration.String(),
 	}
 }

@@ -1,5 +1,5 @@
 {
-  "content": "Work complete.",
+  "content": "Task complete. Submitting work.",
   "tool_calls": [
     {
       "id": "call_submit_fallback",

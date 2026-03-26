@@ -1,8 +1,8 @@
 {
-  "content": "I'll implement the /goodbye endpoint to pass the tests.",
+  "content": "I'll implement the /goodbye endpoint following the same pattern as /hello.",
   "tool_calls": [
     {
-      "id": "call_write_impl_1",
+      "id": "call_write_impl_goodbye",
       "type": "function",
       "function": {
         "name": "bash",

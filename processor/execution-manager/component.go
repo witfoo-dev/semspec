@@ -1841,6 +1841,7 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 		Slug:          exec.Slug,
 		FilesModified: exec.FilesModified,
 		WorktreePath:  exec.WorktreePath,
+		TaskID:        exec.TaskID,
 		TraceID:       exec.TraceID,
 	}
 

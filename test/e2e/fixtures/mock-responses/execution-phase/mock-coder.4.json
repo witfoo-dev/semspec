@@ -2,11 +2,11 @@
   "content": "Implementation complete. Submitting work.",
   "tool_calls": [
     {
-      "id": "call_submit_build_1",
+      "id": "call_submit_build_goodbye",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\":\"Implemented /goodbye endpoint in api/app.py returning JSON with goodbye message\"}"
+        "arguments": "{\"summary\":\"Implemented /goodbye endpoint in api/app.py returning JSON farewell message\",\"files_modified\":[\"api/app.py\"]}"
       }
     }
   ],

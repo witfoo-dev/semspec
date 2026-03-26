@@ -2,11 +2,11 @@
   "content": "I'll write the test file for the /goodbye endpoint.",
   "tool_calls": [
     {
-      "id": "call_write_test",
+      "id": "call_write_test_goodbye",
       "type": "function",
       "function": {
         "name": "bash",
-        "arguments": "{\"command\":\"cat > api/test_goodbye.py << 'PYEOF'\\nimport pytest\\nfrom app import app\\n\\ndef test_goodbye_returns_json():\\n    client = app.test_client()\\n    response = client.get('/goodbye')\\n    assert response.status_code == 200\\n    data = response.get_json()\\n    assert 'message' in data\\n    assert 'goodbye' in data['message'].lower()\\n\\ndef test_goodbye_message_content():\\n    client = app.test_client()\\n    response = client.get('/goodbye')\\n    data = response.get_json()\\n    assert data['message'] == 'Goodbye, World!'\\nPYEOF\"}"
+        "arguments": "{\"command\":\"cat > api/test_goodbye.py << 'PYEOF'\\nimport sys, os\\nsys.path.insert(0, os.path.dirname(__file__))\\nfrom app import app\\nimport pytest\\n\\ndef test_goodbye_returns_json():\\n    client = app.test_client()\\n    response = client.get('/goodbye')\\n    assert response.status_code == 200\\n    data = response.get_json()\\n    assert data is not None\\n    assert 'message' in data\\n\\ndef test_goodbye_message_content():\\n    client = app.test_client()\\n    response = client.get('/goodbye')\\n    data = response.get_json()\\n    assert 'goodbye' in data['message'].lower()\\nPYEOF\"}"
       }
     }
   ],

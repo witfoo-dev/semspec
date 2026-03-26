@@ -133,6 +133,19 @@ func (s *ExecutionPhaseScenario) setupWorkspace() error {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}
+
+	// Initialize git repository so the sandbox can create worktrees for
+	// task isolation. Without git, worktree creation fails and all tasks
+	// write to the same workspace without isolation.
+	if err := s.fs.InitGit(); err != nil {
+		return fmt.Errorf("init git: %w", err)
+	}
+	if err := s.fs.GitAdd("."); err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+	if err := s.fs.GitCommit("Initial workspace setup"); err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
 	return nil
 }
 
@@ -294,18 +307,16 @@ func (s *ExecutionPhaseScenario) stageWaitForExecStart(ctx context.Context, resu
 }
 
 // stageWaitForExecComplete polls two message-logger subjects to confirm the
-// execution pipeline progressed beyond the trigger phase:
+// execution pipeline completed end-to-end:
 //
 //  1. workflow.trigger.task-execution-loop — published by requirement-execution-loop
-//     after decompose_task succeeds; confirms at least one DAG node was dispatched.
+//     after decompose_task succeeds; confirms DAG nodes were dispatched.
 //  2. agent.complete.* — published when any agentic loop finishes.
-//     We look for count growth after the execution trigger to confirm the
-//     execution-orchestrator's loop completed (not just the planning loops).
+//     We wait for count growth beyond the pre-execution baseline to confirm
+//     execution-phase loops completed (not just planning loops).
 //
-// Both checks are NON-FATAL warnings when the mock LLM does not emit
-// decompose_task tool calls, because the test infrastructure may not have
-// fixtures for the full execution path. The stage itself only fails when the
-// context deadline is exceeded with zero evidence of progress.
+// Both checks are HARD assertions. The mock fixtures produce working code
+// that passes structural validation, so all executions should reach approved.
 func (s *ExecutionPhaseScenario) stageWaitForExecComplete(ctx context.Context, result *Result) error {
 	// Use baseline captured in stageTriggerExecution (before execution started).
 	baseline := 0
@@ -315,56 +326,37 @@ func (s *ExecutionPhaseScenario) stageWaitForExecComplete(ctx context.Context, r
 		}
 	}
 
-	// First gate: wait for at least one task-execution-loop trigger message.
-	// This confirms that requirement-execution-loop received and processed its
-	// trigger, and that decompose_task was invoked.
+	// First gate: wait for task-execution-loop trigger messages.
+	// With 3 requirements each decomposed into 1 node, expect at least 3.
 	taskExecSubject := "workflow.trigger.task-execution-loop"
-	taskExecCtx, cancelTaskExec := context.WithTimeout(ctx, 300*time.Second)
-	defer cancelTaskExec()
-
-	taskExecErr := s.pollMessageLogger(taskExecCtx, taskExecSubject, 1)
-	if taskExecErr != nil {
-		result.AddWarning(fmt.Sprintf(
-			"no %s message observed within 300s — mock LLM may not emit decompose_task: %v",
-			taskExecSubject, taskExecErr,
-		))
-		result.SetDetail("task_exec_loop_dispatched", false)
-		// Do not return; continue to the loop-completed check.
-	} else {
-		result.SetDetail("task_exec_loop_dispatched", true)
+	if err := s.pollMessageLogger(ctx, taskExecSubject, 1); err != nil {
+		return fmt.Errorf("task-execution-loop trigger not observed: %w", err)
 	}
+	result.SetDetail("task_exec_loop_dispatched", true)
 
-	// Second gate: wait for the agentic loop count to grow beyond the baseline.
-	// We use a shorter budget since if the task-execution-loop fired, completion
-	// should follow quickly in a mock-LLM environment.
-	loopCompleteCtx, cancelLoopComplete := context.WithTimeout(ctx, 300*time.Second)
-	defer cancelLoopComplete()
+	// Second gate: wait for agentic loop completions beyond baseline.
+	// 1 decomposer loop + (tester + builder + reviewer) = 4 loops minimum.
+	// We require at least 1 new completion (the decomposer loop).
+	const minNewCompletions = 1
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-loopCompleteCtx.Done():
-			// Record what we observed and return a warning — not a hard failure —
-			// because the mock fixture set may not cover full execution.
-			result.AddWarning(fmt.Sprintf(
-				"agent.complete.* count did not grow beyond baseline %d within timeout: %v",
-				baseline, loopCompleteCtx.Err(),
-			))
-			result.SetDetail("exec_complete_observed", false)
-			// Return nil: execution start was already verified; incomplete
-			// execution in mock environments is expected.
-			return nil
+		case <-ctx.Done():
+			return fmt.Errorf("agent.complete.* count did not grow by %d beyond baseline %d: %w",
+				minNewCompletions, baseline, ctx.Err())
 		case <-ticker.C:
-			entries, err := s.http.GetMessageLogEntries(loopCompleteCtx, 500, "agent.complete.*")
+			entries, err := s.http.GetMessageLogEntries(ctx, 500, "agent.complete.*")
 			if err != nil {
 				continue
 			}
-			if len(entries) > baseline {
+			newCount := len(entries) - baseline
+			if newCount >= minNewCompletions {
 				result.SetDetail("exec_complete_observed", true)
 				result.SetDetail("exec_complete_count", len(entries))
-				result.SetDetail("exec_complete_new", len(entries)-baseline)
+				result.SetDetail("exec_complete_new", newCount)
 				return nil
 			}
 		}
@@ -407,24 +399,28 @@ func (s *ExecutionPhaseScenario) stageVerifyMockStats(ctx context.Context, resul
 	// Plan phase: planner + reviewer must have been called.
 	for _, model := range []string{"mock-planner", "mock-reviewer"} {
 		if count, ok := stats[model]; !ok || count == 0 {
-			result.AddWarning(fmt.Sprintf("expected mock model %q to be called, got %d", model, count))
+			return fmt.Errorf("expected mock model %q to be called, got %d", model, count)
 		}
 	}
 
-	// Execution phase: mock-decomposer decomposes per-requirement, mock-coder
-	// handles TDD pipeline stages. With ~3 requirements × 4 coder calls, expect ≥10.
+	// Execution phase: 1 requirement decomposed into 1 node.
+	// TDD pipeline: tester (2 coder calls) + builder (2 coder calls) + reviewer.
 	if coderCalls, ok := stats["mock-coder"]; ok {
 		result.SetDetail("mock_coder_calls", coderCalls)
-		if coderCalls < 6 {
-			result.AddWarning(fmt.Sprintf("expected mock-coder to be called at least 6 times, got %d", coderCalls))
+		if coderCalls < 4 {
+			return fmt.Errorf("expected mock-coder to be called at least 4 times, got %d", coderCalls)
 		}
 	} else {
-		result.AddWarning("mock-coder was not called — execution phase may not have progressed to task execution")
+		return fmt.Errorf("mock-coder was not called — execution pipeline did not reach task execution")
 	}
 
-	// Total calls: planning (~7) + execution (~19) = ~26 with requirement-level dispatch.
-	if mockStats.TotalCalls < 20 {
-		result.AddWarning(fmt.Sprintf("expected at least 20 total mock calls (plan + execution), got %d", mockStats.TotalCalls))
+	if decomposerCalls, ok := stats["mock-decomposer"]; ok {
+		result.SetDetail("mock_decomposer_calls", decomposerCalls)
+	}
+
+	// Total calls: planning (~7) + execution (~8) = ~15 with 1 requirement.
+	if mockStats.TotalCalls < 12 {
+		return fmt.Errorf("expected at least 12 total mock calls (plan + execution), got %d", mockStats.TotalCalls)
 	}
 
 	var summary []string

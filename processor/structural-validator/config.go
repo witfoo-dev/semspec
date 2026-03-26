@@ -29,6 +29,12 @@ type Config struct {
 	// DefaultTimeout is the fallback command execution timeout when a check has no timeout set.
 	DefaultTimeout string `json:"default_timeout" schema:"type:string,description:Default command execution timeout (duration string),category:advanced,default:120s"`
 
+	// SandboxURL is the sandbox server URL for executing validation checks.
+	// When set, checklist commands run inside the sandbox container instead of
+	// locally. This ensures agent-generated code never executes outside the
+	// sandbox boundary. When empty, commands run locally via os/exec.
+	SandboxURL string `json:"sandbox_url,omitempty" schema:"type:string,description:Sandbox server URL for remote check execution,category:advanced,default:"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }

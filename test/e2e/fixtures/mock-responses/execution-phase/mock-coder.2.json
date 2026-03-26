@@ -2,11 +2,11 @@
   "content": "Tests written. Submitting work.",
   "tool_calls": [
     {
-      "id": "call_submit_test_1",
+      "id": "call_submit_test_goodbye",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\":\"Written failing unit tests for /goodbye endpoint in api/test_goodbye.py\"}"
+        "arguments": "{\"summary\":\"Written failing unit tests for /goodbye endpoint in api/test_goodbye.py\",\"files_modified\":[\"api/test_goodbye.py\"]}"
       }
     }
   ],

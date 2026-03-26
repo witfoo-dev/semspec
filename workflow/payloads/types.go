@@ -408,6 +408,13 @@ type ValidationRequest struct {
 	// to validate sandbox worktrees.
 	WorktreePath string `json:"worktree_path,omitempty"`
 
+	// TaskID identifies the sandbox worktree for remote command execution.
+	// When set alongside a configured sandbox URL, the structural-validator
+	// delegates check commands to the sandbox container instead of running
+	// them locally. This ensures agent-generated code executes only inside
+	// the sandbox boundary.
+	TaskID string `json:"task_id,omitempty"`
+
 	// Trace context
 	TraceID string `json:"trace_id,omitempty"`
 }

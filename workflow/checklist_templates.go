@@ -200,7 +200,7 @@ var pythonBaseTemplates = []checkTemplate{
 	},
 	{
 		Name:        "pytest",
-		Command:     "python -m pytest .",
+		Command:     "python3 -m pytest .",
 		Trigger:     []string{"*.py"},
 		Category:    CheckCategoryTest,
 		Required:    true,

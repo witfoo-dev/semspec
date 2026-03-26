@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/component"
@@ -78,6 +79,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	repoPath := resolveRepoPath(config.RepoPath)
 
 	executor := NewExecutor(repoPath, config.ChecklistPath, config.GetDefaultTimeout())
+	if config.SandboxURL != "" {
+		executor.sandboxClient = sandbox.NewClient(config.SandboxURL)
+	}
 
 	return &Component{
 		name:       "structural-validator",
@@ -206,6 +210,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"slug", trigger.Slug,
 		"files_modified", len(trigger.FilesModified),
 		"execution_id", trigger.ExecutionID,
+		"task_id", trigger.TaskID,
 		"worktree_path", trigger.WorktreePath)
 
 	// Signal in-progress to prevent redelivery during long validation operations.
