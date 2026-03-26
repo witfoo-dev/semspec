@@ -156,6 +156,10 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("consume planner triggers: %w", err)
 	}
 
+	// KV watcher — self-triggers on new plan creation (status == "created", revision == 1).
+	// Runs alongside the JetStream consumer so both trigger paths remain active.
+	go c.watchPlanStates(subCtx)
+
 	c.logger.Info("planner started",
 		"stream", c.config.StreamName,
 		"consumer", c.config.ConsumerName,
@@ -170,6 +174,175 @@ func (c *Component) rollbackStart(cancel context.CancelFunc) {
 	c.cancel = nil
 	c.mu.Unlock()
 	cancel()
+}
+
+// watchPlanStates watches the PLAN_STATES KV bucket and self-triggers the planner
+// whenever a new plan is created (revision == 1). This replaces the deleted coordinator
+// as the dispatch path for initial plan drafting.
+//
+// Revision 1 means the key has just been written for the first time — i.e., the plan
+// was just created by plan-manager. Updates (status transitions, review saves) have
+// revision > 1 and are ignored.
+func (c *Component) watchPlanStates(ctx context.Context) {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Warn("Cannot watch PLAN_STATES: no JetStream", "error", err)
+		return
+	}
+
+	bucket, err := js.KeyValue(ctx, "PLAN_STATES")
+	if err != nil {
+		c.logger.Warn("PLAN_STATES bucket not available — KV self-trigger disabled", "error", err)
+		return
+	}
+
+	watcher, err := bucket.WatchAll(ctx)
+	if err != nil {
+		c.logger.Warn("Failed to start PLAN_STATES watcher", "error", err)
+		return
+	}
+	defer watcher.Stop()
+
+	c.logger.Info("Watching PLAN_STATES for new plan creations")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case entry, ok := <-watcher.Updates():
+			if !ok {
+				c.logger.Info("PLAN_STATES watcher closed")
+				return
+			}
+			// nil entry signals the initial value delivery is complete; not a real update.
+			if entry == nil {
+				continue
+			}
+			// Only react to Put operations (not Delete/Purge).
+			if entry.Operation() != jetstream.KeyValuePut {
+				continue
+			}
+			// Revision 1 == first write == plan just created. Skip all subsequent writes
+			// (status transitions, review results, etc.) to avoid re-triggering.
+			if entry.Revision() != 1 {
+				continue
+			}
+
+			var plan struct {
+				Slug   string `json:"slug"`
+				Title  string `json:"title"`
+				Status string `json:"status"`
+			}
+			if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+				c.logger.Warn("PLAN_STATES watcher: failed to parse entry",
+					"key", entry.Key(), "error", err)
+				continue
+			}
+
+			// Guard: only draft plans in the "created" status.
+			if plan.Status != "created" {
+				continue
+			}
+			if plan.Slug == "" {
+				continue
+			}
+
+			c.logger.Info("PLAN_STATES trigger: new plan detected, starting planning pipeline",
+				"slug", plan.Slug, "title", plan.Title)
+
+			go c.processNewPlan(ctx, plan.Slug, plan.Title)
+		}
+	}
+}
+
+// processNewPlan runs the full planning pipeline for a newly created plan and
+// sends the result to plan-manager via plan.mutation.drafted request/reply.
+//
+// This is called from the PLAN_STATES KV watcher goroutine and itself runs in
+// a dedicated goroutine, so failures here are logged but do not affect other plans.
+func (c *Component) processNewPlan(ctx context.Context, slug, title string) {
+	c.triggersProcessed.Add(1)
+	c.updateLastActivity()
+
+	// Build a synthetic PlannerRequest so we can reuse the existing pipeline
+	// (generatePlan, resolveProvider, etc.) without duplicating logic.
+	trigger := &payloads.PlannerRequest{
+		RequestID: fmt.Sprintf("kv-%s", slug),
+		Slug:      slug,
+		Title:     title,
+	}
+
+	llmCtx := c.buildLLMContext(ctx, trigger)
+
+	planContent, _, err := c.generatePlan(llmCtx, trigger)
+	if err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("KV trigger: plan generation failed",
+			"slug", slug, "error", err)
+		return
+	}
+
+	// Convert PlanContent.Scope → workflow.Scope for the mutation payload.
+	// PlanContent.Scope and workflow.Scope share the same JSON shape (include/exclude/do_not_touch).
+	scope := &workflow.Scope{
+		Include:    planContent.Scope.Include,
+		Exclude:    planContent.Scope.Exclude,
+		DoNotTouch: planContent.Scope.DoNotTouch,
+	}
+
+	mutReq := draftedMutationRequest{
+		Slug:    slug,
+		Goal:    planContent.Goal,
+		Context: planContent.Context,
+		Scope:   scope,
+	}
+	data, err := json.Marshal(mutReq)
+	if err != nil {
+		c.logger.Error("KV trigger: failed to marshal drafted mutation", "slug", slug, "error", err)
+		return
+	}
+
+	resp, err := c.natsClient.RequestWithRetry(ctx, mutationDraftedSubject, data, 10*time.Second, natsclient.DefaultRetryConfig())
+	if err != nil {
+		c.logger.Error("KV trigger: drafted mutation request failed",
+			"slug", slug, "error", err)
+		return
+	}
+
+	var mutResp struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(resp, &mutResp); err != nil || !mutResp.Success {
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		} else {
+			errMsg = mutResp.Error
+		}
+		c.logger.Error("KV trigger: plan-manager rejected drafted mutation",
+			"slug", slug, "error", errMsg)
+		return
+	}
+
+	c.plansGenerated.Add(1)
+	c.logger.Info("KV trigger: plan drafted and mutation accepted",
+		"slug", slug)
+}
+
+// mutationDraftedSubject is the request/reply subject for plan.mutation.drafted.
+// Plan-manager subscribes here; planner sends results after LLM processing.
+const mutationDraftedSubject = "plan.mutation.drafted"
+
+// draftedMutationRequest is sent by the planner to plan-manager after drafting a plan.
+// The shape must match plan-manager's DraftedMutationRequest so the single JSON
+// payload deserialises correctly on the other side.
+type draftedMutationRequest struct {
+	Slug    string          `json:"slug"`
+	Goal    string          `json:"goal"`
+	Context string          `json:"context"`
+	Scope   *workflow.Scope `json:"scope,omitempty"`
+	TraceID string          `json:"trace_id,omitempty"`
 }
 
 // handleMessagePush is the push-based callback for ConsumeStreamWithConfig.

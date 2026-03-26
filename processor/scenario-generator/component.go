@@ -134,6 +134,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
+	if config.PlanStateBucket == "" {
+		config.PlanStateBucket = defaults.PlanStateBucket
+	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -200,6 +203,15 @@ func (c *Component) Start(ctx context.Context) error {
 	if err := c.natsClient.ConsumeStreamWithConfig(subCtx, cfg, c.handleMessagePush); err != nil {
 		c.rollbackStart(cancel)
 		return fmt.Errorf("consume scenario triggers: %w", err)
+	}
+
+	// Watch PLAN_STATES for plans reaching "requirements_generated" status.
+	// This is the KV twofer — the write IS the trigger.
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Warn("Cannot start PLAN_STATES watcher: no JetStream", "error", err)
+	} else {
+		go c.watchPlanStates(subCtx, js)
 	}
 
 	c.logger.Info("scenario-generator started",

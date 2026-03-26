@@ -24,6 +24,10 @@ type Config struct {
 	// DefaultCapability is the model capability to use for requirement generation.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for requirement generation,category:basic,default:planning"`
 
+	// PlanStateBucket is the KV bucket name to watch for approved plans (KV twofer).
+	// The requirement-generator self-triggers when any plan transitions to "approved".
+	PlanStateBucket string `json:"plan_state_bucket" schema:"type:string,description:KV bucket to watch for approved plans,category:advanced,default:PLAN_STATES"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -35,6 +39,7 @@ func DefaultConfig() Config {
 		ConsumerName:      "requirement-generator",
 		TriggerSubject:    "workflow.async.requirement-generator",
 		DefaultCapability: "planning",
+		PlanStateBucket:   "PLAN_STATES",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

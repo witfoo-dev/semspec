@@ -12,7 +12,10 @@ import (
 // Mutation subjects — generators use request/reply to return results.
 // Plan-manager is the single writer; the KV write IS the event (twofer).
 const (
-	mutationPrefix              = "plan.mutation."
+	mutationPrefix                = "plan.mutation."
+	mutationDrafted               = "plan.mutation.drafted"
+	mutationReviewed              = "plan.mutation.reviewed"
+	mutationApproved              = "plan.mutation.approved"
 	mutationRequirementsGenerated = "plan.mutation.requirements.generated"
 	mutationScenariosGenerated    = "plan.mutation.scenarios.generated"
 	mutationGenerationFailed      = "plan.mutation.generation.failed"
@@ -33,6 +36,29 @@ type ScenariosMutationRequest struct {
 	RequirementID string             `json:"requirement_id"`
 	Scenarios     []workflow.Scenario `json:"scenarios"`
 	TraceID       string             `json:"trace_id,omitempty"`
+}
+
+// DraftedMutationRequest is sent by the planner after focus/synthesis.
+type DraftedMutationRequest struct {
+	Slug    string          `json:"slug"`
+	Goal    string          `json:"goal"`
+	Context string          `json:"context"`
+	Scope   *workflow.Scope `json:"scope,omitempty"`
+	TraceID string          `json:"trace_id,omitempty"`
+}
+
+// ReviewedMutationRequest is sent by the plan-reviewer after reviewing.
+type ReviewedMutationRequest struct {
+	Slug    string `json:"slug"`
+	Verdict string `json:"verdict"` // "approved" or "needs_changes"
+	Summary string `json:"summary,omitempty"`
+	TraceID string `json:"trace_id,omitempty"`
+}
+
+// ApprovedMutationRequest is sent by auto-approve rule or human.
+type ApprovedMutationRequest struct {
+	Slug    string `json:"slug"`
+	TraceID string `json:"trace_id,omitempty"`
 }
 
 // GenerationFailedRequest is sent by a generator when all retries are exhausted.
@@ -61,6 +87,9 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		subject string
 		handler func(context.Context, []byte) MutationResponse
 	}{
+		{mutationDrafted, c.handleDraftedMutation},
+		{mutationReviewed, c.handleReviewedMutation},
+		{mutationApproved, c.handleApprovedMutation},
 		{mutationRequirementsGenerated, c.handleRequirementsMutation},
 		{mutationScenariosGenerated, c.handleScenariosMutation},
 		{mutationGenerationFailed, c.handleGenerationFailedMutation},
@@ -201,5 +230,93 @@ func (c *Component) handleGenerationFailedMutation(ctx context.Context, data []b
 		}
 	}
 
+	return MutationResponse{Success: true}
+}
+
+// handleDraftedMutation updates a plan with goal/context/scope from the planner.
+func (c *Component) handleDraftedMutation(ctx context.Context, data []byte) MutationResponse {
+	var req DraftedMutationRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" || req.Goal == "" {
+		return MutationResponse{Success: false, Error: "slug and goal required"}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	plan.Goal = req.Goal
+	plan.Context = req.Context
+	if req.Scope != nil {
+		plan.Scope = *req.Scope
+	}
+	plan.Status = workflow.StatusDrafted
+
+	if err := ps.save(ctx, plan); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+
+	c.logger.Info("Plan drafted via mutation", "slug", req.Slug, "goal", req.Goal)
+	return MutationResponse{Success: true}
+}
+
+// handleReviewedMutation updates plan status to reviewed after reviewer verdict.
+func (c *Component) handleReviewedMutation(ctx context.Context, data []byte) MutationResponse {
+	var req ReviewedMutationRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" {
+		return MutationResponse{Success: false, Error: "slug required"}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	plan.ReviewVerdict = req.Verdict
+	plan.ReviewSummary = req.Summary
+	now := time.Now()
+	plan.ReviewedAt = &now
+
+	if err := ps.setStatus(ctx, plan.Slug, workflow.StatusReviewed); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("status transition: %v", err)}
+	}
+
+	c.logger.Info("Plan reviewed via mutation", "slug", req.Slug, "verdict", req.Verdict)
+	return MutationResponse{Success: true}
+}
+
+// handleApprovedMutation sets plan status to approved (from auto-approve rule or human).
+func (c *Component) handleApprovedMutation(ctx context.Context, data []byte) MutationResponse {
+	var req ApprovedMutationRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" {
+		return MutationResponse{Success: false, Error: "slug required"}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	if err := ps.setStatus(ctx, req.Slug, workflow.StatusApproved); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("status transition: %v", err)}
+	}
+
+	c.logger.Info("Plan approved via mutation", "slug", req.Slug)
 	return MutationResponse{Success: true}
 }
