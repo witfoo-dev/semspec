@@ -160,6 +160,10 @@ type Component struct {
 	inputPorts  []component.Port
 	outputPorts []component.Port
 
+	// store is the 3-layer execution store (cache + KV + triples).
+	// Will replace activeExecutions and taskIDIndex once fully wired.
+	store *executionStore
+
 	// activeExecutions maps entityID → *taskExecution.
 	activeExecutions sync.Map
 
