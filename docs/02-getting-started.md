@@ -248,7 +248,7 @@ endpoint reports initialization state — the UI uses this to determine what to 
 
 ### Option A: API-Driven Setup
 
-The project-api provides endpoints for automated project setup:
+The project-manager provides endpoints for automated project setup:
 
 ```bash
 # Check initialization status

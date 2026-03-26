@@ -1,7 +1,7 @@
 # Plan API Reference
 
 REST API for managing plans, requirements, scenarios, and change proposals. All endpoints are
-served by the `plan-manager` component. The HTTP route prefix is `/plan-api/`.
+served by the `plan-manager` component. The HTTP route prefix is `/plan-manager/`.
 
 ## Plans
 
@@ -50,7 +50,7 @@ entity for scenarios.
 ### Create Requirement
 
 ```bash
-curl -X POST http://localhost:8080/plan-api/plans/my-plan/requirements \
+curl -X POST http://localhost:8080/plan-manager/plans/my-plan/requirements \
   -H "Content-Type: application/json" \
   -d '{
     "title": "User authentication",
@@ -72,7 +72,7 @@ curl -X POST http://localhost:8080/plan-api/plans/my-plan/requirements \
 ### Update Requirement
 
 ```bash
-curl -X PATCH http://localhost:8080/plan-api/plans/my-plan/requirements/req-123 \
+curl -X PATCH http://localhost:8080/plan-manager/plans/my-plan/requirements/req-123 \
   -H "Content-Type: application/json" \
   -d '{"title": "Updated title", "depends_on": ["req-456"]}'
 ```
@@ -82,7 +82,7 @@ All fields are optional. Only provided fields are updated.
 ### Deprecate Requirement
 
 ```bash
-curl -X POST http://localhost:8080/plan-api/plans/my-plan/requirements/req-123/deprecate
+curl -X POST http://localhost:8080/plan-manager/plans/my-plan/requirements/req-123/deprecate
 ```
 
 Sets status to `deprecated`. This is a terminal state — deprecated requirements cannot be
@@ -121,7 +121,7 @@ time; all scenarios for that requirement are verified by the reviewer after DAG 
 ### Create Scenario
 
 ```bash
-curl -X POST http://localhost:8080/plan-api/plans/my-plan/scenarios \
+curl -X POST http://localhost:8080/plan-manager/plans/my-plan/scenarios \
   -H "Content-Type: application/json" \
   -d '{
     "requirement_id": "req-123",
@@ -145,7 +145,7 @@ curl -X POST http://localhost:8080/plan-api/plans/my-plan/scenarios \
 ### Update Scenario
 
 ```bash
-curl -X PATCH http://localhost:8080/plan-api/plans/my-plan/scenarios/sc-456 \
+curl -X PATCH http://localhost:8080/plan-manager/plans/my-plan/scenarios/sc-456 \
   -H "Content-Type: application/json" \
   -d '{"when": "they submit the login form with MFA", "status": "passing"}'
 ```
@@ -155,7 +155,7 @@ All fields are optional.
 ### List by Requirement
 
 ```bash
-curl http://localhost:8080/plan-api/plans/my-plan/scenarios?requirement_id=req-123
+curl http://localhost:8080/plan-manager/plans/my-plan/scenarios?requirement_id=req-123
 ```
 
 Returns only scenarios belonging to the specified requirement.
@@ -191,7 +191,7 @@ and tasks.
 ### Create Change Proposal
 
 ```bash
-curl -X POST http://localhost:8080/plan-api/plans/my-plan/change-proposals \
+curl -X POST http://localhost:8080/plan-manager/plans/my-plan/change-proposals \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Add rate limiting to auth endpoints",
@@ -213,7 +213,7 @@ curl -X POST http://localhost:8080/plan-api/plans/my-plan/change-proposals \
 ### Accept Proposal
 
 ```bash
-curl -X POST http://localhost:8080/plan-api/plans/my-plan/change-proposals/cp-789/accept
+curl -X POST http://localhost:8080/plan-manager/plans/my-plan/change-proposals/cp-789/accept
 ```
 
 Accepting a proposal triggers a cascade: affected scenarios are marked dirty, dependent tasks

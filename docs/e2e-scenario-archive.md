@@ -44,7 +44,7 @@ Stages that wait for async pipeline progress use a ticker-based polling loop:
 - Loop exits when the expected condition is met or the stage context is cancelled
 - Always respect context cancellation — do not use `time.Sleep`
 
-Example condition: poll `GET /plan-api/plans/{slug}` until `status` equals `approved` or until the
+Example condition: poll `GET /plan-manager/plans/{slug}` until `status` equals `approved` or until the
 stage deadline expires.
 
 ### Graph Readiness Gate
@@ -154,7 +154,7 @@ A basic Go HTTP service.
 }
 ```
 
-The `.semspec/projects/default/project.json` file must exist before plan creation. The plan-api
+The `.semspec/projects/default/project.json` file must exist before plan creation. The plan-manager
 uses it to associate the plan with a project.
 
 ### Stage Sequence
@@ -163,12 +163,12 @@ uses it to associate the plan with a project.
 |---|-------|---------|--------------|
 | 1 | setup-project | 30s | Write workspace files, verify directory structure |
 | 2 | detect-stack | 15s | Assert Go is detected from `go.mod` |
-| 3 | init-project | 15s | `POST /plan-api/projects` or verify default project exists |
+| 3 | init-project | 15s | `POST /plan-manager/projects` or verify default project exists |
 | 4 | verify-graph-ready | 30s | Poll graph-gateway until workspace is indexed |
-| 5 | create-plan | 15s | `POST /plan-api/plans` with the prompt above |
+| 5 | create-plan | 15s | `POST /plan-manager/plans` with the prompt above |
 | 6 | wait-for-plan-goal | 120s | Poll plan until `goal` field is non-empty |
 | 7 | wait-for-approval | 300s | Poll plan until `status` is `approved` |
-| 8 | trigger-execution | 15s | `POST /plan-api/plans/{slug}/execute` |
+| 8 | trigger-execution | 15s | `POST /plan-manager/plans/{slug}/execute` |
 | 9 | wait-for-scenarios | 60s | Poll until at least 1 scenario has `status != pending` |
 | 10 | wait-for-execution | 300s | Poll until `agent.complete.*` count grows beyond baseline |
 | 11 | verify-deliverables | 30s | Assert new `.go` and `_test.go` files exist in workspace |
@@ -290,10 +290,10 @@ Same content as health-check.
 | 2 | detect-stack | 15s | Assert Go detected from `go.mod` |
 | 3 | init-project | 15s | Verify default project exists |
 | 4 | verify-graph-ready | 30s | Poll graph-gateway until indexed |
-| 5 | create-plan | 15s | `POST /plan-api/plans` with the prompt above |
+| 5 | create-plan | 15s | `POST /plan-manager/plans` with the prompt above |
 | 6 | wait-for-plan-goal | 180s | Poll until `goal` field is non-empty (extra 60s vs health-check) |
 | 7 | wait-for-approval | 600s | Poll until `status` is `approved` |
-| 8 | trigger-execution | 15s | `POST /plan-api/plans/{slug}/execute` |
+| 8 | trigger-execution | 15s | `POST /plan-manager/plans/{slug}/execute` |
 | 9 | wait-for-scenarios | 120s | Poll until at least 3 scenarios are non-pending |
 | 10 | wait-for-execution | 600s | Poll until `agent.complete.*` count exceeds baseline |
 | 11 | verify-deliverables | 30s | Assert handler and middleware files exist |
@@ -341,7 +341,7 @@ they are not configurable.
 A brownfield Go+Svelte todo application receives a terse plan prompt to add due dates. This
 scenario's purpose is to validate that the planner correctly reads and references existing source
 files rather than hallucinating a greenfield design. An SOP is injected before planning to test
-SOP enforcement. CRUD operations on requirements and scenarios are verified against the plan-api.
+SOP enforcement. CRUD operations on requirements and scenarios are verified against the plan-manager.
 
 ### Plan Prompt
 
@@ -434,18 +434,18 @@ git commit -m "initial commit"
 | 1 | setup-project | 30s | Write workspace files, git init, initial commit |
 | 2 | check-not-initialized | 10s | Assert no existing plan for this slug |
 | 3 | detect-stack | 30s | Assert both Go (`api/go.mod`) and Svelte (`ui/svelte.config.js`) detected |
-| 4 | init-project | 30s | `POST /plan-api/projects` |
-| 5 | verify-initialized | 10s | `GET /plan-api/projects/{id}` returns 200 |
+| 4 | init-project | 30s | `POST /plan-manager/projects` |
+| 5 | verify-initialized | 10s | `GET /plan-manager/projects/{id}` returns 200 |
 | 6 | ingest-sop | 30s | Verify `sources/model-change-sop.md` exists; poll semsource ingest |
 | 7 | verify-sop-ingested | 60s | Poll graph-gateway for entity with `source.doc` predicate and `category=sop` |
 | 8 | verify-standards-populated | 30s | Poll until `standards.json` contains at least one rule |
 | 9 | verify-graph-ready | 30s | Poll graph-gateway until workspace is indexed |
-| 10 | create-plan | 30s | `POST /plan-api/plans` with the prompt above |
+| 10 | create-plan | 30s | `POST /plan-manager/plans` with the prompt above |
 | 11 | wait-for-plan | 300s | Poll until `status` is `approved` |
 | 12 | verify-plan-semantics | 10s | Inline assertions against the plan JSON |
 | 13 | approve-plan | 240s | If `auto_approve=false`, call `POST /plans/{slug}/promote`; wait for `ready_for_execution` |
-| 14 | verify-requirements | 10s | `GET /plan-api/plans/{slug}/requirements` — assert count > 0 |
-| 15 | verify-scenarios | 10s | `GET /plan-api/plans/{slug}/requirements/{id}/scenarios` — assert count > 0 |
+| 14 | verify-requirements | 10s | `GET /plan-manager/plans/{slug}/requirements` — assert count > 0 |
+| 15 | verify-scenarios | 10s | `GET /plan-manager/plans/{slug}/requirements/{id}/scenarios` — assert count > 0 |
 | 16 | requirement-crud | 30s | Exercise create/get/update/deprecate/delete on a test requirement |
 | 17 | scenario-crud | 30s | Exercise create/get/update/list/delete on a test scenario |
 | 18 | capture-trajectory | 30s | `GET /trajectory-api/loops` — capture loop list for report |
@@ -476,7 +476,7 @@ ingest failure as a blocking error.
 
 **CRUD operations** (stages 16–17):
 
-These stages call the plan-api directly to verify the CRUD endpoints are functional. They do not
+These stages call the plan-manager directly to verify the CRUD endpoints are functional. They do not
 test the LLM output — they test the API itself using the plan created in stage 10 as the parent
 entity. Run these even if earlier stages show warnings.
 
@@ -600,11 +600,11 @@ three instances:
 | 1 | verify-service-health | 30s | Assert NATS, semspec HTTP, and all 3 semsource instances respond |
 | 2 | verify-graph-manifest | 60s | Poll `GET /graph-gateway/manifest` until total entity count > 100 |
 | 3 | setup-workspace | 30s | Write workspace files, git init, initial commit |
-| 4 | init-project | 15s | `POST /plan-api/projects` or verify default project |
-| 5 | create-plan | 15s | `POST /plan-api/plans` with the prompt above |
+| 4 | init-project | 15s | `POST /plan-manager/projects` or verify default project |
+| 5 | create-plan | 15s | `POST /plan-manager/plans` with the prompt above |
 | 6 | wait-for-plan-goal | 180s | Poll until plan `goal` is non-empty |
 | 7 | wait-for-approval | 600s | Poll until `status` is `approved` |
-| 8 | trigger-execution | 15s | `POST /plan-api/plans/{slug}/execute` |
+| 8 | trigger-execution | 15s | `POST /plan-manager/plans/{slug}/execute` |
 | 9 | wait-for-scenarios | 120s | Poll until at least 3 scenarios are non-pending |
 | 10 | wait-for-execution | 900s | Poll until `status` is `reviewing_rollup` or `complete` |
 | 11 | wait-for-rollup | 120s | If status is `reviewing_rollup`, poll until `status` is `complete` |
@@ -653,8 +653,8 @@ three instances:
   and multi-file generation across 3+ scenarios takes significantly longer than Go scenarios. A
   real LLM provider with a loaded inference cluster can take 12–15 minutes for this scenario.
 - `reviewing_rollup` is a distinct plan status introduced in the reactive execution model
-  (ADR-025). If the plan-api version predates this status, the `wait-for-execution` stage will
-  never exit via the rollup path — it will poll until `complete` directly. Check the plan-api
+  (ADR-025). If the plan-manager version predates this status, the `wait-for-execution` stage will
+  never exit via the rollup path — it will poll until `complete` directly. Check the plan-manager
   version before asserting rollup behavior.
 - The epic scenario does not use a mock LLM. There are no fixture files for it. Running
   `task e2e:mock -- epic-meshtastic` will fail — use `task e2e:epic` exclusively.
