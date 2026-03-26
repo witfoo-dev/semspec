@@ -222,25 +222,17 @@ func (c *Component) watchPlanStates(ctx context.Context) {
 			if entry.Operation() != jetstream.KeyValuePut {
 				continue
 			}
-			// Revision 1 == first write == plan just created. Skip all subsequent writes
-			// (status transitions, review results, etc.) to avoid re-triggering.
-			if entry.Revision() != 1 {
-				continue
-			}
-
 			var plan struct {
 				Slug   string `json:"slug"`
 				Title  string `json:"title"`
 				Status string `json:"status"`
 			}
 			if err := json.Unmarshal(entry.Value(), &plan); err != nil {
-				c.logger.Warn("PLAN_STATES watcher: failed to parse entry",
-					"key", entry.Key(), "error", err)
 				continue
 			}
 
-			// Guard: only draft plans in the "created" status.
-			if plan.Status != "created" {
+			// Only trigger on new plans (status empty or "created").
+			if plan.Status != "" && plan.Status != string(workflow.StatusCreated) {
 				continue
 			}
 			if plan.Slug == "" {
