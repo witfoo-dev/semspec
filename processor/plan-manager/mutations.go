@@ -358,8 +358,23 @@ func (c *Component) handleApprovedMutation(ctx context.Context, data []byte) Mut
 	ps := c.plans
 	c.mu.RUnlock()
 
-	if err := ps.setStatus(ctx, req.Slug, workflow.StatusApproved); err != nil {
-		return MutationResponse{Success: false, Error: fmt.Sprintf("status transition: %v", err)}
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusApproved) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → approved", current)}
+	}
+
+	now := time.Now()
+	plan.Approved = true
+	plan.ApprovedAt = &now
+	plan.Status = workflow.StatusApproved
+
+	if err := ps.save(ctx, plan); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
 	c.logger.Info("Plan approved via mutation", "slug", req.Slug)
