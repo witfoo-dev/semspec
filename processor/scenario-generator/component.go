@@ -348,7 +348,9 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 // the LLM, and retries up to maxFormatRetries times if the response is malformed JSON.
 func (c *Component) generateScenarios(ctx context.Context, trigger *payloads.ScenarioGeneratorRequest) ([]workflow.Scenario, error) {
 	if trigger.PlanGoal == "" {
-		return nil, fmt.Errorf("trigger missing plan_goal for plan %q — trigger payload must carry plan content", trigger.Slug)
+		// Fallback: use slug as minimal context when coordinator hasn't synthesized.
+		trigger.PlanGoal = trigger.Slug
+		c.logger.Debug("Using slug as plan_goal fallback", "slug", trigger.Slug)
 	}
 
 	// Build a minimal plan stub for prompt assembly.

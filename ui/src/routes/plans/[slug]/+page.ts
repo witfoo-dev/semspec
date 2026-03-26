@@ -9,25 +9,26 @@ export const load: PageLoad = async ({ params, fetch, depends }) => {
 	const slug = params.slug;
 
 	// Fetch plan, tasks, and requirements in parallel
+	// Backend may return JSON `null` for empty collections, so coalesce to []
 	const [plan, tasks, requirements] = await Promise.all([
 		fetch(`/plan-manager/plans/${slug}`)
 			.then((r) => (r.ok ? (r.json() as Promise<PlanWithStatus>) : null))
 			.catch(() => null),
 		fetch(`/plan-manager/plans/${slug}/tasks`)
-			.then((r) => (r.ok ? (r.json() as Promise<Task[]>) : []))
+			.then((r) => (r.ok ? r.json().then((d: Task[] | null) => d ?? []) : []))
 			.catch(() => [] as Task[]),
 		fetch(`/plan-manager/plans/${slug}/requirements`)
-			.then((r) => (r.ok ? (r.json() as Promise<Requirement[]>) : []))
+			.then((r) => (r.ok ? r.json().then((d: Requirement[] | null) => d ?? []) : []))
 			.catch(() => [] as Requirement[])
 	]);
 
 	// Fetch scenarios for each requirement in parallel
 	const scenarioEntries = await Promise.all(
-		requirements.map(async (req) => {
+		(requirements ?? []).map(async (req) => {
 			const scenarios = await fetch(
 				`/plan-manager/plans/${slug}/scenarios?requirement_id=${encodeURIComponent(req.id)}`
 			)
-				.then((r) => (r.ok ? (r.json() as Promise<Scenario[]>) : []))
+				.then((r) => (r.ok ? r.json().then((d: Scenario[] | null) => d ?? []) : []))
 				.catch(() => [] as Scenario[]);
 			return [req.id, scenarios] as const;
 		})

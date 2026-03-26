@@ -12,38 +12,56 @@ test.describe('@mock board', () => {
 	});
 
 	test('shows column chips with default columns visible', async ({ page }) => {
-		await page.goto('/');
-		await waitForHydration(page);
+		// Kanban only renders when plans exist
+		const plan = await createPlan(`Chip visibility test ${Date.now()}`);
+		try {
+			await page.goto('/');
+			await waitForHydration(page);
 
-		// Default ON columns — chips contain label + optional count
-		for (const label of ['Review', 'Ready', 'Running', 'Complete']) {
-			await expect(page.getByRole('button', { name: new RegExp(`^${label}`) }).first()).toBeVisible();
+			// Default ON columns — chips contain label + optional count
+			for (const label of ['Review', 'Ready', 'Running', 'Complete']) {
+				await expect(page.getByRole('button', { name: new RegExp(`^${label}`) }).first()).toBeVisible();
+			}
+		} finally {
+			await deletePlan(plan.slug).catch(() => {});
 		}
 	});
 
 	test('Failed chip is off by default', async ({ page }) => {
-		await page.goto('/');
-		await waitForHydration(page);
+		// Kanban only renders when plans exist
+		const plan = await createPlan(`Failed chip test ${Date.now()}`);
+		try {
+			await page.goto('/');
+			await waitForHydration(page);
 
-		const failedChip = page.getByRole('button', { name: /^Failed/ }).first();
-		await expect(failedChip).toBeVisible();
-		await expect(failedChip).toHaveAttribute('aria-pressed', 'false');
+			const failedChip = page.getByRole('button', { name: /^Failed/ }).first();
+			await expect(failedChip).toBeVisible();
+			await expect(failedChip).toHaveAttribute('aria-pressed', 'false');
+		} finally {
+			await deletePlan(plan.slug).catch(() => {});
+		}
 	});
 
 	test('toggling a chip hides/shows its column', async ({ page }) => {
-		await page.goto('/');
-		await waitForHydration(page);
+		// Kanban only renders when plans exist
+		const plan = await createPlan(`Toggle chip test ${Date.now()}`);
+		try {
+			await page.goto('/');
+			await waitForHydration(page);
 
-		const reviewColumn = page.locator('.column-label', { hasText: 'Review' });
-		await expect(reviewColumn).toBeVisible();
+			const reviewColumn = page.locator('.column-label', { hasText: 'Review' });
+			await expect(reviewColumn).toBeVisible();
 
-		// Toggle Review chip off
-		await page.getByRole('button', { name: /^Review/ }).first().click();
-		await expect(reviewColumn).not.toBeVisible();
+			// Toggle Review chip off
+			await page.getByRole('button', { name: /^Review/ }).first().click();
+			await expect(reviewColumn).not.toBeVisible();
 
-		// Toggle it back on
-		await page.getByRole('button', { name: /^Review/ }).first().click();
-		await expect(reviewColumn).toBeVisible();
+			// Toggle it back on
+			await page.getByRole('button', { name: /^Review/ }).first().click();
+			await expect(reviewColumn).toBeVisible();
+		} finally {
+			await deletePlan(plan.slug).catch(() => {});
+		}
 	});
 
 	test('new plan appears in Review column', async ({ page }) => {

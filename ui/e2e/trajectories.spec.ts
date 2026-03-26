@@ -27,10 +27,8 @@ test.describe('@mock trajectories', () => {
 		const list = page.getByTestId('trajectory-list');
 		const empty = page.getByTestId('trajectories-empty');
 
-		// One of these should be visible
-		const hasItems = await list.isVisible().catch(() => false);
-		const isEmpty = await empty.isVisible().catch(() => false);
-		expect(hasItems || isEmpty).toBe(true);
+		// Wait for loading to resolve — one of these should appear
+		await expect(list.or(empty)).toBeVisible();
 	});
 
 	test('trajectory items link to detail page', async ({ page }) => {

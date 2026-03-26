@@ -44,7 +44,10 @@ test.describe('@mock right-panel', () => {
 	test('tab switching works', async ({ page }) => {
 		const res = await fetch('http://localhost:3000/plan-manager/plans');
 		const plans = await res.json();
-		const approved = plans.find((p: any) => p.approved === true);
+		// Avoid executing plans — auto-switch logic overrides tab selection during execution
+		const approved = plans.find(
+			(p: any) => p.approved === true && !['implementing', 'executing', 'reviewing_rollup'].includes(p.stage)
+		);
 
 		if (!approved) {
 			test.skip();
