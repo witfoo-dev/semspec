@@ -33,7 +33,6 @@ import (
 	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/tools/sandbox"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
-	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
@@ -372,15 +371,14 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		}
 	}
 
-	// Write initial entity triples.
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "requirement-execution")
-	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phaseDecomposing); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseDecomposing, "error", err)
+	// Send creation mutation to execution-manager (single writer to EXECUTION_STATES).
+	storeKey, mutErr := c.sendReqCreate(ctx, exec, trigger)
+	if mutErr != nil {
+		c.logger.Warn("Failed to send req.create mutation (graph observability degraded)",
+			"entity_id", entityID, "error", mutErr)
+	} else {
+		exec.storeKey = storeKey
 	}
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Slug, trigger.Slug)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.RequirementID, trigger.RequirementID)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.ProjectID, trigger.ProjectID)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
 
 	// Publish initial entity snapshot for graph observability.
 	c.publishEntity(ctx, NewRequirementExecutionEntity(exec).WithPhase(phaseDecomposing))
@@ -513,10 +511,12 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 		exec.NodeIndex[dagResponse.DAG.Nodes[i].ID] = &dagResponse.DAG.Nodes[i]
 	}
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseExecuting); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseExecuting, "error", err)
+	nodeCount := len(sorted)
+	if err := c.sendReqPhase(ctx, exec.storeKey, phaseExecuting, map[string]any{
+		"node_count": nodeCount,
+	}); err != nil {
+		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseExecuting, "error", err)
 	}
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.NodeCount, len(sorted))
 
 	c.logger.Info("Decomposition complete, starting serial execution",
 		"entity_id", exec.EntityID,
@@ -557,9 +557,6 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 		return
 	}
 
-	// TODO: no vocabulary constant for per-node status predicates; kept as formatted string.
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, fmt.Sprintf("workflow.node.%s.status", nodeID), "completed")
-
 	// Update the DAG node graph entity to reflect successful completion.
 	c.publishDAGNodeStatus(ctx, exec, nodeID, "completed")
 
@@ -578,6 +575,16 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 		}
 	}
 	exec.NodeResults = append(exec.NodeResults, nodeResult)
+
+	// Send node completion mutation to execution-manager.
+	wfResult := &workflow.NodeResult{
+		NodeID:        nodeResult.NodeID,
+		FilesModified: nodeResult.FilesModified,
+		Summary:       nodeResult.Summary,
+	}
+	if err := c.sendReqNode(ctx, exec.storeKey, exec.CurrentNodeIdx, "", wfResult); err != nil {
+		c.logger.Warn("Failed to send req.node mutation", "node_id", nodeID, "error", err)
+	}
 
 	c.logger.Info("Node completed",
 		"entity_id", exec.EntityID,
@@ -721,8 +728,10 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 		ScenarioBranch: exec.RequirementBranch,
 	}
 
-	// TODO: no vocabulary constant for per-node status predicates; kept as formatted string.
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, fmt.Sprintf("workflow.node.%s.status", nodeID), "running")
+	// Send node dispatch mutation to execution-manager.
+	if err := c.sendReqNode(ctx, exec.storeKey, exec.CurrentNodeIdx, taskID, nil); err != nil {
+		c.logger.Warn("Failed to send req.node mutation", "node_id", nodeID, "error", err)
+	}
 
 	// Update the DAG node graph entity to reflect that execution has started.
 	c.publishDAGNodeStatus(ctx, exec, nodeID, "executing")
@@ -763,8 +772,10 @@ func (c *Component) dispatchRequirementRedTeamLocked(ctx context.Context, exec *
 	exec.RedTeamTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseRedTeaming); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseRedTeaming, "error", err)
+	if err := c.sendReqPhase(ctx, exec.storeKey, phaseRedTeaming, map[string]any{
+		"red_team_task_id": taskID,
+	}); err != nil {
+		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseRedTeaming, "error", err)
 	}
 
 	asmCtx := c.buildRequirementReviewContext(exec)
@@ -817,8 +828,8 @@ func (c *Component) handleRequirementRedTeamCompleteLocked(ctx context.Context, 
 		}
 	}
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
+	if err := c.sendReqPhase(ctx, exec.storeKey, phaseReviewing, nil); err != nil {
+		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseReviewing, "error", err)
 	}
 	c.dispatchRequirementReviewerLocked(ctx, exec)
 }
@@ -830,8 +841,10 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 	exec.ReviewerTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
+	if err := c.sendReqPhase(ctx, exec.storeKey, phaseReviewing, map[string]any{
+		"reviewer_task_id": taskID,
+	}); err != nil {
+		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseReviewing, "error", err)
 	}
 
 	asmCtx := c.buildRequirementReviewContext(exec)
@@ -999,8 +1012,8 @@ func (c *Component) markCompletedLocked(ctx context.Context, exec *requirementEx
 	}
 	exec.terminated = true
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseCompleted); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseCompleted, "error", err)
+	if err := c.sendReqPhase(ctx, exec.storeKey, phaseCompleted, nil); err != nil {
+		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseCompleted, "error", err)
 	}
 
 	c.requirementsCompleted.Add(1)
@@ -1025,10 +1038,11 @@ func (c *Component) markFailedLocked(ctx context.Context, exec *requirementExecu
 	}
 	exec.terminated = true
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseFailed); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseFailed, "error", err)
+	if err := c.sendReqPhase(ctx, exec.storeKey, phaseFailed, map[string]any{
+		"error_reason": reason,
+	}); err != nil {
+		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseFailed, "error", err)
 	}
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.FailureReason, reason)
 
 	c.requirementsFailed.Add(1)
 
@@ -1116,10 +1130,11 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *requirementExecut
 	}
 	exec.terminated = true
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseError, "error", err)
+	if err := c.sendReqPhase(ctx, exec.storeKey, phaseError, map[string]any{
+		"error_reason": reason,
+	}); err != nil {
+		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseError, "error", err)
 	}
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ErrorReason, reason)
 
 	c.errors.Add(1)
 

@@ -29,6 +29,10 @@ type requirementExecution struct {
 	// when timeout and completion events race.
 	terminated bool
 
+	// storeKey is the EXECUTION_STATES KV key (req.<slug>.<reqID>).
+	// Set after successful creation mutation to execution-manager.
+	storeKey string
+
 	// EntityID is the canonical graph entity ID:
 	// semspec.local.exec.req.run.<slug>-<requirementID>
 	EntityID string
