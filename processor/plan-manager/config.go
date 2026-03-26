@@ -15,6 +15,10 @@ type Config struct {
 	// ExecutionBucketName is the KV bucket name for workflow executions.
 	ExecutionBucketName string `json:"execution_bucket_name" schema:"type:string,description:KV bucket for workflow executions,category:basic,default:WORKFLOW_EXECUTIONS"`
 
+	// PlanStateBucket is the KV bucket name for plan state (PLAN_STATES).
+	// The write IS the event — downstream components watch this bucket.
+	PlanStateBucket string `json:"plan_state_bucket" schema:"type:string,description:KV bucket for plan state (observable twofer),category:advanced,default:PLAN_STATES"`
+
 	// EventStreamName is the JetStream stream for workflow events (plan_approved, etc.).
 	EventStreamName string `json:"event_stream_name" schema:"type:string,description:JetStream stream for workflow events,category:basic,default:WORKFLOW"`
 
@@ -91,6 +95,7 @@ func DefaultConfig() Config {
 	defaultTrue := true
 	return Config{
 		ExecutionBucketName:   "WORKFLOW_EXECUTIONS",
+		PlanStateBucket:       "PLAN_STATES",
 		EventStreamName:       "WORKFLOW",
 		UserStreamName:        "USER",
 		MaxConcurrentPlanners: 3,

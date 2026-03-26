@@ -6,44 +6,79 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
+	sscache "github.com/c360studio/semstreams/pkg/cache"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // planStore owns the lifecycle of plan data entities (wf.plan.plan.*).
-// It follows the same 3-layer pattern as execution-manager:
+// It follows the 3-layer manager pattern:
 //
-//  1. sync.Map — hot cache, all runtime reads go here
-//  2. WriteTriple — durable write-through to ENTITY_STATES via graph-ingest
-//  3. reconcile — startup-only recovery from ENTITY_STATES
+//  1. cache.Cache[*workflow.Plan] — TTL cache, all runtime reads go here first
+//  2. jetstream.KeyValue (PLAN_STATES) — observable, durable write-through;
+//     the write IS the event (KV twofer). May be nil in tests / no-NATS mode.
+//  3. *graphutil.TripleWriter — global graph truth for rules and cross-component
+//     queries. Still the fallback source during startup reconciliation.
 //
-// Runtime reads NEVER hit the graph. The graph is for durability, rules,
-// and crash recovery.
+// Runtime reads never hit the graph. Reconcile prefers KV on restart; falls
+// back to graph only on first startup (empty KV bucket).
 type planStore struct {
-	cache        sync.Map // slug → *workflow.Plan
+	cache        sscache.Cache[*workflow.Plan]
+	kvBucket     jetstream.KeyValue // PLAN_STATES — may be nil (tests, no NATS)
 	tripleWriter *graphutil.TripleWriter
 	logger       *slog.Logger
 }
 
-// newPlanStore creates a plan store with the given triple writer.
-func newPlanStore(tw *graphutil.TripleWriter, logger *slog.Logger) *planStore {
+// newPlanStore creates a plan store backed by a TTL in-memory cache.
+// kv may be nil — store operates in cache+graph-only mode when absent.
+func newPlanStore(ctx context.Context, kv jetstream.KeyValue, tw *graphutil.TripleWriter, logger *slog.Logger) (*planStore, error) {
+	c, err := sscache.NewTTL[*workflow.Plan](ctx, 30*time.Minute, 5*time.Minute)
+	if err != nil {
+		return nil, fmt.Errorf("create plan cache: %w", err)
+	}
 	return &planStore{
+		cache:        c,
+		kvBucket:     kv,
 		tripleWriter: tw,
 		logger:       logger,
-	}
+	}, nil
 }
 
-// reconcile populates the cache from ENTITY_STATES on startup.
-// This is the only time we read from the graph — all subsequent reads
-// go through the cache.
+// reconcile populates the cache on startup.
+// Prefers KV (fast, local, operational source of truth). Falls back to the
+// graph when the KV bucket is absent or empty (e.g., first ever startup).
 func (s *planStore) reconcile(ctx context.Context) {
 	reconcileCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
+	// --- KV path (preferred) ---
+	if s.kvBucket != nil {
+		keys, err := s.kvBucket.Keys(reconcileCtx)
+		if err == nil && len(keys) > 0 {
+			recovered := 0
+			for _, key := range keys {
+				entry, err := s.kvBucket.Get(reconcileCtx, key)
+				if err != nil {
+					continue
+				}
+				var plan workflow.Plan
+				if json.Unmarshal(entry.Value(), &plan) == nil {
+					s.cache.Set(plan.Slug, &plan) //nolint:errcheck // cache set is best-effort
+					recovered++
+				}
+			}
+			if recovered > 0 {
+				s.logger.Info("Plan cache reconciled from KV", "count", recovered)
+				return
+			}
+		}
+	}
+
+	// --- Graph fallback (first startup or empty KV) ---
 	prefix := workflow.EntityPrefix() + ".wf.plan.plan."
 	entities, err := s.tripleWriter.ReadEntitiesByPrefix(reconcileCtx, prefix, 500)
 	if err != nil {
@@ -57,13 +92,11 @@ func (s *planStore) reconcile(ctx context.Context) {
 		if triples[semspec.PredicatePlanStatus] == "deleted" {
 			continue
 		}
-
 		plan := planFromTripleMap(entityID, triples)
 		if plan.Slug == "" {
 			continue
 		}
-
-		s.cache.Store(plan.Slug, plan)
+		s.cache.Set(plan.Slug, plan) //nolint:errcheck // cache set is best-effort
 		recovered++
 	}
 
@@ -72,38 +105,53 @@ func (s *planStore) reconcile(ctx context.Context) {
 	}
 }
 
-// get returns a shallow copy of a plan by slug from the cache.
-// Returns a copy to prevent data races — multiple goroutines (HTTP handlers,
-// event handlers, coordinator) may hold plan pointers concurrently.
+// get returns a shallow copy of a plan by slug.
+// Cache is checked first; on miss the KV bucket is queried and the result is
+// back-filled into the cache.
 func (s *planStore) get(slug string) (*workflow.Plan, bool) {
-	val, ok := s.cache.Load(slug)
-	if !ok {
-		return nil, false
+	// 1. Cache hit — shallow copy to prevent races.
+	if plan, ok := s.cache.Get(slug); ok {
+		p := *plan
+		return &p, true
 	}
-	p := *val.(*workflow.Plan)
-	return &p, true
+
+	// 2. KV fallback on cache miss.
+	if s.kvBucket != nil {
+		entry, err := s.kvBucket.Get(context.Background(), slug)
+		if err == nil {
+			var plan workflow.Plan
+			if json.Unmarshal(entry.Value(), &plan) == nil {
+				s.cache.Set(plan.Slug, &plan) //nolint:errcheck // cache set is best-effort
+				p := plan
+				return &p, true
+			}
+		}
+	}
+
+	return nil, false
 }
 
-// list returns all plans from the cache, sorted by creation time (newest first).
+// list returns all non-expired plans from the cache, sorted newest-first.
 func (s *planStore) list() []*workflow.Plan {
 	plans := make([]*workflow.Plan, 0)
-	s.cache.Range(func(_, value any) bool {
-		plans = append(plans, value.(*workflow.Plan))
-		return true
-	})
+	for _, key := range s.cache.Keys() {
+		if plan, ok := s.cache.Get(key); ok {
+			plans = append(plans, plan)
+		}
+	}
 	sort.Slice(plans, func(i, j int) bool {
 		return plans[i].CreatedAt.After(plans[j].CreatedAt)
 	})
 	return plans
 }
 
-// exists checks if a plan exists in the cache (not deleted).
+// exists reports whether a plan is present in the cache (not deleted).
 func (s *planStore) exists(slug string) bool {
-	_, ok := s.cache.Load(slug)
+	_, ok := s.cache.Get(slug)
 	return ok
 }
 
-// create creates a new plan in the cache and writes triples to ENTITY_STATES.
+// create creates a new plan and persists it through all three layers.
 func (s *planStore) create(ctx context.Context, slug, title string) (*workflow.Plan, error) {
 	if err := workflow.ValidateSlug(slug); err != nil {
 		return nil, err
@@ -130,15 +178,16 @@ func (s *planStore) create(ctx context.Context, slug, title string) (*workflow.P
 		},
 	}
 
-	if err := s.writeTriples(ctx, plan); err != nil {
-		return nil, fmt.Errorf("write plan triples: %w", err)
+	if err := s.save(ctx, plan); err != nil {
+		return nil, fmt.Errorf("save new plan: %w", err)
 	}
-
-	s.cache.Store(slug, plan)
 	return plan, nil
 }
 
-// save updates a plan in the cache and writes triples to ENTITY_STATES.
+// save persists a plan through all three layers in order:
+// cache → KV bucket → graph triples.
+// KV write failures are logged but do not abort the operation — cache and
+// graph remain the authoritative copies when KV is temporarily unavailable.
 func (s *planStore) save(ctx context.Context, plan *workflow.Plan) error {
 	if err := workflow.ValidateSlug(plan.Slug); err != nil {
 		return err
@@ -147,16 +196,31 @@ func (s *planStore) save(ctx context.Context, plan *workflow.Plan) error {
 		return err
 	}
 
+	// 1. Update cache.
+	s.cache.Set(plan.Slug, plan) //nolint:errcheck // cache set is best-effort
+
+	// 2. Write to KV bucket (observable — this IS the event).
+	if s.kvBucket != nil {
+		data, err := json.Marshal(plan)
+		if err != nil {
+			return fmt.Errorf("marshal plan for KV: %w", err)
+		}
+		if _, err := s.kvBucket.Put(ctx, plan.Slug, data); err != nil {
+			s.logger.Warn("KV put failed (cache and graph still updated)",
+				"slug", plan.Slug, "error", err)
+		}
+	}
+
+	// 3. Write to graph (global truth).
 	if err := s.writeTriples(ctx, plan); err != nil {
 		return fmt.Errorf("write plan triples: %w", err)
 	}
 
-	s.cache.Store(plan.Slug, plan)
 	return nil
 }
 
-// setStatus transitions a plan to a new status. Validates the transition,
-// writes the status triple, and updates the cache.
+// setStatus transitions a plan to a new status, validates the transition, then
+// writes through all three layers via save.
 func (s *planStore) setStatus(ctx context.Context, slug string, target workflow.Status) error {
 	plan, ok := s.get(slug)
 	if !ok {
@@ -172,7 +236,7 @@ func (s *planStore) setStatus(ctx context.Context, slug string, target workflow.
 	return s.save(ctx, plan)
 }
 
-// approve transitions a plan to approved status.
+// approve transitions a plan to approved status and writes through all layers.
 func (s *planStore) approve(ctx context.Context, plan *workflow.Plan) error {
 	if plan.Approved {
 		return fmt.Errorf("%w: %s", workflow.ErrAlreadyApproved, plan.Slug)
@@ -186,7 +250,8 @@ func (s *planStore) approve(ctx context.Context, plan *workflow.Plan) error {
 	return s.save(ctx, plan)
 }
 
-// delete tombstones a plan by setting its status to "deleted" and removing from cache.
+// delete tombstones a plan by setting its status to "deleted", writing a graph
+// tombstone, then removing it from cache and KV.
 func (s *planStore) delete(ctx context.Context, slug string) error {
 	plan, ok := s.get(slug)
 	if !ok {
@@ -198,25 +263,40 @@ func (s *planStore) delete(ctx context.Context, slug string) error {
 		return fmt.Errorf("write delete tombstone: %w", err)
 	}
 
-	s.cache.Delete(slug)
+	s.cache.Delete(slug) //nolint:errcheck // cache delete is best-effort
+	if s.kvBucket != nil {
+		_ = s.kvBucket.Delete(ctx, slug)
+	}
 	return nil
 }
 
-// put updates the cache for a plan that was mutated externally (e.g., via workflow functions).
-// This is a transitional method — once all writes go through the store, this can be removed.
+// put updates the cache and KV for a plan that was mutated externally (e.g.,
+// via workflow helper functions). Transitional method — once all writes go
+// through save(), this can be removed.
 func (s *planStore) put(plan *workflow.Plan) {
-	if plan != nil && plan.Slug != "" {
-		s.cache.Store(plan.Slug, plan)
+	if plan == nil || plan.Slug == "" {
+		return
+	}
+	s.cache.Set(plan.Slug, plan) //nolint:errcheck // cache set is best-effort
+	if s.kvBucket != nil {
+		if data, err := json.Marshal(plan); err == nil {
+			s.kvBucket.Put(context.Background(), plan.Slug, data) //nolint:errcheck // best-effort
+		}
 	}
 }
 
-// remove removes a plan from the cache. Used when a plan is deleted externally.
+// remove removes a plan from the cache and KV. Used when a plan is deleted
+// externally.
 func (s *planStore) remove(slug string) {
-	s.cache.Delete(slug)
+	s.cache.Delete(slug) //nolint:errcheck // cache delete is best-effort
+	if s.kvBucket != nil {
+		_ = s.kvBucket.Delete(context.Background(), slug)
+	}
 }
 
 // writeTriples writes all plan fields as individual triples to ENTITY_STATES.
-// This is the durable write-through — the cache is the read path.
+// This is the durable write-through to the global graph. Unchanged from the
+// previous implementation.
 func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error {
 	tw := s.tripleWriter
 	if tw == nil {
@@ -303,7 +383,7 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 }
 
 // planFromTripleMap reconstructs a Plan from a predicate→value map.
-// Used by reconcile to rebuild cache from ENTITY_STATES.
+// Used by reconcile to rebuild cache from ENTITY_STATES. Unchanged.
 func planFromTripleMap(entityID string, triples map[string]string) *workflow.Plan {
 	plan := &workflow.Plan{
 		ID:   entityID,

@@ -59,8 +59,7 @@ type Component struct {
 	cancel    context.CancelFunc
 }
 
-// loadPlanCached loads a plan from the cache, falling back to graph if not cached.
-// On cache miss + graph hit, the plan is added to the cache.
+// loadPlanCached loads a plan from the store (cache → KV → graph fallback).
 func (c *Component) loadPlanCached(ctx context.Context, slug string) (*workflow.Plan, error) {
 	c.mu.RLock()
 	ps := c.plans
@@ -71,7 +70,7 @@ func (c *Component) loadPlanCached(ctx context.Context, slug string) (*workflow.
 		return plan, nil
 	}
 
-	// Cache miss — fall back to graph (startup race or external mutation).
+	// Cache + KV miss — fall back to graph (startup race or external mutation).
 	plan, err := workflow.LoadPlan(ctx, tw, slug)
 	if err != nil {
 		return nil, err
@@ -80,46 +79,40 @@ func (c *Component) loadPlanCached(ctx context.Context, slug string) (*workflow.
 	return plan, nil
 }
 
-// savePlanCached saves a plan via triples and updates the cache.
+// savePlanCached saves a plan through all three layers (cache → KV → graph).
 func (c *Component) savePlanCached(ctx context.Context, plan *workflow.Plan) error {
 	c.mu.RLock()
 	ps := c.plans
-	tw := c.tripleWriter
 	c.mu.RUnlock()
 
-	if err := workflow.SavePlan(ctx, tw, plan); err != nil {
-		return err
-	}
-	ps.put(plan)
-	return nil
+	return ps.save(ctx, plan)
 }
 
-// setPlanStatusCached transitions plan status and updates the cache.
+// setPlanStatusCached transitions plan status and persists through all three layers.
+// The caller's plan pointer is updated in-place so it remains consistent after the call.
 func (c *Component) setPlanStatusCached(ctx context.Context, plan *workflow.Plan, target workflow.Status) error {
 	c.mu.RLock()
-	tw := c.tripleWriter
 	ps := c.plans
 	c.mu.RUnlock()
 
-	if err := workflow.SetPlanStatus(ctx, tw, plan, target); err != nil {
+	if err := ps.setStatus(ctx, plan.Slug, target); err != nil {
 		return err
 	}
-	ps.put(plan)
+	// Keep the caller's pointer consistent so downstream code sees the new status.
+	plan.Status = target
 	return nil
 }
 
-// approvePlanCached approves a plan and updates the cache.
+// approvePlanCached approves a plan and persists through all three layers.
+// ps.approve mutates the plan pointer in-place before saving, so the caller's
+// pointer is updated as a side effect.
 func (c *Component) approvePlanCached(ctx context.Context, plan *workflow.Plan) error {
 	c.mu.RLock()
-	tw := c.tripleWriter
 	ps := c.plans
 	c.mu.RUnlock()
 
-	if err := workflow.ApprovePlan(ctx, tw, plan); err != nil {
-		return err
-	}
-	ps.put(plan)
-	return nil
+	// ps.approve mutates plan directly (sets Approved, ApprovedAt, Status) then saves.
+	return ps.approve(ctx, plan)
 }
 
 const (
@@ -140,6 +133,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	defaults := DefaultConfig()
 	if config.ExecutionBucketName == "" {
 		config.ExecutionBucketName = defaults.ExecutionBucketName
+	}
+	if config.PlanStateBucket == "" {
+		config.PlanStateBucket = defaults.PlanStateBucket
 	}
 	if config.EventStreamName == "" {
 		config.EventStreamName = defaults.EventStreamName
@@ -211,32 +207,22 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("get jetstream: %w", err)
 	}
 
-	// Get KV bucket for workflow executions
-	execBucket, err := js.KeyValue(ctx, c.config.ExecutionBucketName)
+	execBucket, planBucket, tw := c.acquireInfrastructure(ctx, js)
+
+	// Create cancellation context before initializing stores (needed for TTL cache background goroutine).
+	childCtx, cancel := context.WithCancel(ctx)
+
+	// Initialize entity stores and reconcile from startup sources.
+	ps, err := newPlanStore(childCtx, planBucket, tw, c.logger)
 	if err != nil {
-		// Don't fail startup - bucket might be created later by workflow processor
-		c.logger.Warn("Workflow executions bucket not found, will retry on queries",
-			"bucket", c.config.ExecutionBucketName,
-			"error", err)
+		cancel()
+		return fmt.Errorf("create plan store: %w", err)
 	}
-
-	// Initialize TripleWriter for workflow state operations.
-	tw := &graphutil.TripleWriter{
-		NATSClient:    c.natsClient,
-		Logger:        c.logger,
-		ComponentName: "plan-manager",
-	}
-
-	// Initialize entity stores and reconcile from graph.
-	ps := newPlanStore(tw, c.logger)
 	rs := newRequirementStore(tw, c.logger)
 	ss := newScenarioStore(tw, c.logger)
 	ps.reconcile(ctx)
 	rs.reconcile(ctx)
 	ss.reconcile(ctx)
-
-	// Create cancellation context
-	childCtx, cancel := context.WithCancel(ctx)
 
 	// Wire stores into coordinator so it can read/write plan state.
 	c.coordinator.plans = ps
@@ -284,6 +270,36 @@ func (c *Component) Start(ctx context.Context) error {
 		"exec_bucket", c.config.ExecutionBucketName)
 
 	return nil
+}
+
+// Stop gracefully stops the component.
+// acquireInfrastructure sets up KV buckets and TripleWriter for Start().
+// Failures are non-fatal — the component degrades gracefully.
+func (c *Component) acquireInfrastructure(ctx context.Context, js jetstream.JetStream) (jetstream.KeyValue, jetstream.KeyValue, *graphutil.TripleWriter) {
+	// Workflow executions bucket (read-only, may not exist yet).
+	execBucket, err := js.KeyValue(ctx, c.config.ExecutionBucketName)
+	if err != nil {
+		c.logger.Warn("Workflow executions bucket not found, will retry on queries",
+			"bucket", c.config.ExecutionBucketName, "error", err)
+	}
+
+	// PLAN_STATES KV bucket (observable, the KV twofer).
+	planBucket, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
+		Bucket:  c.config.PlanStateBucket,
+		History: 1,
+	})
+	if err != nil {
+		c.logger.Warn("PLAN_STATES bucket unavailable, KV layer disabled",
+			"bucket", c.config.PlanStateBucket, "error", err)
+	}
+
+	tw := &graphutil.TripleWriter{
+		NATSClient:    c.natsClient,
+		Logger:        c.logger,
+		ComponentName: "plan-manager",
+	}
+
+	return execBucket, planBucket, tw
 }
 
 // Stop gracefully stops the component.

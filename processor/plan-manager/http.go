@@ -429,6 +429,8 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 	switch endpoint {
 	case "":
 		c.handlePlanCRUD(w, r, slug)
+	case "stream":
+		c.handlePlanStream(w, r, slug)
 	case "promote":
 		requireMethod(w, r, http.MethodPost, func() { c.handlePromotePlan(w, r, slug) })
 	case "reviews":
