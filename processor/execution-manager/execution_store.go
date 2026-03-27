@@ -137,6 +137,36 @@ func (s *executionStore) listTasks() []*workflow.TaskExecution {
 	return out
 }
 
+// listTasksForSlug returns task executions matching the given plan slug.
+// Keys are formatted as "task.<slug>.<taskID>".
+func (s *executionStore) listTasksForSlug(slug string) []*workflow.TaskExecution {
+	prefix := "task." + slug + "."
+	var out []*workflow.TaskExecution
+	for _, key := range s.taskCache.Keys() {
+		if strings.HasPrefix(key, prefix) {
+			if exec, ok := s.taskCache.Get(key); ok {
+				out = append(out, exec)
+			}
+		}
+	}
+	return out
+}
+
+// listReqsForSlug returns requirement executions matching the given plan slug.
+// Keys are formatted as "req.<slug>.<reqID>".
+func (s *executionStore) listReqsForSlug(slug string) []*workflow.RequirementExecution {
+	prefix := "req." + slug + "."
+	var out []*workflow.RequirementExecution
+	for _, key := range s.reqCache.Keys() {
+		if strings.HasPrefix(key, prefix) {
+			if exec, ok := s.reqCache.Get(key); ok {
+				out = append(out, exec)
+			}
+		}
+	}
+	return out
+}
+
 // ---------------------------------------------------------------------------
 // Requirement Execution — CRUD
 // ---------------------------------------------------------------------------
