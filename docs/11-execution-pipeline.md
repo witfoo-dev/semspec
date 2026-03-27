@@ -10,17 +10,25 @@ Reference for the full semspec execution pipeline — from plan creation through
 │  /plan <title>                                                                │
 │       │                                                                       │
 │       ▼                                                                       │
-│  plan-manager ──► plan-coordinator                                            │
-│                     │                                                         │
-│                     ├──► planner (async, parallel)                            │
-│                     ├──► requirement-generator (async)                        │
-│                     └──► scenario-generator (async)                           │
-│                                │                                              │
-│                                ▼                                              │
-│                          plan-reviewer ──► approved / needs_changes           │
-│                                │                                              │
-│                                ▼ (approved)                                   │
-│                    status: ready_for_execution                                │
+│  plan-manager (status: created → PLAN_STATES KV)                             │
+│       │                                                                       │
+│       ▼  (KV watch)                                                           │
+│  planner ──► Goal/Context/Scope (status: drafted)                             │
+│       │                                                                       │
+│       ▼  (KV watch)                                                           │
+│  plan-reviewer ──► approved / needs_changes                                  │
+│       │  (retry up to 3× with findings in context)                            │
+│       │                                                                       │
+│       ▼  (approved → status: reviewed)                                        │
+│  requirement-generator ──► RequirementsGeneratedEvent                         │
+│       │  (status: requirements_generated)                                     │
+│       │                                                                       │
+│       ▼  (KV watch)                                                           │
+│  scenario-generator ──► ScenariosGeneratedEvent                               │
+│       │  (status: scenarios_generated)                                        │
+│       │                                                                       │
+│       ▼                                                                       │
+│  status: ready_for_execution                                                  │
 │                                                                               │
 └───────────────────────────────────────────────────────────────────────────────┘
                                  │
@@ -109,30 +117,31 @@ Reference for the full semspec execution pipeline — from plan creation through
 
 Between plan approval and `/execute`, humans can review, edit, or delete the generated
 Requirements and Scenarios via the REST API. This is the primary quality gate before execution
-commits resources. When `auto_approve` is enabled on plan-coordinator, the pipeline skips this
-gate and flows directly to execution. See [Plan API Reference](12-plan-api.md) for the full
-endpoint reference.
+commits resources. When `auto_approve` is enabled, the pipeline skips this gate and flows
+directly to execution. See [Plan API Reference](12-plan-api.md) for the full endpoint reference.
 
 ## NATS Subject Reference
 
 ### Plan Phase
 
+The plan phase is driven by `PLAN_STATES` KV bucket watches. Each component reacts to a specific
+status value; there is no coordinator. NATS subjects carry the trigger payloads between
+components.
+
 | Subject | Stream | Publisher → Subscriber | Payload | Consumer |
 |---------|--------|----------------------|---------|----------|
-| `workflow.trigger.plan-coordinator` | WORKFLOWS | plan-manager → plan-coordinator | `TriggerPayload` | `plan-coordinator-coordination-trigger` |
-| `workflow.async.planner` | WORKFLOWS | plan-coordinator → planner | `TriggerPayload` | `planner` |
-| `workflow.async.requirement-generator` | WORKFLOWS | plan-coordinator → requirement-generator | `TriggerPayload` | `requirement-generator` |
-| `workflow.async.scenario-generator` | WORKFLOWS | plan-coordinator → scenario-generator | `TriggerPayload` | `scenario-generator` |
-| `workflow.async.plan-reviewer` | WORKFLOWS | plan-coordinator → plan-reviewer | `TriggerPayload` | `plan-reviewer` |
-| `workflow.events.requirements.generated` | WORKFLOWS | requirement-generator → plan-coordinator | `RequirementsGeneratedEvent` | `plan-coordinator-reqs-generated` |
-| `workflow.events.scenarios.generated` | WORKFLOWS | scenario-generator → plan-coordinator | `ScenariosGeneratedEvent` | `plan-coordinator-scenarios-generated` |
-| `agent.complete.>` | AGENT | agentic-loop → plan-coordinator | `LoopCompletedEvent` | `plan-coordinator-loop-completions` |
+| `workflow.async.planner` | WORKFLOWS | plan-manager → planner | `TriggerPayload` | `planner` |
+| `workflow.async.plan-reviewer` | WORKFLOWS | planner → plan-reviewer | `TriggerPayload` | `plan-reviewer` |
+| `workflow.async.requirement-generator` | WORKFLOWS | plan-reviewer → requirement-generator | `TriggerPayload` | `requirement-generator` |
+| `workflow.async.scenario-generator` | WORKFLOWS | requirement-generator → scenario-generator | `TriggerPayload` | `scenario-generator` |
+| `workflow.events.requirements.generated` | WORKFLOWS | requirement-generator → plan-manager | `RequirementsGeneratedEvent` | `plan-manager-reqs-generated` |
+| `workflow.events.scenarios.generated` | WORKFLOWS | scenario-generator → plan-manager | `ScenariosGeneratedEvent` | `plan-manager-scenarios-generated` |
 
 ### Execution Trigger Phase
 
 | Subject | Stream | Publisher → Subscriber | Payload | Consumer |
 |---------|--------|----------------------|---------|----------|
-| `scenario.orchestrate.*` | WORKFLOWS | plan-manager / plan-coordinator → scenario-orchestrator | `ScenarioOrchestrationTrigger` (BaseMessage) | `scenario-orchestrator` |
+| `scenario.orchestrate.*` | WORKFLOWS | plan-manager → scenario-orchestrator | `ScenarioOrchestrationTrigger` (BaseMessage) | `scenario-orchestrator` |
 | `workflow.trigger.requirement-execution-loop` | WORKFLOWS | scenario-orchestrator → requirement-executor | `RequirementExecutionRequest` (BaseMessage) | `requirement-executor-trigger` |
 
 ### Decomposition Phase
@@ -176,10 +185,12 @@ the component's `consumerInfos` slice and stopped cleanly in `Stop()`.
 
 | Component | Consumer Name | Subject Filter | Purpose |
 |-----------|--------------|----------------|---------|
-| plan-coordinator | `plan-coordinator-coordination-trigger` | `workflow.trigger.plan-coordinator` | Inbound plan triggers |
-| plan-coordinator | `plan-coordinator-loop-completions` | `agent.complete.>` | Planner loop completions |
-| plan-coordinator | `plan-coordinator-reqs-generated` | `workflow.events.requirements.generated` | Requirements ready signal |
-| plan-coordinator | `plan-coordinator-scenarios-generated` | `workflow.events.scenarios.generated` | Scenarios ready signal |
+| planner | `planner` | `workflow.async.planner` | Inbound plan generation triggers |
+| plan-reviewer | `plan-reviewer` | `workflow.async.plan-reviewer` | Inbound plan review triggers |
+| requirement-generator | `requirement-generator` | `workflow.async.requirement-generator` | Inbound requirement generation triggers |
+| scenario-generator | `scenario-generator` | `workflow.async.scenario-generator` | Inbound scenario generation triggers |
+| plan-manager | `plan-manager-reqs-generated` | `workflow.events.requirements.generated` | Requirements ready signal |
+| plan-manager | `plan-manager-scenarios-generated` | `workflow.events.scenarios.generated` | Scenarios ready signal |
 | scenario-orchestrator | `scenario-orchestrator` | `scenario.orchestrate.*` | Requirement dispatch triggers (Fetch pattern) |
 | requirement-executor | `requirement-executor-trigger` | `workflow.trigger.requirement-execution-loop` | Per-requirement execution start |
 | requirement-executor | `requirement-executor-loop-completions` | `agent.complete.>` | Decomposer + requirement-review loop completions |
@@ -195,14 +206,14 @@ files. The `Schema()` method on each type must match its registration exactly.
 
 | Domain | Category | Version | Type | Used By |
 |--------|----------|---------|------|---------|
-| `workflow` | `trigger` | `v1` | `TriggerPayload` | plan-coordinator, planner, plan-reviewer, plan-rollup-reviewer |
+| `workflow` | `trigger` | `v1` | `TriggerPayload` | planner, plan-reviewer, requirement-generator, scenario-generator, plan-rollup-reviewer |
 | `workflow` | `scenario-orchestration` | `v1` | `ScenarioOrchestrationTrigger` | scenario-orchestrator |
 | `workflow` | `requirement-execution` | `v1` | `RequirementExecutionRequest` | requirement-executor |
 | `workflow` | `scenario-execution` | `v1` | `ScenarioExecutionRequest` | requirement-executor (backward compat) |
 | `workflow` | `task-execution` | `v1` | `TriggerPayload` | execution-manager |
-| `workflow` | `loop-completed` | `v1` | `LoopCompletedEvent` | plan-coordinator, requirement-executor, execution-manager, plan-manager |
-| `workflow` | `requirements-generated` | `v1` | `RequirementsGeneratedEvent` | plan-coordinator |
-| `workflow` | `scenarios-generated` | `v1` | `ScenariosGeneratedEvent` | plan-coordinator |
+| `workflow` | `loop-completed` | `v1` | `LoopCompletedEvent` | requirement-executor, execution-manager, plan-manager |
+| `workflow` | `requirements-generated` | `v1` | `RequirementsGeneratedEvent` | plan-manager |
+| `workflow` | `scenarios-generated` | `v1` | `ScenariosGeneratedEvent` | plan-manager |
 | `workflow` | `scenario-execution-complete` | `v1` | `ScenarioExecutionCompleteEvent` | plan-manager |
 
 ## Key Patterns
@@ -238,10 +249,10 @@ for _, info := range s.consumerInfos {
 
 ### Fan-Out on `agent.complete.>`
 
-`agent.complete.>` is consumed by **three** independent named consumers — one per orchestrator level.
+`agent.complete.>` is consumed by **two** independent named consumers — one per orchestrator level.
 Each consumer receives every completion event; each filters by the loop IDs it dispatched, ignoring
-the rest. This allows plan-coordinator, requirement-executor, and execution-manager to coexist
-on the same stream without coordination.
+the rest. This allows requirement-executor and execution-manager to coexist on the same stream
+without coordination.
 
 ### decompose_task and StopLoop
 
@@ -295,7 +306,6 @@ the agentic-loop, collect completions, advance to the next stage.
 
 | Coordinator | Fan-out | Completion routing | Next stage |
 |---|---|---|---|
-| plan-coordinator | N planners (parallel by focus area) | `agent.complete.>` → `taskIDIndex` → `handlePlannerCompleteLocked` | synthesize → requirement-gen → scenario-gen → review |
 | requirement-executor | 1 decomposer → N DAG nodes (serial) → requirement review | `agent.complete.>` → `taskIDIndex` → `handleNodeCompleteLocked` | next node → [red team] → requirement-reviewer → complete |
 | execution-manager | 4 TDD stages (serial pipeline) | `agent.complete.>` → `taskIDIndex` → stage-specific handler | tester→builder→validator→reviewer→complete |
 | plan-manager | 1 rollup reviewer (post all scenarios) | `agent.complete.>` → `taskIDIndex` → `handleRollupCompleteLocked` | approved→complete / needs_attention |

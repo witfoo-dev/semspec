@@ -1,7 +1,7 @@
 # Semspec Components
 
-> **When to use components vs workflows?** See [Architecture: Components vs Workflows](03-architecture.md#components-vs-workflows)
-> for the decision framework.
+> **How does the planning pipeline self-coordinate?** See [Architecture: KV-Driven Pipeline](03-architecture.md#kv-driven-pipeline)
+> for the decision framework and status transition table.
 
 ---
 
@@ -65,67 +65,11 @@ No NATS subjects consumed or published. All state is filesystem-based.
 
 ## Planning
 
-### plan-coordinator
-
-**Purpose**: Orchestrates parallel planners with focus area decomposition. This is the primary entry
-point for `/plan` commands.
-
-**Location**: `processor/plan-coordinator/`
-
-#### Configuration
-
-```json
-{
-  "stream_name": "WORKFLOWS",
-  "consumer_name": "plan-coordinator",
-  "trigger_subject": "workflow.trigger.plan-coordinator",
-  "sessions_bucket": "PLAN_SESSIONS",
-  "max_concurrent_planners": 3,
-  "planner_timeout": "120s",
-  "context_timeout": "30s",
-  "default_capability": "planning"
-}
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `stream_name` | string | `WORKFLOWS` | JetStream stream for workflow triggers |
-| `consumer_name` | string | `plan-coordinator` | Durable consumer name |
-| `trigger_subject` | string | `workflow.trigger.plan-coordinator` | Subject for coordinator triggers |
-| `sessions_bucket` | string | `PLAN_SESSIONS` | KV bucket for plan sessions |
-| `max_concurrent_planners` | int | `3` | Maximum concurrent planners (1–3) |
-| `planner_timeout` | string | `120s` | Timeout for each planner to complete |
-| `context_timeout` | string | `30s` | Timeout for context building |
-| `default_capability` | string | `planning` | Default model capability for coordination |
-| `context_subject_prefix` | string | `context.build` | Subject prefix for context build requests |
-| `context_response_bucket` | string | `CONTEXT_RESPONSES` | KV bucket for context responses |
-
-#### Behavior
-
-1. **Determines focus areas**: Calls context-builder for project context, then calls the LLM to
-   decompose the plan title into 1–3 distinct focus areas.
-2. **Runs planners in parallel**: Each focus area gets its own goroutine that calls the LLM with a
-   focused system prompt and its portion of the project context.
-3. **Synthesizes results**: If multiple planners ran, calls the LLM to merge their outputs into a
-   single coherent plan; falls back to simple concatenation on merge failure.
-4. **Saves plan**: Writes the final Goal/Context/Scope to `.semspec/plans/<slug>/plan.json`.
-
-> **Design note**: plan-coordinator calls the LLM directly in goroutines for each focus area. It
-> does **not** delegate to the `planner` component.
-
-#### NATS Subjects
-
-| Subject | Transport | Direction | Description |
-|---------|-----------|-----------|-------------|
-| `workflow.trigger.plan-coordinator` | JetStream (WORKFLOWS) | Input | Plan coordinator triggers |
-| `workflow.result.plan-coordinator.<slug>` | Core NATS | Output | Completion notifications |
-
----
-
 ### planner
 
-**Purpose**: Generates Goal/Context/Scope for plans using LLM. This is the simple single-planner
-path; `plan-coordinator` is the primary orchestrator for most `/plan` commands.
+**Purpose**: Generates Goal/Context/Scope for plans using LLM. Self-triggers by watching the
+PLAN_STATES KV bucket for newly created plans (revision 1), eliminating the need for an external
+coordinator.
 
 **Location**: `processor/planner/`
 
@@ -144,17 +88,22 @@ path; `plan-coordinator` is the primary orchestrator for most `/plan` commands.
 |-------|------|---------|-------------|
 | `stream_name` | string | `WORKFLOWS` | JetStream stream name |
 | `consumer_name` | string | `planner` | Durable consumer name |
-| `trigger_subject` | string | `workflow.trigger.planner` | Subject to consume triggers from |
+| `trigger_subject` | string | `workflow.trigger.planner` | Legacy explicit trigger subject |
 | `default_capability` | string | `planning` | Default model capability |
 
 #### Behavior
 
-1. **Subscribes**: Consumes from `workflow.trigger.planner` on the WORKFLOWS stream
-2. **Loads Plan**: Reads existing plan from `.semspec/plans/{slug}/plan.json`
-3. **Generates Content**: Calls LLM with planner system prompt
-4. **Parses Response**: Extracts JSON for Goal/Context/Scope from LLM output
-5. **Saves Plan**: Updates `plan.json` with generated content
-6. **Publishes Result**: Sends completion to `workflow.result.planner.{slug}`
+1. **Watches PLAN_STATES KV**: A background watcher fires whenever a plan entry has revision 1
+   (i.e., the plan was just created by `plan-manager`). Revision > 1 entries (status updates,
+   review saves) are ignored.
+2. **Loads Plan**: Reads the new plan's goal and metadata from PLAN_STATES.
+3. **Generates Content**: Calls LLM with planner system prompt to produce Goal/Context/Scope.
+4. **Parses Response**: Extracts JSON from markdown-fenced LLM output (up to 5 format retries).
+5. **Saves Plan**: Writes generated content to `.semspec/plans/{slug}/plan.json` and sets
+   PLAN_STATES status to `drafted`.
+
+The JetStream consumer on `workflow.trigger.planner` remains active as a secondary trigger path
+for explicit invocations.
 
 #### LLM Response Format
 
@@ -172,19 +121,25 @@ The component expects the LLM to return JSON, optionally wrapped in markdown cod
 }
 ```
 
-#### NATS Subjects
+#### Self-Trigger Pattern
 
-| Subject | Transport | Direction | Description |
-|---------|-----------|-----------|-------------|
-| `workflow.trigger.planner` | JetStream (WORKFLOWS) | Input | Plan generation triggers |
-| `workflow.result.planner.<slug>` | Core NATS | Output | Completion notifications |
+```
+plan-manager writes PLAN_STATES[slug] (revision 1, status=created)
+  │
+  └── planner KV watcher fires
+        │
+        ├── Call LLM → parse JSON
+        ├── Write plan.json
+        └── Update PLAN_STATES[slug] → status=drafted
+```
 
 ---
 
 ### plan-reviewer
 
 **Purpose**: SOP-aware plan review before approval. Validates plans against project SOPs and flags
-scope hallucination.
+scope hallucination. Self-triggers by watching the PLAN_STATES KV bucket for plans that have
+reached `drafted` or `scenarios_generated` status.
 
 **Location**: `processor/plan-reviewer/`
 
@@ -196,6 +151,7 @@ scope hallucination.
   "consumer_name": "plan-reviewer",
   "trigger_subject": "workflow.trigger.plan-reviewer",
   "result_subject_prefix": "workflow.result.plan-reviewer",
+  "plan_state_bucket": "PLAN_STATES",
   "graph_gateway_url": "http://localhost:8082",
   "context_token_budget": 4000,
   "default_capability": "reviewing",
@@ -207,36 +163,31 @@ scope hallucination.
 |-------|------|---------|-------------|
 | `stream_name` | string | `WORKFLOWS` | JetStream stream for workflow triggers |
 | `consumer_name` | string | `plan-reviewer` | Durable consumer name |
-| `trigger_subject` | string | `workflow.trigger.plan-reviewer` | Subject for plan review triggers |
+| `trigger_subject` | string | `workflow.trigger.plan-reviewer` | Legacy explicit trigger subject |
 | `result_subject_prefix` | string | `workflow.result.plan-reviewer` | Subject prefix for review results |
+| `plan_state_bucket` | string | `PLAN_STATES` | KV bucket watched for status changes |
 | `graph_gateway_url` | string | `http://localhost:8082` | Graph gateway URL for context queries |
 | `context_token_budget` | int | `4000` | Token budget for additional graph context |
 | `default_capability` | string | `reviewing` | Default model capability for plan review |
 | `llm_timeout` | string | `120s` | Timeout for LLM calls |
 | `context_build_timeout` | string | `30s` | Timeout for context building requests |
 
-#### Trigger Payload
-
-```json
-{
-  "request_id": "...",
-  "slug": "add-auth-refresh",
-  "project_id": "myproject",
-  "plan_content": "{ ... }",
-  "scope_patterns": ["processor/", "workflow/"],
-  "sop_context": "..."
-}
-```
-
 #### Behavior
 
-1. **Enriches context**: Queries graph for related plans and code patterns.
-2. **Auto-approves**: If no SOP context and no graph context are available, returns `approved`
+1. **Watches PLAN_STATES KV**: A background watcher fires on status changes. The component
+   reviews on `drafted` (after planner completes) and on `scenarios_generated` (after the
+   scenario-generator publishes scenarios). This is the "KV Twofer" — the plan-manager write
+   IS the trigger.
+2. **Enriches context**: Queries graph for related plans and code patterns.
+3. **Auto-approves**: If no SOP context and no graph context are available, returns `approved`
    immediately.
-3. **Validates**: Calls LLM (temperature 0.3) to verify the plan against each SOP requirement.
-4. **Checks scope**: Compares scope paths against the actual project file tree to detect
+4. **Validates**: Calls LLM (temperature 0.3) to verify the plan against each SOP requirement.
+5. **Checks scope**: Compares scope paths against the actual project file tree to detect
    hallucinated paths.
-5. **Returns verdict**: `approved` or `needs_changes` with a `findings` array.
+6. **Returns verdict**: `approved` or `needs_changes` with a `findings` array.
+
+The JetStream consumer on `workflow.trigger.plan-reviewer` remains active as a secondary trigger
+path for explicit invocations.
 
 Each finding has the shape:
 

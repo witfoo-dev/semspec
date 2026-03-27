@@ -195,39 +195,48 @@ The system creates your plan and shows progress in the activity stream.
 ```
 
 Output:
+
 ```
 ✓ Created plan: Add user authentication with JWT tokens
 
-Change slug: add-user-authentication-with-jwt-tokens
-Status: created
+Slug:   add-user-authentication-with-jwt-tokens
+Status: planning
 
-Files created:
-- .semspec/plans/add-user-authentication-with-jwt-tokens/plan.json
-- .semspec/plans/add-user-authentication-with-jwt-tokens/metadata.json
-
-Next steps:
-1. Review the generated Goal, Context, and Scope in the Plans page
-2. Run /approve add-user-authentication-with-jwt-tokens to approve the plan
-3. Run /execute add-user-authentication-with-jwt-tokens to execute
+The planner is generating requirements and scenarios. Check the Plans
+page for progress — components self-trigger via PLAN_STATES as each
+phase completes.
 ```
+
+Plan state is stored in the `PLAN_STATES` KV bucket (source of truth). Artifact files are
+written to `.semspec/plans/<slug>/` for git-friendliness, but KV is always authoritative.
+
+The pipeline advances automatically without an explicit coordinator: `planner` generates the
+Goal/Context/Scope, `requirement-generator` and `scenario-generator` run next (each watches
+`PLAN_STATES` for the status that triggers them), and finally `plan-reviewer` validates the
+output against project SOPs.
 
 ### 2. Approve the Plan
 
-Once you've reviewed the plan, approve it:
+Once you've reviewed the generated requirements and scenarios, approve:
+
 ```
 /approve add-user-authentication-with-jwt-tokens
 ```
 
-Approval triggers validation against project SOPs before tasks are generated.
+If `auto_approve` is enabled (the default), the plan moves to `ready_for_execution`
+automatically after the reviewer passes it — no manual approval needed.
 
 ### 3. Execute
 
-Start the adversarial developer/reviewer loop:
+Start the TDD execution pipeline:
+
 ```
 /execute add-user-authentication-with-jwt-tokens
 ```
 
-The system generates tasks, then executes them with developer and reviewer agents working in an adversarial loop.
+The `scenario-orchestrator` dispatches pending requirements. For each requirement, the
+`requirement-executor` decomposes it into a task DAG and runs stages in order:
+tester → builder → validator → reviewer.
 
 ## Project Initialization
 
@@ -380,9 +389,13 @@ After initialization and running the planning workflow, your `.semspec/` directo
 ├── plans/
 │   └── add-user-authentication-with-jwt-tokens/
 │       ├── metadata.json     # Status, timestamps, author
-│       └── plan.json         # Goal, context, scope (JSON)
+│       └── plan.json         # Goal, context, scope — artifact only (KV is source of truth)
 └── worktrees/                # Agent task worktrees (temporary, auto-cleaned)
 ```
+
+Plan files are written by `plan-manager` as git-friendly artifacts. The authoritative source of
+truth is the `PLAN_STATES` JetStream KV bucket. Tasks are not stored in plan files — they are
+created at execution time by the decomposer agent and tracked in `EXECUTION_STATES`.
 
 These files are git-friendly — commit them with your code to preserve context.
 
@@ -422,14 +435,20 @@ If a command returns an error, check:
 
 If validation fails:
 
-1. Check the generated document:
+1. Check plan state in the KV bucket:
+
+   ```bash
+   curl http://localhost:8080/message-logger/kv/PLAN_STATES | jq .
+   ```
+
+2. Or inspect the artifact file written for reference:
+
    ```bash
    cat .semspec/plans/my-feature/plan.json
    ```
 
-2. Plans need `goal`, `context`, and `scope` fields
-3. Tasks need proper BDD format with acceptance criteria
-4. The system retries up to 3 times with feedback
+3. Plans need `goal`, `context`, and `scope` fields
+4. The system retries up to 3 times with reviewer feedback before escalating
 
 ### Debugging Requests
 

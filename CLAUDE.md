@@ -61,9 +61,16 @@ events (`RequirementsGeneratedEvent`, `ScenariosForRequirementGeneratedEvent`). 
 the sole persister — it consumes those events and writes all entity state. Generators do not write
 directly to the graph.
 
-**KV Twofer**: `ENTITY_STATES` KV bucket is the source of truth for plan state, replacing
-`.semspec/plans/*.json`. Managers write triples to `ENTITY_STATES` on every mutation and
-reconcile from it on startup.
+**KV-driven pipeline**: Components watch `PLAN_STATES` and self-trigger on status changes. There
+is no coordinator component — plan state transitions drive the next stage automatically.
+
+**Plan files as artifacts**: `plan-manager` still writes `.semspec/plans/<slug>/plan.json` for
+git-friendliness, but `PLAN_STATES` is the authoritative source of truth. Tasks are created at
+execution time (reactive mode) and are never stored in plan files.
+
+**KV Twofer**: `ENTITY_STATES` KV bucket mirrors key facts from `PLAN_STATES` as triples for
+rule evaluation. Managers write to both on every mutation and reconcile from `PLAN_STATES` on
+startup.
 
 **workflow/ package**: Shared domain contracts only (types, entity IDs, subjects, payloads). NOT a
 state management layer. Components own their entity lifecycle.
@@ -73,21 +80,21 @@ state management layer. Components own their entity lifecycle.
 | Component | Directory | Role |
 |-----------|-----------|------|
 | `workflow-validator` | `processor/workflow-validator/` | Validates workflow configurations |
-| `workflow-documents` | (semstreams built-in) | Document management |
+| `workflow-documents` | `output/workflow-documents/` | File output to .semspec/plans/ |
 | `question-answerer` | `processor/question-answerer/` | LLM-backed question answering |
 | `question-router` | `processor/question-router/` | Routes questions to appropriate answerers |
 | `question-timeout` | `processor/question-timeout/` | SLA monitoring and escalation |
 | `requirement-generator` | `processor/requirement-generator/` | Generates requirements from plans |
 | `scenario-generator` | `processor/scenario-generator/` | Generates scenarios for requirements |
-| `planner` | `processor/planner/` | Single-planner path |
-| `plan-manager` | `processor/plan-manager/` | Plan/Requirement/Scenario/ChangeProposal lifecycle |
-| `plan-reviewer` | `processor/plan-reviewer/` | SOP-aware plan validation |
+| `planner` | `processor/planner/` | Watches PLAN_STATES; generates Goal/Context/Scope via LLM |
+| `plan-manager` | `processor/plan-manager/` | Single writer for plans, requirements, scenarios |
+| `plan-reviewer` | `processor/plan-reviewer/` | Watches PLAN_STATES; SOP-aware validation |
 | `project-manager` | `processor/project-manager/` | Project config (stack, standards, checklist) |
-| `structural-validator` | `processor/structural-validator/` | Governance and checklist enforcement |
+| `structural-validator` | `processor/structural-validator/` | Deterministic checklist validation |
 | `execution-manager` | `processor/execution-manager/` | TDD pipeline: tester → builder → validator → reviewer |
 | `requirement-executor` | `processor/requirement-executor/` | DAG decomposition and serial node execution |
 | `scenario-orchestrator` | `processor/scenario-orchestrator/` | Dispatches pending requirements for execution |
-| `change-proposal-handler` | `processor/change-proposal-handler/` | ChangeProposal OODA loop |
+| `change-proposal-handler` | `processor/change-proposal-handler/` | ChangeProposal lifecycle: review, accept/reject, cascade |
 
 ## What Semspec is NOT
 
@@ -151,7 +158,7 @@ Configuration supports env var expansion: `"${LLM_API_URL:-http://localhost:1143
 | `SEMSOURCE_URL` | Legacy single semsource URL (used when `GRAPH_SOURCES` is not set) |
 | `SANDBOX_URL` | Sandbox container URL; without it agents operate directly on host |
 
-Key config flag: `task-generator.reactive_mode` (default `true`) — skip task generation, advance plan to `ready_for_execution` for reactive execution via scenario-orchestrator.
+Key config flag: `task-generator.reactive_mode` (default `true`) — skip static task generation and advance plan to `ready_for_execution`; `scenario-orchestrator` then dispatches pending requirements for reactive execution.
 
 ## Graph-First Architecture
 
@@ -174,7 +181,7 @@ See [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) for complete 
 | Use Case | Transport | Why |
 |----------|-----------|-----|
 | Fire-and-forget, heartbeats, tool registration | Core NATS | Ephemeral, no delivery guarantee needed |
-| Task dispatch, workflow triggers, context builds | **JetStream** | Order matters, must not lose messages |
+| Task dispatch, plan status changes, KV watches | **JetStream** | Order matters, must not lose messages |
 | Any message with dependencies | **JetStream** | Must confirm delivery before signaling completion |
 
 **CRITICAL**: Core NATS `Publish()` is async/buffered — messages may reorder. Use JetStream publish when order matters or when subsequent logic assumes delivery.

@@ -224,42 +224,27 @@ context build and retry than to review with incomplete enforcement context.
 ## Plan Review Enforcement
 
 The plan-reviewer component (`processor/plan-reviewer/`) validates generated plans against
-SOPs before the plan-coordinator progresses to task generation.
+SOPs. It watches the `PLAN_STATES` KV bucket for plans in status `drafted`, fetches SOP
+context, and either approves the plan (advancing status to `reviewed`) or returns findings
+so the planner can regenerate.
 
 ### Review Flow
 
+```mermaid
+flowchart TD
+    A[PLAN_STATES\nstatus: drafted] --> B[plan-reviewer\nwatches KV bucket]
+    B --> C[Fetch SOPs via SOPGatherer\nall-or-nothing policy]
+    C --> D[LLM: validate plan against\neach SOP requirement]
+    D -->|verdict: approved| E[PLAN_STATES\nstatus: reviewed]
+    D -->|verdict: needs_changes| F[Findings published\nwith violation details]
+    F --> G[planner regenerates\nwith findings in context]
+    G -->|attempt 1-3| B
+    G -->|attempt 4 — max retries| H[Session failed\nuser notified]
 ```
-PlanCoordinatorTrigger
-        │
-        ▼
-plan-coordinator builds context
-  - Fetches SOPs via SOPGatherer (all-or-nothing)
-  - Enriches with graph entities (related plans, code patterns)
-  - Packages as PlanReviewTrigger
-        │
-        ▼
-workflow.trigger.plan-reviewer (JetStream)
-        │
-        ▼
-plan-reviewer receives trigger
-  - Validates PlanReviewTrigger payload
-  - Resolves LLM model (capability: reviewing, temperature 0.3)
-  - Calls LLM with PlanReviewerSystemPrompt + PlanReviewerUserPrompt
-  - Parses JSON review result
-        │
-        ├─── verdict: "approved"
-        │       │
-        │       ▼
-        │   Publishes result to workflow.result.plan-reviewer.<slug>
-        │   plan-coordinator proceeds to task generation
-        │
-        └─── verdict: "needs_changes"
-                │
-                ▼
-            Publishes result with findings
-            plan-coordinator retries planning
-            (up to 3 attempts, 5s backoff)
-```
+
+The planner receives the violation findings in its next prompt and regenerates the plan
+with those constraints. This retry loop runs up to three times with a five-second backoff
+between attempts.
 
 ### Review Result Format
 
@@ -298,13 +283,9 @@ The LLM returns a structured JSON result that the plan-reviewer parses:
 
 ### Retry Behavior
 
-When the plan-reviewer returns `needs_changes`, the plan-coordinator regenerates the plan
-with the violation findings included in the LLM context. This gives the planner concrete
-feedback on what to fix. The retry loop runs up to three times with a five-second backoff
-between attempts.
-
-If all three attempts produce `needs_changes`, the plan-coordinator fails the session and
-notifies the user.
+When the plan-reviewer returns `needs_changes`, the planner regenerates the plan with the
+violation findings included in its LLM context. This gives the planner concrete feedback on
+what to fix. After three failed attempts, the session fails and the user is notified.
 
 ### LLM Configuration
 
@@ -373,9 +354,10 @@ curl -s "http://localhost:8080/message-logger/entries?subject=graph.ingest.entit
 
 ### Step 4: Context Assembly
 
-The plan-coordinator builds context for the plan-reviewer. Because the plan title
-references API work and the SOP has `scope: plan` and `applies_to: ["api/**"]`, the
-SOPGatherer returns the new SOP.
+The planner watches `PLAN_STATES` for the new plan (status `created`) and triggers. After
+generating Goal/Context/Scope (status → `drafted`), the plan-reviewer picks up the plan
+automatically. Because the plan title references API work and the SOP has `scope: plan` and
+`applies_to: ["api/**"]`, the SOPGatherer returns the new SOP.
 
 ### Step 5: Plan Review
 
@@ -389,15 +371,15 @@ each requirement:
 
 ### Step 6: Verdict
 
-**If compliant**: The plan-reviewer publishes `verdict: "approved"`. The plan-coordinator
-proceeds to task generation.
+**If compliant**: The plan-reviewer writes status `reviewed` to `PLAN_STATES`. The
+requirement-generator picks it up and begins generating Requirements.
 
 **If violated**: The plan-reviewer publishes `verdict: "needs_changes"` with specific
-findings. The plan-coordinator regenerates the plan with the findings in context and
-re-reviews. This repeats up to three times.
+findings. The planner receives those findings in its next prompt, regenerates the plan, and
+the plan-reviewer evaluates again. This repeats up to three times.
 
-Once approved, the plan-coordinator triggers task generation and the plan state
-(status, Goal, Context, Scope) is stored as triples in the `ENTITY_STATES` KV bucket.
+Once approved, plan state (status, Goal, Context, Scope) is stored as triples in the
+`ENTITY_STATES` KV bucket.
 
 ## NATS Subjects
 
@@ -405,7 +387,7 @@ Once approved, the plan-coordinator triggers task generation and the plan state
 |---------|-----------|-----------|---------|
 | `source.ingest.>` | JetStream | Input | Ingest requests for new documents |
 | `graph.ingest.entity` | JetStream | Output | Ingested SOP entities |
-| `workflow.trigger.plan-reviewer` | JetStream | Input | Plan review triggers |
+| `workflow.async.plan-reviewer` | JetStream | Input | Plan review triggers |
 | `workflow.result.plan-reviewer.<slug>` | JetStream | Output | Review verdicts |
 
 ## Frontmatter Field Reference
@@ -428,5 +410,5 @@ pattern queries.
 | Document | Description |
 |----------|-------------|
 | [Components](04-components.md) | Plan-reviewer and other component configuration |
-| [Workflow System](05-workflow-system.md) | How plan generation and the planning loop work |
+| [Workflow System](05-workflow-system.md) | How plan generation and the planning pipeline work |
 | [How It Works](01-how-it-works.md) | End-to-end command execution overview |

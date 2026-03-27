@@ -111,7 +111,6 @@ Semspec is an **extension** of semstreams, not a standalone tool.
 │  ├── agentic-loop (LLM reasoning with tool use)         │
 │  ├── agentic-model (LLM API calls)                      │
 │  ├── graph-* (knowledge graph storage)                  │
-│  ├── workflow-processor (declarative workflow runner)   │
 │  └── component lifecycle                                 │
 └─────────────────────────────────────────────────────────┘
                           ▲
@@ -119,12 +118,13 @@ Semspec is an **extension** of semstreams, not a standalone tool.
                           │
 ┌─────────────────────────────────────────────────────────┐
 │  semspec (this project)                                  │
-│  ├── Planning    (planner, plan-manager, plan-reviewer,  │
+│  ├── Planning    (planner, plan-reviewer,                │
 │  │               requirement-generator, scenario-gen)   │
-│  ├── Execution   (scenario-orchestrator, requirement-executor,  │
-│  │               execution-manager, change-proposal-handler)    │
-│  └── Support     (plan-manager, project-manager, validators,    │
-│                   question-router, Q&A, etc.)                   │
+│  ├── Execution   (scenario-orchestrator,                 │
+│  │               requirement-executor, execution-manager,│
+│  │               change-proposal-handler)                │
+│  └── Support     (plan-manager, project-manager,        │
+│                   question-router, Q&A, etc.)            │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -165,10 +165,14 @@ docker compose up -d nats
 
 This is the complete message flow for `/plan Add user authentication`.
 
-### Step 1: Command dispatch
+The planning pipeline is driven by **KV watches on the PLAN_STATES bucket**. Each component
+watches for the status it owns and self-triggers — there is no coordinator orchestrating the
+sequence. A write to PLAN_STATES is the trigger (the KV Twofer pattern).
 
-The user types the command in the Web UI. `agentic-dispatch` receives it and publishes a trigger
-to `workflow.trigger.plan-coordinator` on the NATS WORKFLOWS stream.
+### Step 1: Plan created
+
+The user submits a plan description via the Web UI or REST API. The `plan-manager` creates a plan
+record in PLAN_STATES with status `created`.
 
 ```
 ┌─ WEB UI ───────────────────────────────────────────────────┐
@@ -176,84 +180,79 @@ to `workflow.trigger.plan-coordinator` on the NATS WORKFLOWS stream.
 └────────────────────────────────────────────────────────────┘
                           │
                           ▼
-┌─ AGENTIC-DISPATCH ─────────────────────────────────────────┐
-│  Publishes to: workflow.trigger.plan-coordinator            │
-│  Payload: { title: "Add user authentication", slug: ... }  │
+┌─ PLAN-MANAGER ─────────────────────────────────────────────┐
+│  Writes to PLAN_STATES: { slug, status: "created", ... }   │
 └────────────────────────────────────────────────────────────┘
 ```
 
-### Step 2: Plan coordinator initializes
+### Step 2: Planner drafts the plan
 
-The `plan-coordinator` component receives the trigger and creates a planning session in the
-`PLAN_SESSIONS` KV bucket. It then requests context from the `context-builder`.
-
-### Step 3: Context assembly
-
-The `context-builder` runs the `PlanningStrategy`, assembling context in seven steps within a
-32,000-token budget. Steps are ordered by priority: high-priority items consume budget first.
+The `planner` component watches PLAN_STATES for status `created`. It assembles context via the
+`PlanningStrategy`, calls the LLM, and writes the plan's goal, context, and scope back to
+PLAN_STATES with status `drafted`.
 
 ```
 PlanningStrategy (context-builder)
   Step 1: File tree             ← filesystem read, always fast
   Step 2: Codebase summary      ← graph query, timeout-guarded
-  Step 3: Architecture docs     ← filesystem reads from docs/
+  Step 3: Architecture docs     ← graph entities or filesystem fallback
   Step 4: Existing specs        ← graph query, timeout-guarded
   Step 5: Relevant code patterns← graph query, timeout-guarded
   Step 6: Requested files       ← filesystem, caller-specified
   Step 7: Planning SOPs         ← graph query, best-effort
 ```
 
-On first use, the context-builder probes the graph pipeline with exponential backoff. If the graph
-is not yet ready, graph-backed steps are skipped cleanly — the file tree and filesystem steps always
-run.
-
-### Step 4: Parallel planning
-
-The `plan-coordinator` asks the LLM to identify one to three focus areas for the plan, then spawns
-parallel planning goroutines — one per focus area. Each goroutine calls the LLM independently and
-produces a partial plan JSON.
-
-```
-plan-coordinator
-  ├── LLM: determine focus areas (1-3)
-  ├── goroutine: focus area 1 → partial plan JSON
-  ├── goroutine: focus area 2 → partial plan JSON   (if needed)
-  └── goroutine: focus area 3 → partial plan JSON   (if needed)
-```
-
-### Step 5: Plan synthesis and file write
-
-When all planners complete, the `plan-coordinator` synthesizes the partial plans into a single
-coherent plan via one final LLM call, then writes the result to disk:
+The planner writes structured output (Goal, Context, Scope) to disk and updates PLAN_STATES:
 
 ```
 .semspec/plans/add-user-authentication/
-  ├── metadata.json    ← status, timestamps, session ID
+  ├── metadata.json    ← status, timestamps
   └── plan.json        ← Goal, Context, Scope (structured JSON)
 ```
 
-### Step 6: Plan review
+### Step 3: Plan review
 
-The `plan-coordinator` immediately triggers the `plan-reviewer`. The reviewer assembles its own
-context using the `PlanReviewStrategy`, which fetches SOPs with an all-or-nothing budget policy —
-the review never proceeds without the applicable SOPs loaded.
+The `plan-reviewer` watches PLAN_STATES for status `drafted`. It assembles context via the
+`PlanReviewStrategy`, which fetches SOPs with an all-or-nothing budget policy — the review never
+proceeds without the applicable SOPs loaded.
 
 ```
 plan-reviewer
-  ├── Requests context: PlanReviewStrategy
+  ├── Assembles context: PlanReviewStrategy
   │     Step 1: SOPs (all-or-nothing — fail if SOPs exceed budget)
   │     Step 2: Plan content
   │     Step 3: File tree
   ├── LLM: validates plan against each SOP requirement
-  └── Returns verdict: "approved" OR "needs_changes" + findings
+  └── Writes verdict to PLAN_STATES:
+        "reviewed"        → passes; ready for human or auto-approval
+        "revision_needed" → violations found; planner retries
 ```
 
-**Verdict: needs_changes** — The `plan-coordinator` regenerates the plan with the violation findings
-included as LLM context, then re-submits for review. This loop repeats up to three times with a
-five-second backoff between attempts.
+**Verdict: revision_needed** — The `planner` re-triggers from `revision_needed` status, generates
+a revised plan incorporating the violation findings as LLM context, and sets status back to
+`drafted`. This loop repeats up to three times.
 
-**Verdict: approved** — The `plan-coordinator` publishes a completion signal to
-`workflow.result.plan-coordinator.<slug>` and the user is notified.
+**Verdict: reviewed** — If `auto_approve=true` is set, the plan-reviewer promotes directly to
+`approved`. Otherwise, a human approves via the UI or API.
+
+### Step 4: Requirement generation
+
+The `requirement-generator` watches PLAN_STATES for status `approved`. It calls the LLM to
+generate structured Requirements from the plan and publishes a `RequirementsGeneratedEvent`.
+The `plan-manager` receives the event, stores the Requirements, and sets status to
+`requirements_generated`.
+
+### Step 5: Scenario generation
+
+The `scenario-generator` watches for status `requirements_generated`. For each Requirement it
+generates BDD Scenarios (Given/When/Then) and publishes events. The `plan-manager` accumulates
+the Scenarios and sets status to `scenarios_generated` when all Requirements are covered.
+
+### Step 6: Scenario review
+
+The `plan-reviewer` watches for status `scenarios_generated` and performs a second review pass,
+validating the Scenarios against SOPs and Requirements. On approval, status advances to
+`scenarios_reviewed` and then to `ready_for_execution`.
 
 ### Full flow summary
 
@@ -261,32 +260,40 @@ five-second backoff between attempts.
 User: /plan Add user authentication
   │
   ▼
-agentic-dispatch → workflow.trigger.plan-coordinator
+plan-manager: PLAN_STATES ← { status: "created" }
+  │
+  ▼ (planner watches status=created)
+planner: PlanningStrategy → LLM → plan.json written
   │
   ▼
-plan-coordinator: creates PLAN_SESSIONS entry
+plan-manager: PLAN_STATES ← { status: "drafted" }
   │
-  ▼
-context-builder: PlanningStrategy (file tree + graph + SOPs)
-  │
-  ▼
-plan-coordinator: LLM determines focus areas (1-3)
-  │
-  ├── parallel goroutine: LLM → partial plan JSON
-  ├── parallel goroutine: LLM → partial plan JSON
-  └── ...
-  │
-  ▼
-plan-coordinator: LLM synthesizes → plan.json written
-  │
-  ▼
+  ▼ (plan-reviewer watches status=drafted)
 plan-reviewer: PlanReviewStrategy (SOPs all-or-nothing + plan + file tree)
   │
-  ▼
-plan-reviewer: LLM validates each SOP requirement
+  ├── revision_needed → PLAN_STATES ← { status: "revision_needed" }
+  │     │
+  │     └── planner retries (max 3)
   │
-  ├── needs_changes → plan-coordinator retries (max 3, 5s backoff)
-  └── approved → workflow.result.plan-coordinator.<slug>
+  └── reviewed → PLAN_STATES ← { status: "reviewed" }
+        │
+        ▼ (auto_approve=true OR human approves)
+      PLAN_STATES ← { status: "approved" }
+        │
+        ▼ (requirement-generator watches status=approved)
+      LLM → Requirements published → plan-manager stores
+        │
+        ▼
+      PLAN_STATES ← { status: "requirements_generated" }
+        │
+        ▼ (scenario-generator watches)
+      LLM → Scenarios per Requirement → plan-manager accumulates
+        │
+        ▼
+      PLAN_STATES ← { status: "scenarios_generated" }
+        │
+        ▼ (plan-reviewer second pass)
+      PLAN_STATES ← { status: "ready_for_execution" }
         │
         ▼
       User notified → .semspec/plans/<slug>/plan.json ready
@@ -305,7 +312,7 @@ your-project/
 │   │       └── api-conventions.md
 │   └── plans/
 │       └── add-user-authentication/
-│           ├── metadata.json   ← Status, timestamps, session ID
+│           ├── metadata.json   ← Status, timestamps
 │           ├── plan.json       ← Goal, Context, Scope (JSON)
 │           └── tasks.json      ← BDD implementation tasks (JSON, after approval)
 └── ... your code ...
@@ -319,11 +326,14 @@ Semspec registers 16 components at startup alongside the full semstreams compone
 
 ```
 ┌──────────── Planning ────────────────────────────────────────────────┐
-│  plan-coordinator     Parallel planner orchestration                 │
-│  planner              Single-planner fallback path                   │
-│  plan-reviewer        SOP-aware plan validation with LLM review      │
-│  requirement-generator  Generates structured Requirements from plan  │
-│  scenario-generator   Generates BDD Scenarios from Requirements      │
+│  planner              Watches PLAN_STATES=created, drafts plan        │
+│  plan-reviewer        Watches PLAN_STATES=drafted/scenarios_generated,│
+│                        validates against SOPs; sets reviewed or       │
+│                        revision_needed; promotes to approved when     │
+│                        auto_approve=true                              │
+│  requirement-generator  Watches PLAN_STATES=approved, generates      │
+│                          structured Requirements via LLM              │
+│  scenario-generator   Generates BDD Scenarios from Requirements       │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────── Execution ───────────────────────────────────────────────┐
@@ -337,7 +347,8 @@ Semspec registers 16 components at startup alongside the full semstreams compone
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────── Support ─────────────────────────────────────────────────┐
-│  plan-manager         Requirement/Scenario/ChangeProposal HTTP API   │
+│  plan-manager         Requirement/Scenario/ChangeProposal HTTP API;  │
+│                        owns PLAN_STATES writes and event handling    │
 │  project-manager      Project management HTTP API                    │
 │  workflow-validator   Document structure validation (request/reply)  │
 │  workflow-documents   File output to .semspec/plans/                 │
@@ -349,7 +360,7 @@ Semspec registers 16 components at startup alongside the full semstreams compone
 ```
 
 **Note**: `context-builder`, `task-generator`, `task-dispatcher`, `source-ingester`, and
-`ast-indexer` are now semstreams or semsource components, not registered by semspec directly.
+`ast-indexer` are semstreams or semsource components, not registered by semspec directly.
 Source indexing is handled by the external semsource service.
 
 ## The Knowledge Graph
@@ -487,8 +498,8 @@ curl "http://localhost:8080/message-logger/entries?subject=workflow.trigger.*&li
 # Query messages by trace ID
 curl http://localhost:8080/message-logger/trace/{traceID}
 
-# Check KV state for plan sessions
-curl http://localhost:8080/message-logger/kv/PLAN_SESSIONS
+# Check KV state for plan status
+curl http://localhost:8080/message-logger/kv/PLAN_STATES
 ```
 
 ### Find trace IDs

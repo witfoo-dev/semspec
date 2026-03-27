@@ -176,11 +176,13 @@ plan → requirements → decompose → TDD pipeline [tester → builder → val
 ```
 
 **Plan** — Communicate intent: goal, context, scope. Not a detailed specification. A small fix gets
-three paragraphs. An architecture change gets thorough treatment. A plan-coordinator orchestrates
-parallel planners across focus areas, then synthesizes their output. The planner also runs a
-requirement-generator and scenario-generator concurrently, producing structured Requirements and
-Scenarios — not tasks. Plan-reviewer then validates the result against project SOPs before the plan
-reaches `ready_for_execution`.
+three paragraphs. An architecture change gets thorough treatment. The pipeline is driven by KV
+watches on the PLAN_STATES bucket: the planner triggers on status `created`, drafts the plan, and
+writes status `drafted`; the plan-reviewer triggers on `drafted`, validates against SOPs, and sets
+`reviewed` or `revision_needed`; on approval the requirement-generator and scenario-generator run
+in sequence, each triggered by the status the previous stage wrote. There is no coordinator — each
+component self-triggers when it sees the status it owns (the KV Twofer pattern). The plan reaches
+`ready_for_execution` after the plan-reviewer approves the generated Scenarios.
 
 **Requirements** — The unit of execution. Scenarios are acceptance criteria attached to a
 requirement, validated at review time — not independent execution units. `/execute` triggers the
@@ -241,7 +243,9 @@ Commands are entered in the chat interface:
 
 **AST Indexing** — Parses Go, TypeScript, JavaScript, Python, and Java. Extracts functions, types, interfaces, and packages into the graph via semsource.
 
-**Plan Coordination** — Parallel planner orchestration with LLM-driven synthesis. Focus areas enable concurrent planning.
+**Plan Pipeline** — KV-watch-driven planning pipeline: planner drafts, plan-reviewer validates
+against SOPs, requirement-generator and scenario-generator run in sequence. Each component
+self-triggers on the PLAN_STATES status it owns — no coordinator required.
 
 **SOP Enforcement** — Project-specific rules (SOPs) are ingested, stored in the graph, and enforced during plan review.
 See [SOP System](docs/09-sop-system.md).

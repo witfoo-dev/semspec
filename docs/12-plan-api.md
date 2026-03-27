@@ -27,7 +27,12 @@ created → planning → reviewed → approved → ready_for_execution → imple
                         └── needs_changes → (revision cycle)
 ```
 
-After plan-coordinator produces a plan, the plan-reviewer validates it against project SOPs.
+The pipeline is KV-driven: each component watches `PLAN_STATES` and self-triggers when the
+plan enters the status it owns. The `planner` generates Goal/Context/Scope; `requirement-generator`
+and `scenario-generator` produce structured requirements and scenarios; `plan-reviewer` validates
+the output against project SOPs. No coordinator component orchestrates these steps — status
+transitions in `PLAN_STATES` are the handoff mechanism.
+
 If `auto_approve` is `true` (default), approved plans flow directly to `ready_for_execution`.
 If `false`, the pipeline pauses until a human calls `POST /plans/{slug}/promote`.
 

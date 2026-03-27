@@ -1,68 +1,44 @@
 # Workflow System
 
 This document describes the LLM-driven workflow system in semspec, including capability-based model
-selection, the plan-and-execute adversarial loop, and specialized processing components.
+selection, the KV-driven planning pipeline, and specialized processing components.
 
 ## Overview
 
-Semspec uses two complementary patterns for LLM-driven processing:
+Semspec uses component-based processors for all LLM-driven work. Each component subscribes to a
+NATS subject, performs a focused LLM call, and advances plan state via the `PLAN_STATES` KV bucket.
 
-1. **Components** - Single-shot processors that call LLM, parse structured output, and persist to files
-2. **Workflows** - Multi-step orchestration for coordinating multiple agents
-
-See [Architecture: Components vs Workflows](03-architecture.md#components-vs-workflows) for when to
-use each pattern.
-
-## Current Workflow: Plan and Execute (ADR-003)
-
-The `plan-and-execute` workflow implements an adversarial developer/reviewer loop:
+Components watch the KV bucket for status changes and self-trigger — there is no central coordinator
+and no JSON workflow definition files. The pipeline is a chain of status-driven reactions:
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────────────┐
-│  developer  │────▶│  reviewer   │────▶│  verdict_check      │
-│  (implement)│     │  (evaluate) │     │                     │
-└─────────────┘     └─────────────┘     └──────────┬──────────┘
-                                                   │
-                    ┌──────────────────────────────┼──────────────────┐
-                    │                              │                  │
-                    ▼                              ▼                  ▼
-            ┌───────────────┐            ┌───────────────┐    ┌───────────────┐
-            │   approved    │            │   fixable     │    │  misscoped/   │
-            │   → complete  │            │   → retry     │    │  too_big      │
-            └───────────────┘            └───────────────┘    │  → escalate   │
-                                                              └───────────────┘
+created → drafted → reviewed → approved
+  → requirements_generated → scenarios_generated
+  → ready_for_execution → implementing → complete
 ```
 
-**Workflow definition**: `configs/workflows/plan-and-execute.json`
-
-**Key features:**
-
-- Adversarial loop: developer implements, reviewer evaluates
-- Conditional routing based on verdict (approved, fixable, misscoped, too_big)
-- Retry with feedback for fixable issues (max 3 iterations)
-- Escalation to user for architectural or scoping issues
-- Built-in failure handling via `on_fail` steps
+See [Architecture: Components vs Workflows](03-architecture.md#components-vs-workflows) for
+additional context.
 
 ## Specialized Processing Components
 
 For single-shot LLM operations that require structured output parsing, semspec uses dedicated
-components instead of workflow steps. This is because agentic-loop returns raw text and cannot
-parse structured JSON responses.
+components. Each component subscribes to its own NATS subject, calls the LLM, parses a structured
+JSON response, and advances plan state by writing to `PLAN_STATES`.
 
 | Component | Trigger | Processing | Output |
 |-----------|---------|------------|--------|
-| `plan-coordinator` | `/plan <title>` | Multi-planner orchestration → Goal/Context/Scope | `plan.json` |
-| `planner` | (fallback path) | Single LLM → Goal/Context/Scope | `plan.json` |
-| `plan-reviewer` | `/approve <slug>` | SOP validation → Verdict | Review result |
-| `requirement-generator` | After approval | LLM → Requirements list | `RequirementsGeneratedEvent` → plan-manager persists |
-| `scenario-generator` | After requirements | LLM → Given/When/Then scenarios | `ScenariosForRequirementGeneratedEvent` → plan-manager persists |
-| `task-dispatcher` | `/execute <slug>` | Dependency-aware dispatch | Agent tasks (semstreams component) |
+| `planner` | Status `created` in `PLAN_STATES` | Single LLM → Goal/Context/Scope | Sets status `drafted` |
+| `plan-reviewer` | Status `drafted` in `PLAN_STATES` | SOP validation → Verdict | Sets status `reviewed` or retries |
+| `requirement-generator` | Status `reviewed` in `PLAN_STATES` | LLM → Requirements list | Publishes `RequirementsGeneratedEvent`; plan-manager sets status `requirements_generated` |
+| `scenario-generator` | Status `requirements_generated` | LLM → Given/When/Then scenarios | Publishes `ScenariosGeneratedEvent`; plan-manager sets status `scenarios_generated` |
+| `task-dispatcher` | Status `ready_for_execution` | Dependency-aware dispatch | Agent tasks (semstreams component) |
 | `context-builder` | (shared service) | Graph + filesystem → Context | Token-budgeted context (semstreams component) |
 
 **Single-writer pattern**: Generators publish typed events; `plan-manager` is the sole persister
 of plan state. No component writes plan, requirement, or scenario entities directly — all
 mutations flow through plan-manager's store layer (`planStore`, `requirementStore`,
-`scenarioStore`) which updates both the `sync.Map` cache and graph triples atomically.
+`scenarioStore`) which updates both the `PLAN_STATES` KV bucket and graph triples atomically.
 
 Each processing component:
 
@@ -70,8 +46,7 @@ Each processing component:
 2. Calls LLM with domain-specific prompts
 3. Parses JSON from markdown-wrapped responses
 4. Validates required fields
-5. Publishes a typed event — plan-manager reacts and persists
-6. Publishes completion to `workflow.result.<name>.<slug>`
+5. Publishes a typed event — plan-manager reacts and advances plan status
 
 See [Components](04-components.md) for detailed documentation of each component.
 
@@ -158,64 +133,64 @@ When the primary model fails, the system tries fallback models in order:
 claude-opus (unavailable) → claude-sonnet → qwen → llama3.2
 ```
 
-## Planning Workflow
+## Planning Pipeline
 
-The planning workflow uses specialized components for LLM-assisted content generation.
+The planning pipeline uses a chain of status-watching components. Each component subscribes to its
+own NATS subject, does one focused LLM job, and writes back to `PLAN_STATES`. No central
+coordinator orchestrates the chain — each status change triggers the next component directly.
 
 ### How It Works
 
 ```bash
 /plan Add auth
-# Creates plan stub, triggers plan-coordinator component
-# LLM generates Goal/Context/Scope and saves to plan.json
+# Creates plan stub (status: created), planner component picks it up automatically
+# LLM generates Goal/Context/Scope, sets status: drafted
 
 /plan Add auth -m
 # Creates plan stub only, no LLM processing
-# User manually edits plan.json
+# User manually edits via the Plan API
 ```
 
-### Plan Status Flow
+### KV-Driven Status Flow
 
-Plans progress through a defined sequence of statuses. ADR-024 inserted the requirements and
-scenario generation steps between approval and phase generation:
-
-```
-created → drafted → reviewed → approved
-  → requirements_generated → scenarios_generated
-  → phases_generated → phases_approved
-  → tasks_generated → tasks_approved
-  → implementing → complete
-```
-
-The two new statuses (`requirements_generated`, `scenarios_generated`) represent distinct LLM
-pipeline steps. Each concern uses a separate, focused prompt so that smaller models produce
-higher-quality output than a single combined call would yield.
-
-### Planning Pipeline (ADR-024)
-
-After a plan is approved, the `task-generator` semstreams component runs a multi-step pipeline
-before producing tasks:
-
-```
-Plan approved
-  → Generate Requirements   (plan-scoped intent statements)
-    → Generate Scenarios     (Given/When/Then per requirement)
-      → Generate Phases      (scheduling containers, unchanged)
-        → Generate Tasks     (implementation work, linked to Scenarios)
-          → Assign Tasks to Phases
+```mermaid
+flowchart TD
+    A[plan-manager\ncreates plan stub\nstatus: created] --> B[planner\nwatches PLAN_STATES\nstatus=created]
+    B -->|LLM: Goal/Context/Scope| C[PLAN_STATES\nstatus: drafted]
+    C --> D[plan-reviewer\nwatches PLAN_STATES\nstatus=drafted]
+    D -->|verdict: needs_changes| B
+    D -->|verdict: approved| E[PLAN_STATES\nstatus: reviewed]
+    E --> F[requirement-generator\nwatches PLAN_STATES\nstatus=reviewed]
+    F -->|RequirementsGeneratedEvent| G[plan-manager\nstatus: requirements_generated]
+    G --> H[scenario-generator\nwatches PLAN_STATES\nstatus=requirements_generated]
+    H -->|ScenariosGeneratedEvent| I[plan-manager\nstatus: scenarios_generated]
+    I --> J[plan-manager\nstatus: ready_for_execution]
 ```
 
-Each step is a separate LLM call with a focused prompt. The pipeline is configurable via the
-`pipeline_mode` field on `task-generator`; the default is `pipeline`. A single-shot mode is
-available for latency-sensitive environments.
+### Plan Status Reference
+
+Plans progress through this sequence of statuses:
+
+| Status | Set By | Meaning |
+|--------|--------|---------|
+| `created` | plan-manager | Plan stub created; planner will pick this up |
+| `drafted` | planner | Goal/Context/Scope generated |
+| `reviewed` | plan-reviewer | Plan passed SOP review |
+| `approved` | plan-reviewer | Approval confirmed (triggers requirement generation) |
+| `requirements_generated` | plan-manager | Requirements list persisted |
+| `scenarios_generated` | plan-manager | Given/When/Then scenarios persisted |
+| `ready_for_execution` | plan-manager | Execution may begin |
+| `implementing` | plan-manager | Execution in progress |
+| `reviewing_rollup` | plan-manager | Post-execution rollup review running |
+| `complete` | plan-manager | All scenarios complete and rollup approved |
 
 **Why separate steps?** Requirements describe *intent*. Scenarios describe *observable behavior*.
-Tasks describe *implementation work*. Phases describe *scheduling*. Separating concerns produces
-higher-quality output and makes each artifact independently queryable in the graph.
+Separating concerns produces higher-quality output and makes each artifact independently queryable
+in the graph.
 
-### Task Statuses (ADR-024)
+### Task Statuses
 
-Two new task statuses were added:
+Two special task statuses track runtime state changes:
 
 | Status | Set By | Meaning |
 |--------|--------|---------|
@@ -231,7 +206,7 @@ Generated documents are validated before proceeding to the next step.
 
 ### Document Type Requirements
 
-#### Plan (`plan.json`)
+#### Plan content
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -239,13 +214,13 @@ Generated documents are validated before proceeding to the next step.
 | `context` | yes | Relevant background |
 | `scope` | yes | Boundaries of the change |
 
-#### Tasks (`tasks.json`)
+#### Task fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `title` | yes | Task title |
 | `description` | yes | Implementation description |
-| `scenarioIDs` | yes | IDs of Scenarios this task satisfies (ADR-024; replaces embedded acceptance criteria) |
+| `scenarioIDs` | yes | IDs of Scenarios this task satisfies |
 
 ### Validation Warnings
 
@@ -313,75 +288,73 @@ and meet minimum content requirements.
 User Command (/plan "Add auth")
     |
     v
-agentic-dispatch (receives message, creates plan stub)
+plan-manager (creates plan stub, status: created)
+    |
+    v                              PLAN_STATES KV watches
+workflow.async.planner ──────────────────────────────┐
+    |                                                 |
+    v                                                 v
+[planner]                                      status: created
+    |-- LLM: generate Goal/Context/Scope         triggers planner
+    |-- Publishes: plan drafted event
+    |-- plan-manager sets status: drafted
     |
     v
-workflow.trigger.plan-coordinator
-    |
-    v
-[plan-coordinator]
-    |-- Requests context from context-builder (semstreams component)
-    |-- LLM: determine focus areas (1-3)
-    |-- Runs planners in parallel (goroutines, NOT planner component)
-    |-- LLM: synthesize if multiple results
-    |-- Saves plan.json
-    |-- Publishes: workflow.result.plan-coordinator.<slug>
-    |
-    v
-User notified, can review plan
-    |
-    v
-User Command (/approve <slug>)
-    |
-    v
-workflow.trigger.plan-reviewer
-    |
-    v
-[plan-reviewer]
+[plan-reviewer] (watches status: drafted)
     |-- Queries graph for SOPs matching plan scope
     |-- LLM: validates plan against each SOP requirement
     |-- Returns: "approved" or "needs_changes"
     |
-    v (if needs_changes, retry up to 3 times)
+    v (if needs_changes, retry up to 3 times with findings in context)
     v (if approved)
     |
-workflow.async.requirement-generator
+    v
+plan-manager sets status: reviewed → approved
     |
     v
-[requirement-generator]
-    |-- Requests context from context-builder (semstreams component)
+[requirement-generator] (watches status: approved)
     |-- LLM: generates Requirements from plan Goal/Context/Scope
-    |       Publishes RequirementsGeneratedEvent → plan-manager persists
-    |       plan-manager sets plan status → requirements_generated
+    |-- Publishes RequirementsGeneratedEvent → plan-manager persists
+    |-- plan-manager sets plan status: requirements_generated
     |
     v
-workflow.async.scenario-generator
-    |
-    v
-[scenario-generator]
+[scenario-generator] (watches status: requirements_generated)
     |-- LLM: generates Scenarios (Given/When/Then) per Requirement
-    |       Publishes ScenariosForRequirementGeneratedEvent → plan-manager persists
-    |       plan-manager sets plan status → scenarios_generated
+    |-- Publishes ScenariosGeneratedEvent → plan-manager persists
+    |-- plan-manager sets plan status: scenarios_generated → ready_for_execution
 ```
 
-### Execution Message Flow (Plan-and-Execute)
+### Execution Message Flow
 
 ```
-User Command (/execute <slug>)
-    ↓
-ExecuteCommand.Execute()
-    └── Publishes to workflow.trigger.plan-and-execute
-    ↓
-[SEMSTREAMS] workflow-processor
-    ↓
-Executes plan-and-execute.json steps
-    ├── developer → agentic-loop → implementation
-    ├── reviewer → agentic-loop → evaluation
-    ├── verdict_check → conditional routing
-    ├── retry_developer (if fixable)
-    └── escalate (if misscoped/too_big)
-    ↓
-Task completion or escalation to user
+User Command (/execute <slug>)  OR  auto_approve=true
+    |
+    v
+plan-manager sets status: implementing
+    |
+    v
+plan-manager publishes scenario.orchestrate.<requirementID>
+    |
+    v
+[scenario-orchestrator]
+    |-- Dispatches RequirementExecutionRequest per pending Requirement
+    |-- Publishes: workflow.trigger.requirement-execution-loop
+    |
+    v
+[requirement-executor] (per Requirement)
+    |-- Calls decompose_task tool → TaskDAG
+    |-- Dispatches DAG nodes serially via workflow.trigger.task-execution-loop
+    |-- Runs [red team] → requirement-reviewer after all nodes complete
+    |-- Publishes: workflow.events.scenario.execution_complete
+    |
+    v (all requirements complete)
+plan-manager sets status: reviewing_rollup
+    |
+    v
+[rollup-reviewer]
+    |-- Evaluates all requirement outcomes
+    |-- verdict: approved → status: complete
+    |-- verdict: needs_attention → status: complete (findings recorded)
 ```
 
 ### Key Components
@@ -390,41 +363,36 @@ Task completion or escalation to user
 
 | Component | Purpose |
 |-----------|---------|
-| `processor/plan-coordinator/` | Multi-planner orchestration |
-| `processor/planner/` | Single-planner fallback path |
-| `processor/plan-reviewer/` | SOP-aware plan validation |
+| `processor/planner/` | Single-planner path; watches PLAN_STATES for status=created |
+| `processor/plan-reviewer/` | SOP-aware plan validation; watches PLAN_STATES for status=drafted |
 | `processor/plan-manager/` | Single writer for plan state; serves REST API for plans/requirements/scenarios |
-| `processor/execution-manager/` | TDD pipeline per DAG node (renamed from execution-orchestrator) |
+| `processor/execution-manager/` | TDD pipeline per DAG node |
 | `workflow/` | Workflow types, prompts, validation |
 | `model/` | Capability-based model selection |
 
 **Semstreams components used:**
 
 - `context-builder` — Token-budgeted context assembly (semstreams library component)
-- `task-generator` — BDD task generation (semstreams library component)
 - `task-dispatcher` — Dependency-aware task execution (semstreams library component)
-- `workflow-processor` — Multi-step workflow execution (plan-and-execute)
 - `agentic-loop` — Generic LLM execution with tool use
 
 **External services:**
 
-- `semsource` — Document and SOP ingestion; watches `.semspec/sources/docs/` and publishes to `graph.ingest.entity`
+- `semsource` — Document and SOP ingestion; watches `.semspec/sources/docs/` and publishes
+  to `graph.ingest.entity`
 
 ### NATS Subjects
 
 | Subject | Purpose |
 |---------|---------|
-| `workflow.trigger.plan-coordinator` | Plan orchestration trigger |
-| `workflow.trigger.planner` | Simple planner trigger |
-| `workflow.trigger.plan-reviewer` | Plan review trigger |
+| `workflow.async.planner` | Single-planner trigger |
+| `workflow.async.plan-reviewer` | Plan review trigger |
 | `workflow.async.requirement-generator` | Requirement generation trigger |
 | `workflow.async.scenario-generator` | Scenario generation trigger |
 | `workflow.trigger.task-dispatcher` | Task dispatch trigger |
 | `workflow.trigger.change-proposal-loop` | ChangeProposal OODA loop trigger |
 | `question.ask.>` | Agent question events (consumed by question-router) |
 | `workflow.result.<component>.<slug>` | Component completion |
-| `context.build.>` | Context build requests |
-| `context.built.<request_id>` | Context build responses |
 | `agent.task.development` | Agent task dispatch |
 | `requirement.created` | New requirement published |
 | `requirement.updated` | Requirement mutated by ChangeProposal |
@@ -443,18 +411,17 @@ Task completion or escalation to user
 | `dag.node.failed.*` | Individual DAG node failed |
 | `dag.execution.complete.*` | Entire DAG completed successfully |
 | `dag.execution.failed.*` | DAG failed (at least one node failed) |
-| `workflow.events.scenario.execution_complete` | Requirement execution completed (emitted per-requirement) |
+| `workflow.events.scenario.execution_complete` | Requirement execution completed (per-requirement) |
 | `agent.signal.cancel.*` | Cancellation signal to a running loop |
 
 ## Reactive Workflows (ADR-025)
 
-ADR-025 introduces two reactive workflows for runtime scenario decomposition and execution. Both
-are built with the semstreams reactive engine and follow the OODA-loop pattern.
+ADR-025 introduces two reactive workflows for runtime scenario decomposition and execution.
 
 ### Plan Status with Reactive Mode
 
-When the `task-generator` semstreams component runs with `reactive_mode=true`, the plan status flow
-takes a shortcut after Scenario generation:
+When the `task-generator` semstreams component runs with `reactive_mode=true`, the plan status
+flow takes a shortcut after scenario generation:
 
 ```
 created → drafted → reviewed → approved
@@ -583,14 +550,13 @@ cancellation reason included in the failure event.
 ## ChangeProposal Lifecycle (ADR-024)
 
 A ChangeProposal is a first-class graph node that represents a mid-stream change to one or more
-Requirements. It follows an OODA (Observe-Orient-Decide-Act) reactive workflow, consistent with
-the ADR-005 reactive engine pattern.
+Requirements. It follows an OODA (Observe-Orient-Decide-Act) reactive workflow.
 
 ### When a ChangeProposal Is Created
 
 Three sources can submit a proposal (all publish to `workflow.trigger.change-proposal-loop`):
 
-1. **User via UI** — manual proposal from the Requirement panel (Phase 5 scope)
+1. **User via UI** — manual proposal from the Requirement panel
 2. **Agent during execution** — developer detects a misscoped requirement and proposes a change
    instead of escalating (future work)
 3. **Reviewer during review** — code reviewer identifies a behavioral gap that warrants a new
@@ -665,8 +631,6 @@ type ChangeProposal struct {
 | `INVALIDATES` | ChangeProposal | Task | Tasks dirtied on acceptance (computed) |
 
 ### Implementation Files
-
-These files are created or modified as part of the ChangeProposal lifecycle implementation:
 
 | File | Status | Purpose |
 |------|--------|---------|
@@ -765,21 +729,22 @@ processor/<name>/
 // 1. Subscribe to trigger subject
 consumer, _ := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
     Durable:       "my-component",
-    FilterSubject: "workflow.trigger.my-component",
+    FilterSubject: "workflow.async.my-component",
 })
 
 // 2. Call LLM with domain-specific prompt
-func (c *Component) generate(ctx context.Context, trigger *WorkflowTriggerPayload) (*MyContent, error) {
+func (c *Component) generate(ctx context.Context, trigger *TriggerPayload) (*MyContent, error) {
     // Build prompt, call LLM, parse JSON response
 }
 
-// 3. Save to filesystem
-func (c *Component) save(ctx context.Context, content *MyContent) error {
-    // Use workflow.Manager or direct file I/O
+// 3. Publish typed event — plan-manager reacts and persists
+func (c *Component) publish(ctx context.Context, content *MyContent) error {
+    event := &MyGeneratedEvent{PlanSlug: content.Slug, Items: content.Items}
+    baseMsg := message.NewBaseMessage(event.Schema(), event, "my-component")
+    data, _ := json.Marshal(baseMsg)
+    _, err := js.Publish(ctx, "workflow.events.my.generated", data)
+    return err
 }
-
-// 4. Publish completion
-c.natsClient.Publish(ctx, "workflow.result.my-component."+slug, result)
 ```
 
 3. Register in `cmd/semspec/main.go`:
@@ -792,29 +757,6 @@ mycomponent.Register(registry)
 
 See `processor/planner/` as the canonical reference implementation.
 
-### Adding a New Workflow Step
-
-Edit `configs/workflows/plan-and-execute.json` to add new steps. See semstreams
-workflow-processor documentation for the full schema.
-
-For steps that need specialized output processing, have the workflow trigger a component:
-
-```json
-{
-  "name": "generate_custom",
-  "action": {
-    "type": "publish",
-    "subject": "workflow.trigger.my-component",
-    "payload": {
-      "slug": "${trigger.payload.slug}",
-      "title": "${trigger.payload.title}"
-    }
-  },
-  "on_success": "next_step",
-  "on_fail": "error_handler"
-}
-```
-
 ## Troubleshooting
 
 ### Component Not Processing
@@ -822,14 +764,14 @@ For steps that need specialized output processing, have the workflow trigger a c
 1. Check component logs:
 
 ```bash
-docker logs semspec 2>&1 | grep "plan-coordinator\|plan-reviewer\|task-generator"
+docker logs semspec 2>&1 | grep "planner\|plan-reviewer\|requirement-generator"
 ```
 
 2. Verify trigger was published:
 
 ```bash
 curl http://localhost:8080/message-logger/entries?limit=50 \
-  | jq '.[] | select(.subject | contains("workflow.trigger"))'
+  | jq '.[] | select(.subject | contains("workflow.async"))'
 ```
 
 3. Check for processing errors:
@@ -839,35 +781,25 @@ curl http://localhost:8080/message-logger/entries?limit=50 \
   | jq '.[] | select(.type == "error")'
 ```
 
-### Plan Not Updated
+### Plan Status Stuck
 
-If `/plan` runs but `plan.json` does not have Goal/Context/Scope:
-
-1. Check plan-coordinator component is registered:
-
-```bash
-docker logs semspec 2>&1 | grep "plan-coordinator started"
-```
-
-2. Check LLM response parsing:
+If plan status is not advancing, check the `PLAN_STATES` KV bucket for the plan's current entry
+and confirm the watching component is running:
 
 ```bash
-# Look for JSON parsing errors
-docker logs semspec 2>&1 | grep "parse plan"
-```
+# Check PLAN_STATES KV bucket
+curl http://localhost:8080/message-logger/kv/PLAN_STATES | jq .
 
-3. Verify plan.json exists:
-
-```bash
-cat .semspec/plans/<slug>/plan.json
+# Check which component should be reacting
+docker logs semspec 2>&1 | grep "plan-reviewer\|requirement-generator"
 ```
 
 ### Workflow Not Progressing
 
-1. Check workflow-processor logs:
+1. Check KV state for the plan:
 
 ```bash
-docker logs semspec 2>&1 | grep "workflow-processor"
+curl http://localhost:8080/message-logger/kv/PLAN_STATES | jq .
 ```
 
 2. Check for agent failures:

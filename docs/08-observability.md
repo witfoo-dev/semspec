@@ -28,12 +28,12 @@ User Request
 ┌─────────────────┐
 │ agentic-dispatch│ ← Generates trace_id
 └────────┬────────┘
-         │ trace_id in message
+         │ trace_id written to PLAN_STATES
          ▼
 ┌─────────────────┐
-│ plan-coordinator│ ← Records trace_id in ENTITY_STATES
+│  plan-manager   │ ← Stores trace_id as triple in ENTITY_STATES
 └────────┬────────┘
-         │ forwards trace_id
+         │ forwards trace_id via KV-driven trigger
          ▼
 ┌─────────────────┐
 │    planner      │ ← Uses llm.WithTraceContext()
@@ -51,10 +51,10 @@ All LLM-calling components inject trace context before making LLM calls:
 
 | Component | Trace Fields |
 |-----------|-------------|
-| `plan-coordinator` | TraceID, LoopID |
 | `planner` | TraceID, LoopID |
+| `requirement-generator` | TraceID, LoopID |
+| `scenario-generator` | TraceID, LoopID |
 | `plan-reviewer` | TraceID, LoopID |
-| `task-generator` (semstreams) | TraceID, LoopID |
 | `question-answerer` | TraceID, LoopID |
 
 ### Code Pattern

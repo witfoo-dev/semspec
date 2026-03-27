@@ -15,7 +15,7 @@ via the component lifecycle.
 │  │  NATS JetStream (required)                                            │   │
 │  │                                                                        │   │
 │  │  Streams:    AGENT      WORKFLOWS     GRAPH      USER      SOURCES    │   │
-│  │  KV Buckets: ENTITY_STATES  CONTEXT_RESPONSES  PLAN_SESSIONS          │   │
+│  │  KV Buckets: ENTITY_STATES  CONTEXT_RESPONSES  PLAN_STATES            │   │
 │  │              AGENT_LOOPS    WORKFLOW_EXECUTIONS  LLM_CALLS             │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
@@ -122,122 +122,86 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 }
 ```
 
-## Components vs Workflows
+## KV-Driven Pipeline
 
-Semspec uses two complementary patterns for LLM-driven processing. Understanding when to use each is critical for
-extending the system.
+Semspec coordinates multi-step planning without a central orchestrator. Instead, components watch
+the **PLAN_STATES** KV bucket and self-trigger when the plan status they care about appears.
+This is the "KV Twofer" pattern: the `plan-manager` write IS the trigger.
 
-### Components: Single-Shot Processing
-
-**Pattern**: Listen → Process → Persist → Publish
-
-Components are standalone processors that subscribe to a trigger subject, process incoming messages (often with LLM
-calls), persist results, and publish completion notifications.
+### How the Planning Pipeline Self-Coordinates
 
 ```
-┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│  workflow.        │     │    Component     │     │  workflow.        │
-│  trigger.planner │────▶│  (planner)       │────▶│  result.planner   │
-└──────────────────┘     │                  │     └──────────────────┘
-                         │  1. Call LLM     │
-                         │  2. Parse JSON   │     ┌──────────────────┐
-                         │  3. Validate     │────▶│  plan.json        │
-                         │  4. Save file    │     └──────────────────┘
-                         └──────────────────┘
+plan-manager                PLAN_STATES KV               Components
+     │                            │
+     │  POST /plans               │
+     │  (status = created)        │
+     │ ──────────────────────────▶│
+     │                            │──── planner watches ────▶ planner
+     │                            │     (revision == 1)        │
+     │                            │                            │ Call LLM
+     │                            │                            │ Generate Goal/Context/Scope
+     │                            │                            │
+     │  ◀── requirement.created ──│◀─── status = drafted ─────│
+     │                            │
+     │                            │──── plan-reviewer watches ▶ plan-reviewer
+     │                            │     (status == drafted)     │
+     │                            │     (status ==              │ Call LLM
+     │                            │      scenarios_generated)   │ SOP validation
+     │                            │                            │
+     │  ◀── plan approved ────────│◀─── status = reviewed ─────│
 ```
+
+No trigger subjects or coordinator component is involved. Each component runs an independent
+KV watcher alongside its JetStream consumer. The `plan-manager` write sets status; the
+interested component reacts within milliseconds.
+
+### Pipeline Stages and Status Transitions
+
+| Status | Set By | Triggers |
+|--------|--------|----------|
+| `created` | `plan-manager` (POST /plans) | `planner` watcher (revision == 1) |
+| `drafted` | `planner` (after LLM generation) | `plan-reviewer` watcher |
+| `reviewed` | `plan-reviewer` (after approval) | `requirement-generator` |
+| `requirements_generated` | `plan-manager` (on `requirement.created` event) | `scenario-generator` |
+| `scenarios_generated` | `plan-manager` (on `scenario.created` event) | `plan-reviewer` watcher (second pass) |
+| `ready_for_execution` | `plan-manager` (after second review) | `scenario-orchestrator` |
+
+### Components: Single-Shot Processors
+
+**Pattern**: Watch KV or consume JetStream → Call LLM → Persist result → Advance status
+
+Components handle the "last mile" processing that generic executors cannot: JSON extraction
+from LLM markdown responses, typed Go struct validation, and domain-specific persistence.
 
 **Use components when:**
 
 - Calling an LLM and parsing structured output (JSON from markdown-wrapped responses)
 - Transforming data between formats
-- Domain-specific file I/O (`plan.json`, `tasks.json`)
+- Domain-specific file I/O (`plan.json`, typed event publishing)
 - Single input → single output operations
 
 **Examples in semspec:**
 
-| Component | Trigger Subject | Processing | Output |
-|-----------|-----------------|------------|--------|
-| `plan-coordinator` | `workflow.trigger.plan-coordinator` | Orchestrates parallel planners | Merged plan |
-| `planner` | `workflow.trigger.planner` | LLM → Goal/Context/Scope | `plan.json` |
-| `plan-reviewer` | `workflow.trigger.plan-reviewer` | SOP-aware LLM review | Review verdict |
-| `task-generator` | `workflow.trigger.task-generator` | LLM → BDD tasks | `tasks.json` |
-| `context-builder` | `context.build.>` | Strategy-based context assembly | Context payload |
-| `workflow-validator` | `workflow.validate.*` | Parse markdown → validate | Validation result |
-
-### Workflows: Multi-Step Orchestration
-
-**Pattern**: Define steps in JSON → workflow-processor executes them
-
-Workflows are state machines defined declaratively in JSON. They coordinate multiple agents with conditional routing,
-retry logic, and failure handling.
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────────────┐
-│  developer  │────▶│  reviewer   │────▶│  verdict_check      │
-└─────────────┘     └─────────────┘     └──────────┬──────────┘
-                                                   │
-                    ┌──────────────────────────────┼──────────────────┐
-                    │                              │                  │
-                    ▼                              ▼                  ▼
-            ┌───────────────┐            ┌───────────────┐    ┌───────────────┐
-            │   approved    │            │  retry_dev    │    │   escalate    │
-            │   (complete)  │            │  (loop back)  │    │   (to user)   │
-            └───────────────┘            └───────────────┘    └───────────────┘
-```
-
-**Use workflows when:**
-
-- Multiple agents need coordination (developer ↔ reviewer)
-- Conditional routing based on step outputs
-- Retry logic with feedback loops
-- Complex failure handling across steps
-
-**Example**: The `plan-and-execute` workflow implements an adversarial loop where the developer implements, the
-reviewer evaluates, and the system routes based on verdict (`approved`, `fixable`, `misscoped`, `too_big`).
-
-### Why Not Just Use Workflows?
-
-**Q: Could planner/task-generator be workflow steps instead of components?**
-
-**A: No.** `agentic-loop` (which workflow steps delegate to) returns **raw text only**. It cannot:
-
-1. Extract JSON from markdown code blocks
-2. Parse into typed Go structs
-3. Validate domain-specific rules
-4. Merge with existing data
-5. Save to specific file formats
-
-Components fill this gap. They handle the "last mile" processing that generic executors cannot.
+| Component | Self-Trigger Condition | Processing | Output |
+|-----------|------------------------|------------|--------|
+| `planner` | PLAN_STATES revision == 1 | LLM → Goal/Context/Scope | `plan.json` |
+| `plan-reviewer` | PLAN_STATES status == drafted or scenarios_generated | SOP-aware LLM review | Review verdict |
+| `requirement-generator` | Plan approved | LLM → Requirements | `requirement.created` event |
+| `scenario-generator` | Requirements generated | LLM → BDD Scenarios | `scenario.created` event |
+| `workflow-validator` | `workflow.validate.*` subject | Parse markdown → validate | Validation result |
 
 ### Decision Framework
 
 ```
 Need to process LLM output?
 ├── YES: Need structured parsing?
-│   ├── YES: Single-shot operation?
-│   │   ├── YES → COMPONENT (processor/)
-│   │   └── NO  → WORKFLOW with component steps
+│   ├── YES → COMPONENT (processor/)
+│   │         Self-triggers via KV watcher or JetStream consumer
 │   └── NO  → Use agentic-loop directly
-└── NO: Multiple coordinated agents?
-    ├── YES → WORKFLOW (configs/workflows/)
-    └── NO  → Simple command handler
+└── NO: Status-driven coordination?
+    ├── YES → KV-Driven Pipeline (PLAN_STATES + plan-manager)
+    └── NO  → Simple command handler or HTTP endpoint
 ```
-
-### Both Patterns Together
-
-Workflows can trigger components when specialized processing is needed:
-
-```json
-{
-  "name": "generate_plan",
-  "action": {
-    "type": "publish",
-    "subject": "workflow.trigger.planner"
-  }
-}
-```
-
-The workflow handles orchestration; the component handles processing.
 
 ## Manager Pattern
 
@@ -574,9 +538,8 @@ All streams are created at startup by `config.StreamsManager`. The full subject 
 | `question.timeout.>` | AGENT | Output | SLA timeout events |
 | `question.escalate.>` | AGENT | Output | Escalation events |
 | `graph.ingest.entity` | GRAPH | Output | Entities for graph storage |
-| `workflow.trigger.plan-coordinator` | WORKFLOWS | Input | Parallel plan orchestration |
-| `workflow.trigger.planner` | WORKFLOWS | Input | Single-planner path |
-| `workflow.trigger.plan-reviewer` | WORKFLOWS | Input | Plan review |
+| `workflow.trigger.planner` | WORKFLOWS | Input | Single-planner path (legacy explicit trigger) |
+| `workflow.trigger.plan-reviewer` | WORKFLOWS | Input | Plan review (legacy explicit trigger) |
 | `workflow.trigger.task-generator` | WORKFLOWS | Input | Task generation |
 | `workflow.trigger.task-dispatcher` | WORKFLOWS | Input | Task dispatch |
 | `workflow.trigger.change-proposal-loop` | WORKFLOWS | Input | ChangeProposal OODA loop |
