@@ -1,0 +1,91 @@
+package planmanager
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/c360studio/semspec/workflow"
+)
+
+func TestHandlePromotePlan_ReviewedToApproved(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+
+	c := setupTestComponent(t)
+	slug := "promote-reviewed"
+
+	// Simulate a plan that the reviewer has reviewed (verdict set, summary set)
+	// but NOT approved — the auto_approve=false path.
+	plan := setupTestPlan(t, c, slug)
+	plan.Goal = "Add a /health endpoint"
+	plan.Status = workflow.StatusReviewed
+	plan.Approved = false
+	c.plans.put(plan)
+
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
+	w := httptest.NewRecorder()
+
+	c.handlePromotePlan(w, req, slug)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var got PlanWithStatus
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Plan == nil {
+		t.Fatal("Plan is nil in response")
+	}
+	if !got.Plan.Approved {
+		t.Error("Plan.Approved should be true after promote")
+	}
+	if got.Plan.ApprovedAt == nil {
+		t.Error("Plan.ApprovedAt should be set after promote")
+	}
+	if got.Plan.Status != workflow.StatusApproved {
+		t.Errorf("Plan.Status = %q, want %q", got.Plan.Status, workflow.StatusApproved)
+	}
+}
+
+func TestHandlePromotePlan_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+
+	c := setupTestComponent(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/no-such-plan/promote", nil)
+	w := httptest.NewRecorder()
+
+	c.handlePromotePlan(w, req, "no-such-plan")
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandlePromotePlan_AlreadyApproved(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+
+	c := setupTestComponent(t)
+	slug := "promote-already-approved"
+
+	plan := setupTestPlan(t, c, slug)
+	plan.Approved = true
+	plan.Status = workflow.StatusApproved
+	c.plans.put(plan)
+
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
+	w := httptest.NewRecorder()
+
+	c.handlePromotePlan(w, req, slug)
+
+	// Idempotent — should return 200 without error.
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+}

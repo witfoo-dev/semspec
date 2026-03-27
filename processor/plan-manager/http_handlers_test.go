@@ -152,53 +152,7 @@ func TestHandleUpdatePlan_NotFound(t *testing.T) {
 	}
 }
 
-// TestHandlePromotePlan requires NATS infrastructure because promote triggers
-// the requirement generation cascade (PublishToStream). Moved to
-// http_handlers_integration_test.go behind the "integration" build tag.
-
-func TestHandlePromotePlan_NotFound(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
-	c := setupTestComponent(t)
-
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/no-such-plan/promote", nil)
-	w := httptest.NewRecorder()
-
-	c.handlePromotePlan(w, req, "no-such-plan")
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
-	}
-}
-
-func TestHandlePromotePlan_AlreadyApproved(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
-	slug := "promote-already-approved"
-	plan, err := workflow.CreatePlan(ctx, nil, slug, "Already Approved Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-	if err := workflow.ApprovePlan(ctx, nil, plan); err != nil {
-		t.Fatalf("ApprovePlan() error = %v", err)
-	}
-
-	c := setupTestComponent(t)
-	setupTestPlan(t, c, slug)
-
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
-	w := httptest.NewRecorder()
-
-	c.handlePromotePlan(w, req, slug)
-
-	// Idempotent — should return 200 without error.
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
-	}
-}
+// Promote tests moved to http_promote_test.go (no build tag — runs as unit tests).
 
 // ---------------------------------------------------------------------------
 // Task collection handlers
