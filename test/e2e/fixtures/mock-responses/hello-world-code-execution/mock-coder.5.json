@@ -1,4 +1,4 @@
 {
-  "content": "{\"verdict\":\"approved\",\"feedback\":\"Implementation correctly adds /goodbye endpoint with JSON response. Tests cover status code, JSON structure, and message content.\",\"slug\":\"add-a-goodbye-endpoint-that-returns-a-goodbye-mess\"}",
+  "content": "{\"verdict\":\"needs_revision\",\"feedback\":\"The implementation appends to app.py but doesn't import jsonify at the top of the goodbye route. Also missing error handling for non-GET methods. Please fix the implementation.\",\"slug\":\"add-a-goodbye-endpoint-that-returns-a-goodbye-mess\",\"rejection_type\":\"fixable\"}",
   "finish_reason": "stop"
 }
