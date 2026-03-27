@@ -9,6 +9,7 @@ import (
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
+	sscache "github.com/c360studio/semstreams/pkg/cache"
 	nats "github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -66,7 +67,21 @@ func newTestComponent(t *testing.T) *Component {
 	if err != nil {
 		t.Fatalf("newTestComponent: NewComponent failed: %v", err)
 	}
-	return disc.(*Component)
+	c := disc.(*Component)
+
+	// Initialize typed caches that are normally created in Start().
+	ctx := context.Background()
+	ae, err := sscache.NewTTL[*taskExecution](ctx, 4*time.Hour, 30*time.Minute)
+	if err != nil {
+		t.Fatalf("newTestComponent: create active execs cache: %v", err)
+	}
+	c.activeExecs = ae
+	tr, err := sscache.NewTTL[string](ctx, 4*time.Hour, 30*time.Minute)
+	if err != nil {
+		t.Fatalf("newTestComponent: create task routing cache: %v", err)
+	}
+	c.taskRouting = tr
+	return c
 }
 
 // ---------------------------------------------------------------------------

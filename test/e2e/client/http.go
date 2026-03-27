@@ -2738,3 +2738,24 @@ func (c *HTTPClient) WaitForPlanGoal(ctx context.Context, slug string) (*Plan, e
 		}
 	}
 }
+
+// WaitForPlanStatus polls GetPlan until the plan reaches the given status.
+func (c *HTTPClient) WaitForPlanStatus(ctx context.Context, slug, status string) (*Plan, error) {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timeout waiting for plan %q to reach status %q: %w", slug, status, ctx.Err())
+		case <-ticker.C:
+			plan, err := c.GetPlan(ctx, slug)
+			if err != nil {
+				continue
+			}
+			if plan.Status == status {
+				return plan, nil
+			}
+		}
+	}
+}

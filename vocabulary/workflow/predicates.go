@@ -56,6 +56,18 @@ const (
 
 	// ErrorReason is a human-readable description of why the execution failed.
 	ErrorReason = "workflow.execution.error_reason"
+
+	// AgentID is the agentic loop ID assigned to this execution stage.
+	AgentID = "workflow.execution.agent_id"
+
+	// BlueTeamID is the blue-team oversight loop ID for this execution stage.
+	BlueTeamID = "workflow.execution.blue_team_id"
+
+	// Model is the LLM model used for this execution.
+	Model = "workflow.execution.model"
+
+	// CurrentStage is the current pipeline stage of the task execution.
+	CurrentStage = "workflow.execution.current_stage"
 )
 
 // Review-specific predicates.
@@ -263,6 +275,26 @@ func registerTrackingPredicates() {
 		vocabulary.WithDescription("Human-readable description of why the execution failed"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"errorReason"))
+
+	vocabulary.Register(AgentID,
+		vocabulary.WithDescription("Agentic loop ID assigned to this execution stage"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"agentID"))
+
+	vocabulary.Register(BlueTeamID,
+		vocabulary.WithDescription("Blue-team oversight loop ID for this execution stage"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"blueTeamID"))
+
+	vocabulary.Register(Model,
+		vocabulary.WithDescription("LLM model used for this execution"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"model"))
+
+	vocabulary.Register(CurrentStage,
+		vocabulary.WithDescription("Current pipeline stage of the task execution"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"currentStage"))
 }
 
 func registerReviewPredicates() {

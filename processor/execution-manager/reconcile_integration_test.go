@@ -64,8 +64,8 @@ func TestIntegration_ReconcileFromGraph(t *testing.T) {
 	_ = tw.WriteTriple(ctx, entityID, wf.TraceID, "trace-reconcile-1")
 	_ = tw.WriteTriple(ctx, entityID, wf.Iteration, 1)
 	_ = tw.WriteTriple(ctx, entityID, wf.MaxIterations, 3)
-	_ = tw.WriteTriple(ctx, entityID, "workflow.execution.model", "mock-coder")
-	_ = tw.WriteTriple(ctx, entityID, "workflow.execution.agent_id", "agent-alpha-builder")
+	_ = tw.WriteTriple(ctx, entityID, wf.Model, "mock-coder")
+	_ = tw.WriteTriple(ctx, entityID, wf.AgentID, "agent-alpha-builder")
 
 	// Verify the triples were written by reading them back.
 	triples, err := tw.ReadEntity(ctx, entityID)
@@ -79,8 +79,8 @@ func TestIntegration_ReconcileFromGraph(t *testing.T) {
 	if triples[wf.Phase] != phaseBuilding {
 		t.Fatalf("ReadEntity phase = %q, want %q", triples[wf.Phase], phaseBuilding)
 	}
-	if triples["workflow.execution.model"] != "mock-coder" {
-		t.Fatalf("ReadEntity model = %q, want %q", triples["workflow.execution.model"], "mock-coder")
+	if triples[wf.Model] != "mock-coder" {
+		t.Fatalf("ReadEntity model = %q, want %q", triples[wf.Model], "mock-coder")
 	}
 
 	t.Log("PASS: Triples written and read back successfully")
@@ -92,13 +92,11 @@ func TestIntegration_ReconcileFromGraph(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
 
-	// Verify the execution was recovered into activeExecutions.
-	execVal, ok := comp.activeExecutions.Load(entityID)
+	// Verify the execution was recovered into activeExecs.
+	exec, ok := comp.activeExecs.Get(entityID)
 	if !ok {
-		t.Fatal("Execution not recovered into activeExecutions after Start()")
+		t.Fatal("Execution not recovered into activeExecs after Start()")
 	}
-
-	exec := execVal.(*taskExecution)
 	if exec.Slug != slug {
 		t.Errorf("Recovered exec.Slug = %q, want %q", exec.Slug, slug)
 	}
@@ -164,12 +162,12 @@ func TestIntegration_ReconcileSkipsTerminal(t *testing.T) {
 	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
 
 	// Terminal should NOT be recovered.
-	if _, ok := comp.activeExecutions.Load(terminalID); ok {
+	if _, ok := comp.activeExecs.Get(terminalID); ok {
 		t.Error("Terminal execution should not be recovered")
 	}
 
 	// Active should be recovered.
-	if _, ok := comp.activeExecutions.Load(activeID); !ok {
+	if _, ok := comp.activeExecs.Get(activeID); !ok {
 		t.Error("Active execution should be recovered")
 	}
 

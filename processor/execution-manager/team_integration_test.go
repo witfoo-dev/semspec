@@ -4,6 +4,8 @@ package executionmanager
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 	"time"
@@ -50,7 +52,7 @@ var teamStreamSubjects = []natsclient.TestStreamConfig{
 //  5. Red team completes → reviewer dispatched (ReviewerTaskID set)
 //  6. Reviewer approves with red-team scores → approved, KV stats updated
 //
-// Task IDs are read directly from the component's activeExecutions map so we
+// Task IDs are read directly from the component's activeExecs cache so we
 // don't depend on JetStream → Core NATS fan-out for driving the pipeline
 // forward. Separate Core NATS subscriptions still verify that messages ARE
 // published to the correct dispatch subjects.
@@ -114,7 +116,8 @@ func TestIntegration_TeamPipelineFullCycle(t *testing.T) {
 		return comp.triggersProcessed.Load() >= 1
 	}, "triggersProcessed should reach 1")
 
-	entityID := workflow.EntityPrefix() + ".exec.task.run.team-plan-feat-001"
+	h1 := sha256.Sum256([]byte("team-plan-feat-001"))
+	entityID := workflow.EntityPrefix() + ".exec.task.run." + hex.EncodeToString(h1[:8])
 
 	// Wait for TesterTaskID to be assigned — this confirms the tester was dispatched.
 	testerTaskID := waitForExecField(t, ctx, comp, entityID, 20*time.Second, func(exec *taskExecution) string {
@@ -297,7 +300,8 @@ func TestIntegration_TeamPipeline_RedTeamFallback(t *testing.T) {
 	}
 	publishExecTrigger(t, tc, ctx, trigger)
 
-	entityID := workflow.EntityPrefix() + ".exec.task.run.fallback-plan-fallback-001"
+	h2 := sha256.Sum256([]byte("fallback-plan-fallback-001"))
+	entityID := workflow.EntityPrefix() + ".exec.task.run." + hex.EncodeToString(h2[:8])
 
 	waitForExecCondition(t, ctx, 20*time.Second, func() bool {
 		return comp.triggersProcessed.Load() >= 1
@@ -457,7 +461,7 @@ func marshalResult(t *testing.T, v any) string {
 	return string(b)
 }
 
-// waitForExecField polls the component's activeExecutions map until fieldFn
+// waitForExecField polls the component's activeExecs cache until fieldFn
 // returns a non-empty string or the deadline is exceeded.  This is the primary
 // mechanism for obtaining task IDs from each pipeline stage without relying on
 // JetStream → Core NATS fan-out of the dispatch messages themselves.
@@ -474,9 +478,7 @@ func waitForExecField(
 
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		val, ok := comp.activeExecutions.Load(entityID)
-		if ok {
-			exec := val.(*taskExecution)
+		if exec, ok := comp.activeExecs.Get(entityID); ok {
 			exec.mu.Lock()
 			id := fieldFn(exec)
 			exec.mu.Unlock()
@@ -499,11 +501,11 @@ func waitForExecField(
 // Used for point-in-time reads of execution state without waiting.
 func loadExec(t *testing.T, comp *Component, entityID string) *taskExecution {
 	t.Helper()
-	val, ok := comp.activeExecutions.Load(entityID)
+	exec, ok := comp.activeExecs.Get(entityID)
 	if !ok {
 		return nil
 	}
-	return val.(*taskExecution)
+	return exec
 }
 
 // waitForSignal waits for a value to arrive on ch or fatals on timeout.

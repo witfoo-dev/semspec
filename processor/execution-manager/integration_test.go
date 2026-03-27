@@ -4,6 +4,8 @@ package executionmanager
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 	"time"
@@ -216,16 +218,11 @@ func TestIntegration_DuplicateTriggerIdempotent(t *testing.T) {
 	}, "triggersProcessed should reach 2")
 
 	// Only one active execution must be registered for the entity.
-	entityID := workflow.EntityPrefix() + ".exec.task.run.dup-plan-dup-task-001"
-	activeCount := 0
-	comp.activeExecutions.Range(func(k, _ any) bool {
-		if k.(string) == entityID {
-			activeCount++
-		}
-		return true
-	})
-	if activeCount != 1 {
-		t.Errorf("expected 1 active execution for %q, got %d", entityID, activeCount)
+	// buildExecution hashes slug+taskID for the entity ID.
+	h := sha256.Sum256([]byte("dup-plan-dup-task-001"))
+	entityID := workflow.EntityPrefix() + ".exec.task.run." + hex.EncodeToString(h[:8])
+	if _, ok := comp.activeExecs.Get(entityID); !ok {
+		t.Errorf("expected active execution for %q, but not found", entityID)
 	}
 }
 

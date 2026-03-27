@@ -36,6 +36,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	sscache "github.com/c360studio/semstreams/pkg/cache"
+
 	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
@@ -161,14 +163,17 @@ type Component struct {
 	outputPorts []component.Port
 
 	// store is the 3-layer execution store (cache + KV + triples).
-	// Will replace activeExecutions and taskIDIndex once fully wired.
 	store *executionStore
 
-	// activeExecutions maps entityID → *taskExecution.
-	activeExecutions sync.Map
+	// activeExecs is a typed TTL cache mapping entityID → *taskExecution.
+	// Holds runtime pipeline state (mutexes, timers) for in-flight executions.
+	// Entries are explicitly deleted on completion; TTL is a safety net for leaks.
+	activeExecs   sscache.Cache[*taskExecution]
+	activeExecsMu sync.Mutex // guards get-or-set for duplicate trigger detection
 
-	// taskIDIndex maps TaskID → entityID for O(1) completion routing.
-	taskIDIndex sync.Map
+	// taskRouting is a typed TTL cache mapping agent TaskID → entityID.
+	// Provides O(1) completion routing from agent loop events to executions.
+	taskRouting sscache.Cache[string]
 
 	// Lifecycle
 	consumerInfos []consumerInfo
@@ -262,6 +267,19 @@ func (c *Component) Start(ctx context.Context) error {
 
 	c.initAgentGraph()
 	c.logger.Info("Starting execution-orchestrator")
+
+	// Initialize typed caches for in-flight execution routing.
+	// TTL is a safety net for leaked entries; normal cleanup is explicit via Delete.
+	if ae, err := sscache.NewTTL[*taskExecution](ctx, 4*time.Hour, 30*time.Minute); err == nil {
+		c.activeExecs = ae
+	} else {
+		return fmt.Errorf("create active executions cache: %w", err)
+	}
+	if tr, err := sscache.NewTTL[string](ctx, 4*time.Hour, 30*time.Minute); err == nil {
+		c.taskRouting = tr
+	} else {
+		return fmt.Errorf("create task routing cache: %w", err)
+	}
 
 	// Initialize EXECUTION_STATES bucket and store.
 	c.initExecutionStore(ctx)
@@ -375,17 +393,17 @@ func (c *Component) Stop(timeout time.Duration) error {
 		c.logger.Warn("Timed out waiting for in-flight handlers to drain")
 	}
 
-	c.activeExecutions.Range(func(_, value any) bool {
-		exec := value.(*taskExecution)
-		exec.mu.Lock()
-		if exec.timeoutTimer != nil {
-			exec.timeoutTimer.stop()
+	for _, key := range c.activeExecs.Keys() {
+		if exec, ok := c.activeExecs.Get(key); ok {
+			exec.mu.Lock()
+			if exec.timeoutTimer != nil {
+				exec.timeoutTimer.stop()
+			}
+			// Discard worktrees for any active executions on shutdown.
+			c.discardWorktree(exec)
+			exec.mu.Unlock()
 		}
-		// Discard worktrees for any active executions on shutdown.
-		c.discardWorktree(exec)
-		exec.mu.Unlock()
-		return true
-	})
+	}
 
 	c.mu.Lock()
 	c.running = false
@@ -593,7 +611,7 @@ var terminalPhases = map[string]bool{
 }
 
 // reconcileFromGraph queries ENTITY_STATES for active (non-terminal) task
-// executions and rebuilds the in-memory sync.Map. This allows the component
+// executions and rebuilds the in-memory cache. This allows the component
 // to resume in-flight executions after a process restart.
 func (c *Component) reconcileFromGraph(ctx context.Context) {
 	reconcileCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -621,10 +639,10 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 			Title:          triples[wf.Title],
 			ProjectID:      triples[wf.ProjectID],
 			TraceID:        triples[wf.TraceID],
-			Model:          triples["workflow.execution.model"],
-			Prompt:         triples["workflow.execution.prompt"],
-			AgentID:        triples["workflow.execution.agent_id"],
-			BlueTeamID:     triples["workflow.execution.blue_team_id"],
+			Model:          triples[wf.Model],
+			Prompt:         triples[wf.Prompt],
+			AgentID:        triples[wf.AgentID],
+			BlueTeamID:     triples[wf.BlueTeamID],
 			WorktreePath:   triples[wf.WorktreePath],
 			WorktreeBranch: triples[wf.WorktreeBranch],
 			Stage:          phase,
@@ -640,7 +658,7 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 			TaskExecution: state,
 		}
 
-		c.activeExecutions.Store(entityID, exec)
+		c.activeExecs.Set(entityID, exec) //nolint:errcheck // cache set is best-effort
 
 		// Also populate the execution store for KV observability.
 		c.syncToStore(reconcileCtx, exec)
@@ -686,11 +704,15 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 
 	exec := c.buildExecution(ctx, trigger)
 
-	if _, loaded := c.activeExecutions.LoadOrStore(exec.EntityID, exec); loaded {
+	c.activeExecsMu.Lock()
+	if _, exists := c.activeExecs.Get(exec.EntityID); exists {
+		c.activeExecsMu.Unlock()
 		c.logger.Debug("Duplicate trigger for active execution, skipping", "entity_id", exec.EntityID)
 		_ = msg.Ack()
 		return
 	}
+	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck // cache set is best-effort
+	c.activeExecsMu.Unlock()
 
 	// Ack the trigger now that execution is registered and will make forward progress.
 	_ = msg.Ack()
@@ -808,16 +830,16 @@ func (c *Component) writeInitialTriples(ctx context.Context, exec *taskExecution
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Iteration, 0)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.MaxIterations, c.config.MaxIterations)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.model", exec.Model)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.current_stage", phaseTesting)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Model, exec.Model)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CurrentStage, phaseTesting)
 	if exec.Prompt != "" {
-		_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.prompt", exec.Prompt)
+		_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Prompt, exec.Prompt)
 	}
 	if exec.AgentID != "" {
-		_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.agent_id", exec.AgentID)
+		_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.AgentID, exec.AgentID)
 	}
 	if exec.BlueTeamID != "" {
-		_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.blue_team_id", exec.BlueTeamID)
+		_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.BlueTeamID, exec.BlueTeamID)
 	}
 
 	// Also write to EXECUTION_STATES KV for observability.
@@ -909,7 +931,7 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 
 	c.updateLastActivity()
 
-	entityIDVal, ok := c.taskIDIndex.Load(event.TaskID)
+	entityID, ok := c.taskRouting.Get(event.TaskID)
 	if !ok {
 		c.logger.Debug("Loop completed for unknown task ID",
 			"task_id", event.TaskID,
@@ -919,15 +941,12 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 		return
 	}
 	_ = msg.Ack()
-	entityID := entityIDVal.(string)
 
-	execVal, ok := c.activeExecutions.Load(entityID)
+	exec, ok := c.activeExecs.Get(entityID)
 	if !ok {
 		c.logger.Debug("No active execution for entity", "entity_id", entityID)
 		return
 	}
-	exec := execVal.(*taskExecution)
-
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
 
@@ -968,7 +987,7 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 // ---------------------------------------------------------------------------
 
 func (c *Component) handleTesterCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
-	c.taskIDIndex.Delete(exec.TesterTaskID)
+	c.taskRouting.Delete(exec.TesterTaskID)
 
 	var result payloads.DeveloperResult
 	if err := json.Unmarshal([]byte(event.Result), &result); err != nil {
@@ -998,7 +1017,7 @@ func (c *Component) handleTesterCompleteLocked(ctx context.Context, event *agent
 // ---------------------------------------------------------------------------
 
 func (c *Component) handleBuilderCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
-	c.taskIDIndex.Delete(exec.BuilderTaskID)
+	c.taskRouting.Delete(exec.BuilderTaskID)
 
 	var result payloads.DeveloperResult
 	if err := json.Unmarshal([]byte(event.Result), &result); err != nil {
@@ -1034,7 +1053,7 @@ func (c *Component) handleBuilderCompleteLocked(ctx context.Context, event *agen
 // ---------------------------------------------------------------------------
 
 func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
-	c.taskIDIndex.Delete(exec.DeveloperTaskID)
+	c.taskRouting.Delete(exec.DeveloperTaskID)
 
 	var result payloads.DeveloperResult
 	if err := json.Unmarshal([]byte(event.Result), &result); err != nil {
@@ -1065,7 +1084,7 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 // ---------------------------------------------------------------------------
 
 func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
-	c.taskIDIndex.Delete(exec.ReviewerTaskID)
+	c.taskRouting.Delete(exec.ReviewerTaskID)
 
 	result := c.parseCodeReviewResult(event.Result, exec.Slug)
 
@@ -1275,7 +1294,7 @@ func (c *Component) markApprovedLocked(ctx context.Context, exec *taskExecution)
 
 	// Notify callers (e.g. scenario-executor) that the TDD pipeline completed.
 	// Safe against self-receive: the completion event uses exec.TaskID (external),
-	// which is not stored in our taskIDIndex (only internal pipeline task IDs are).
+	// which is not stored in our taskRouting cache (only internal pipeline task IDs are).
 	c.publishCompletionEvent(ctx, exec, agentic.OutcomeSuccess, "")
 
 	c.publishEntity(context.Background(), NewTaskExecutionEntity(exec).WithPhase(phaseApproved))
@@ -1357,12 +1376,12 @@ func (c *Component) cleanupExecutionLocked(exec *taskExecution) {
 	if exec.timeoutTimer != nil {
 		exec.timeoutTimer.stop()
 	}
-	c.taskIDIndex.Delete(exec.TesterTaskID)
-	c.taskIDIndex.Delete(exec.BuilderTaskID)
-	c.taskIDIndex.Delete(exec.DeveloperTaskID)
-	c.taskIDIndex.Delete(exec.ValidatorTaskID)
-	c.taskIDIndex.Delete(exec.ReviewerTaskID)
-	c.activeExecutions.Delete(exec.EntityID)
+	c.taskRouting.Delete(exec.TesterTaskID)
+	c.taskRouting.Delete(exec.BuilderTaskID)
+	c.taskRouting.Delete(exec.DeveloperTaskID)
+	c.taskRouting.Delete(exec.ValidatorTaskID)
+	c.taskRouting.Delete(exec.ReviewerTaskID)
+	c.activeExecs.Delete(exec.EntityID) //nolint:errcheck // cache delete is best-effort
 }
 
 // ---------------------------------------------------------------------------
@@ -1645,7 +1664,7 @@ func (c *Component) availableToolNames() []string {
 func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecution) {
 	taskID := fmt.Sprintf("test-%s-%s", exec.EntityID, uuid.New().String())
 	exec.TesterTaskID = taskID
-	c.taskIDIndex.Store(taskID, exec.EntityID)
+	c.taskRouting.Set(taskID, exec.EntityID)
 
 	// Assemble system prompt via fragment pipeline.
 	asmCtx := c.buildAssemblyContext(prompt.RoleTester, exec)
@@ -1684,7 +1703,7 @@ func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecutio
 func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecution) {
 	taskID := fmt.Sprintf("build-%s-%s", exec.EntityID, uuid.New().String())
 	exec.BuilderTaskID = taskID
-	c.taskIDIndex.Store(taskID, exec.EntityID)
+	c.taskRouting.Set(taskID, exec.EntityID)
 
 	// Assemble system prompt via fragment pipeline.
 	asmCtx := c.buildAssemblyContext(prompt.RoleBuilder, exec)
@@ -1730,7 +1749,7 @@ func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecuti
 func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecution) {
 	taskID := fmt.Sprintf("dev-%s-%s", exec.EntityID, uuid.New().String())
 	exec.DeveloperTaskID = taskID
-	c.taskIDIndex.Store(taskID, exec.EntityID)
+	c.taskRouting.Set(taskID, exec.EntityID)
 
 	// Assemble system prompt via fragment pipeline.
 	asmCtx := c.buildAssemblyContext(prompt.RoleDeveloper, exec)
@@ -1966,7 +1985,7 @@ func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecuti
 
 	taskID := fmt.Sprintf("red-%s-%s", exec.EntityID, uuid.New().String())
 	exec.RedTeamTaskID = taskID
-	c.taskIDIndex.Store(taskID, exec.EntityID)
+	c.taskRouting.Set(taskID, exec.EntityID)
 
 	// Assemble system prompt via fragment pipeline.
 	asmCtx := c.buildAssemblyContext(prompt.RoleReviewer, exec)
@@ -2012,7 +2031,7 @@ func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecuti
 // reviewer still runs, just without the red-team input.
 // Caller must hold exec.mu.
 func (c *Component) handleRedTeamCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
-	c.taskIDIndex.Delete(exec.RedTeamTaskID)
+	c.taskRouting.Delete(exec.RedTeamTaskID)
 
 	var challenge payloads.RedTeamChallengeResult
 	if err := json.Unmarshal([]byte(event.Result), &challenge); err != nil {
@@ -2056,7 +2075,7 @@ func (c *Component) handleRedTeamCompleteLocked(ctx context.Context, event *agen
 func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecution) {
 	taskID := fmt.Sprintf("rev-%s-%s", exec.EntityID, uuid.New().String())
 	exec.ReviewerTaskID = taskID
-	c.taskIDIndex.Store(taskID, exec.EntityID)
+	c.taskRouting.Set(taskID, exec.EntityID)
 
 	// Assemble system prompt via fragment pipeline.
 	asmCtx := c.buildAssemblyContext(prompt.RoleReviewer, exec)

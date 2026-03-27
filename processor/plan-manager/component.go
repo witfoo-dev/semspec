@@ -71,7 +71,10 @@ func (c *Component) loadPlanCached(ctx context.Context, slug string) (*workflow.
 	if err != nil {
 		return nil, err
 	}
-	ps.put(plan)
+	// Backfill all three layers. Graph write is idempotent since we just read from it.
+	if saveErr := ps.save(ctx, plan); saveErr != nil {
+		c.logger.Warn("Failed to backfill plan from graph", "slug", slug, "error", saveErr)
+	}
 	return plan, nil
 }
 
@@ -87,16 +90,18 @@ func (c *Component) savePlanCached(ctx context.Context, plan *workflow.Plan) err
 // setPlanStatusCached transitions plan status and persists through all three layers.
 // The caller's plan pointer is updated in-place so it remains consistent after the call.
 func (c *Component) setPlanStatusCached(ctx context.Context, plan *workflow.Plan, target workflow.Status) error {
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(target) {
+		return fmt.Errorf("%w: %s → %s", workflow.ErrInvalidTransition, current, target)
+	}
+
+	plan.Status = target
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
 
-	if err := ps.setStatus(ctx, plan.Slug, target); err != nil {
-		return err
-	}
-	// Keep the caller's pointer consistent so downstream code sees the new status.
-	plan.Status = target
-	return nil
+	return ps.save(ctx, plan)
 }
 
 // approvePlanCached approves a plan and persists through all three layers.
@@ -153,7 +158,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		logger.Warn("Failed to create question handler, Q&A endpoints will be unavailable",
 			"error", err)
 	}
-
 
 	return &Component{
 		name:            "plan-manager",
@@ -233,7 +237,6 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("start mutation handler: %w", err)
 	}
 
-
 	// Transition to running
 	c.state.Store(stateRunning)
 
@@ -286,7 +289,6 @@ func (c *Component) Stop(_ time.Duration) error {
 		}
 		return fmt.Errorf("component in unexpected state: %d", currentState)
 	}
-
 
 	// Get and clear cancel function
 	c.mu.Lock()

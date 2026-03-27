@@ -162,6 +162,11 @@ func (c *Component) handleRequirementsMutation(ctx context.Context, data []byte)
 		}
 	}
 
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusRequirementsGenerated) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → requirements_generated", current)}
+	}
+
 	// Replace requirements inline and advance plan status.
 	// The KV write IS the event — watchers (coordinator, SSE) react automatically.
 	plan.Requirements = req.Requirements
@@ -240,6 +245,10 @@ func (c *Component) handleScenariosMutation(ctx context.Context, data []byte) Mu
 	}
 
 	if allCovered {
+		current := plan.EffectiveStatus()
+		if !current.CanTransitionTo(workflow.StatusScenariosGenerated) {
+			return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → scenarios_generated", current)}
+		}
 		plan.Status = workflow.StatusScenariosGenerated
 		c.logger.Info("All requirements have scenarios — advanced to scenarios_generated",
 			"slug", req.Slug,
@@ -268,13 +277,24 @@ func (c *Component) handleGenerationFailedMutation(ctx context.Context, data []b
 	ps := c.plans
 	c.mu.RUnlock()
 
-	if plan, ok := ps.get(req.Slug); ok {
-		plan.LastError = req.Error
-		now := time.Now()
-		plan.LastErrorAt = &now
-		if err := ps.setStatus(ctx, plan.Slug, workflow.StatusRejected); err != nil {
-			c.logger.Error("Failed to mark plan rejected", "slug", req.Slug, "error", err)
-		}
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusRejected) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → rejected", current)}
+	}
+
+	plan.LastError = req.Error
+	now := time.Now()
+	plan.LastErrorAt = &now
+	plan.Status = workflow.StatusRejected
+
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to mark plan rejected", "slug", req.Slug, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
 	return MutationResponse{Success: true}
@@ -297,6 +317,11 @@ func (c *Component) handleDraftedMutation(ctx context.Context, data []byte) Muta
 	plan, ok := ps.get(req.Slug)
 	if !ok {
 		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusDrafted) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → drafted", current)}
 	}
 
 	plan.Goal = req.Goal
@@ -333,13 +358,19 @@ func (c *Component) handleReviewedMutation(ctx context.Context, data []byte) Mut
 		return MutationResponse{Success: false, Error: "plan not found"}
 	}
 
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusReviewed) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → reviewed", current)}
+	}
+
 	plan.ReviewVerdict = req.Verdict
 	plan.ReviewSummary = req.Summary
 	now := time.Now()
 	plan.ReviewedAt = &now
+	plan.Status = workflow.StatusReviewed
 
-	if err := ps.setStatus(ctx, plan.Slug, workflow.StatusReviewed); err != nil {
-		return MutationResponse{Success: false, Error: fmt.Sprintf("status transition: %v", err)}
+	if err := ps.save(ctx, plan); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
 	c.logger.Info("Plan reviewed via mutation", "slug", req.Slug, "verdict", req.Verdict)
@@ -403,7 +434,17 @@ func (c *Component) handleClaimMutation(ctx context.Context, data []byte) Mutati
 	ps := c.plans
 	c.mu.RUnlock()
 
-	if err := ps.setStatus(ctx, req.Slug, req.Status); err != nil {
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(req.Status) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → %s", current, req.Status)}
+	}
+	plan.Status = req.Status
+
+	if err := ps.save(ctx, plan); err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("claim: %v", err)}
 	}
 
@@ -431,8 +472,18 @@ func (c *Component) handleScenariosReviewedMutation(ctx context.Context, data []
 	ps := c.plans
 	c.mu.RUnlock()
 
-	if err := ps.setStatus(ctx, req.Slug, workflow.StatusScenariosReviewed); err != nil {
-		return MutationResponse{Success: false, Error: fmt.Sprintf("status transition: %v", err)}
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusScenariosReviewed) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → scenarios_reviewed", current)}
+	}
+	plan.Status = workflow.StatusScenariosReviewed
+
+	if err := ps.save(ctx, plan); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
 	c.logger.Info("Plan scenarios reviewed via mutation (awaiting human approval)", "slug", req.Slug)
@@ -455,8 +506,18 @@ func (c *Component) handleReadyForExecutionMutation(ctx context.Context, data []
 	ps := c.plans
 	c.mu.RUnlock()
 
-	if err := ps.setStatus(ctx, req.Slug, workflow.StatusReadyForExecution); err != nil {
-		return MutationResponse{Success: false, Error: fmt.Sprintf("status transition: %v", err)}
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusReadyForExecution) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → ready_for_execution", current)}
+	}
+	plan.Status = workflow.StatusReadyForExecution
+
+	if err := ps.save(ctx, plan); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
 	c.logger.Info("Plan ready for execution via mutation", "slug", req.Slug)

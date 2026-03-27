@@ -30,7 +30,7 @@ func setupTestComponent(t *testing.T) *Component {
 
 // setupTestPlan inserts a minimal Plan into c.plans with the given slug.
 // Use the returned *workflow.Plan to append Requirements/Scenarios if needed,
-// then call c.plans.put(plan) again to persist those changes.
+// then call c.plans.save(ctx, plan) again to persist those changes.
 // All workflow.CreatePlan / workflow.Save* calls with nil TripleWriter are
 // no-ops (KV-only, no filesystem fallback); test data must be set directly.
 func setupTestPlan(t *testing.T, c *Component, slug string) *workflow.Plan {
@@ -41,7 +41,7 @@ func setupTestPlan(t *testing.T, c *Component, slug string) *workflow.Plan {
 		Slug:  slug,
 		Title: slug,
 	}
-	c.plans.put(plan)
+	_ = c.plans.save(context.Background(), plan)
 	return plan
 }
 
@@ -58,7 +58,7 @@ func setupTestPlanWith(t *testing.T, c *Component, slug string, reqs []workflow.
 		Requirements: reqs,
 		Scenarios:    scenarios,
 	}
-	c.plans.put(plan)
+	_ = c.plans.save(context.Background(), plan)
 	return plan
 }
 

@@ -64,6 +64,7 @@ func (s *PlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) {
 		{"plan-create", s.stagePlanCreate},
 		{"plan-verify", s.stagePlanVerify},
 		{"plan-update-scope", s.stagePlanUpdateScope},
+		{"wait-for-drafted", s.stageWaitForDrafted},
 		{"approve", s.stageApprove},
 		{"approve-verify", s.stageApproveVerify},
 		// Requirement/Scenario CRUD (REST-only, no LLM needed)
@@ -84,7 +85,7 @@ func (s *PlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) {
 		stageStart := time.Now()
 		// Use longer timeout for LLM-powered stages
 		stageTimeout := s.config.StageTimeout
-		if stage.name == "plan-create" || stage.name == "plan-verify" {
+		if stage.name == "plan-create" || stage.name == "plan-verify" || stage.name == "wait-for-drafted" {
 			stageTimeout = 120 * time.Second // LLM can take a while
 		}
 		stageCtx, cancel := context.WithTimeout(ctx, stageTimeout)
@@ -168,6 +169,24 @@ func (s *PlanWorkflowScenario) stagePlanUpdateScope(ctx context.Context, result 
 	}
 
 	result.SetDetail("scope_updated", true)
+	return nil
+}
+
+// stageWaitForDrafted waits for the planner to finish drafting the plan.
+// The planner KV watcher picks up new plans and runs the LLM pipeline.
+// With auto-approve enabled, the plan may pass through drafted → reviewed → approved
+// before we check, so we wait for a non-empty Goal (set by the planner) rather than
+// an exact status match.
+func (s *PlanWorkflowScenario) stageWaitForDrafted(ctx context.Context, result *Result) error {
+	expectedSlug, _ := result.GetDetailString("expected_slug")
+
+	plan, err := s.http.WaitForPlanGoal(ctx, expectedSlug)
+	if err != nil {
+		return fmt.Errorf("wait for plan goal: %w", err)
+	}
+
+	result.SetDetail("drafted_goal", plan.Goal)
+	result.SetDetail("drafted_status", plan.Status)
 	return nil
 }
 

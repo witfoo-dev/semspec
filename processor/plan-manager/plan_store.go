@@ -35,6 +35,9 @@ type planStore struct {
 }
 
 // newPlanStore creates a plan store backed by a TTL in-memory cache.
+// Cache is a performance optimization — KV is the durable read source.
+// Plans that outlive the TTL (e.g., waiting for human review) are served
+// via KV fallback on cache miss (see get()). This is the reference pattern.
 // kv may be nil — store operates in cache+graph-only mode when absent.
 func newPlanStore(ctx context.Context, kv jetstream.KeyValue, tw *graphutil.TripleWriter, logger *slog.Logger) (*planStore, error) {
 	c, err := sscache.NewTTL[*workflow.Plan](ctx, 30*time.Minute, 5*time.Minute)
@@ -93,7 +96,7 @@ func (s *planStore) reconcile(ctx context.Context) {
 		if triples[semspec.PredicatePlanStatus] == "deleted" {
 			continue
 		}
-		plan := planFromTripleMap(entityID, triples)
+		plan := workflow.PlanFromTripleMap(entityID, triples)
 		if plan.Slug == "" {
 			continue
 		}
@@ -221,22 +224,6 @@ func (s *planStore) save(ctx context.Context, plan *workflow.Plan) error {
 	return nil
 }
 
-// setStatus transitions a plan to a new status, validates the transition, then
-// writes through all three layers via save.
-func (s *planStore) setStatus(ctx context.Context, slug string, target workflow.Status) error {
-	plan, ok := s.get(slug)
-	if !ok {
-		return fmt.Errorf("%w: %s", workflow.ErrPlanNotFound, slug)
-	}
-
-	current := plan.EffectiveStatus()
-	if !current.CanTransitionTo(target) {
-		return fmt.Errorf("%w: %s → %s", workflow.ErrInvalidTransition, current, target)
-	}
-
-	plan.Status = target
-	return s.save(ctx, plan)
-}
 
 // approve transitions a plan to approved status and writes through all layers.
 func (s *planStore) approve(ctx context.Context, plan *workflow.Plan) error {
@@ -272,29 +259,6 @@ func (s *planStore) delete(ctx context.Context, slug string) error {
 	return nil
 }
 
-// put updates the cache and KV for a plan that was mutated externally (e.g.,
-// via workflow helper functions). Transitional method — once all writes go
-// through save(), this can be removed.
-func (s *planStore) put(plan *workflow.Plan) {
-	if plan == nil || plan.Slug == "" {
-		return
-	}
-	s.cache.Set(plan.Slug, plan) //nolint:errcheck // cache set is best-effort
-	if s.kvBucket != nil {
-		if data, err := json.Marshal(plan); err == nil {
-			s.kvBucket.Put(context.Background(), plan.Slug, data) //nolint:errcheck // best-effort
-		}
-	}
-}
-
-// remove removes a plan from the cache and KV. Used when a plan is deleted
-// externally.
-func (s *planStore) remove(slug string) {
-	s.cache.Delete(slug) //nolint:errcheck // cache delete is best-effort
-	if s.kvBucket != nil {
-		_ = s.kvBucket.Delete(context.Background(), slug)
-	}
-}
 
 // writeTriples writes all plan fields as individual triples to ENTITY_STATES.
 // This is the durable write-through to the global graph. Unchanged from the
@@ -406,84 +370,3 @@ func (s *planStore) writeChildTriples(ctx context.Context, tw *graphutil.TripleW
 	}
 }
 
-// planFromTripleMap reconstructs a Plan from a predicate→value map.
-// Used by reconcile to rebuild cache from ENTITY_STATES. Unchanged.
-func planFromTripleMap(entityID string, triples map[string]string) *workflow.Plan {
-	plan := &workflow.Plan{
-		ID:   entityID,
-		Slug: triples[semspec.PlanSlug],
-	}
-
-	if v := triples[semspec.PlanTitle]; v != "" {
-		plan.Title = v
-	}
-	if v := triples[semspec.PredicatePlanStatus]; v != "" {
-		plan.Status = workflow.Status(v)
-	}
-	if v := triples[semspec.PlanGoal]; v != "" {
-		plan.Goal = v
-	}
-	if v := triples[semspec.PlanContext]; v != "" {
-		plan.Context = v
-	}
-	if v := triples[semspec.PlanProject]; v != "" {
-		plan.ProjectID = v
-	}
-	if v := triples[semspec.PlanCreatedAt]; v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			plan.CreatedAt = t
-		}
-	}
-
-	// Approval
-	plan.Approved = triples[semspec.PlanApproved] == "true"
-	if v := triples[semspec.PlanApprovedAt]; v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			plan.ApprovedAt = &t
-		}
-	}
-
-	// Review
-	plan.ReviewVerdict = triples[semspec.PlanReviewVerdict]
-	plan.ReviewSummary = triples[semspec.PlanReviewSummary]
-	if v := triples[semspec.PlanReviewedAt]; v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			plan.ReviewedAt = &t
-		}
-	}
-	if v := triples[semspec.PlanReviewFindings]; v != "" {
-		plan.ReviewFindings = json.RawMessage(v)
-	}
-	plan.ReviewFormattedFindings = triples[semspec.PlanReviewFormattedFindings]
-	if v := triples[semspec.PlanReviewIteration]; v != "" {
-		fmt.Sscanf(v, "%d", &plan.ReviewIteration)
-	}
-
-	// Error annotations
-	plan.LastError = triples[semspec.PlanLastError]
-	if v := triples[semspec.PlanLastErrorAt]; v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			plan.LastErrorAt = &t
-		}
-	}
-
-	// Scope
-	if v := triples[semspec.PlanScope]; v != "" {
-		_ = json.Unmarshal([]byte(v), &plan.Scope)
-	}
-
-	// Execution trace IDs
-	if v := triples[semspec.PlanExecutionTraceIDs]; v != "" {
-		_ = json.Unmarshal([]byte(v), &plan.ExecutionTraceIDs)
-	}
-
-	// LLM call history
-	if v := triples[semspec.PlanLLMCallHistory]; v != "" {
-		var history workflow.LLMCallHistory
-		if err := json.Unmarshal([]byte(v), &history); err == nil {
-			plan.LLMCallHistory = &history
-		}
-	}
-
-	return plan
-}

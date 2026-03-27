@@ -1,6 +1,7 @@
 package planmanager
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,7 +23,7 @@ func TestHandlePromotePlan_ReviewedToApproved(t *testing.T) {
 	plan.Goal = "Add a /health endpoint"
 	plan.Status = workflow.StatusReviewed
 	plan.Approved = false
-	c.plans.put(plan)
+	_ = c.plans.save(context.Background(), plan)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
 	w := httptest.NewRecorder()
@@ -77,7 +78,7 @@ func TestHandlePromotePlan_AlreadyApproved(t *testing.T) {
 	plan := setupTestPlan(t, c, slug)
 	plan.Approved = true
 	plan.Status = workflow.StatusApproved
-	c.plans.put(plan)
+	_ = c.plans.save(context.Background(), plan)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
 	w := httptest.NewRecorder()

@@ -101,7 +101,9 @@ func (s *ScenarioExecutionScenario) Execute(ctx context.Context) (*Result, error
 		fn   func(context.Context, *Result) error
 	}{
 		// Plan bootstrap — requirement/scenario CRUD depends on an approved plan.
+		// Wait for the planner to draft before approving to avoid racing the KV watcher.
 		{"create-plan", s.stageCreatePlan},
+		{"wait-for-drafted", s.stageWaitForDrafted},
 		{"approve-plan", s.stageApprovePlan},
 
 		// Requirement CRUD
@@ -131,7 +133,11 @@ func (s *ScenarioExecutionScenario) Execute(ctx context.Context) (*Result, error
 
 	for _, stage := range stages {
 		stageStart := time.Now()
-		stageCtx, cancel := context.WithTimeout(ctx, s.config.StageTimeout)
+		stageTimeout := s.config.StageTimeout
+		if stage.name == "wait-for-drafted" {
+			stageTimeout = 120 * time.Second
+		}
+		stageCtx, cancel := context.WithTimeout(ctx, stageTimeout)
 
 		err := stage.fn(stageCtx, result)
 		cancel()
@@ -232,6 +238,18 @@ func (s *ScenarioExecutionScenario) stageCreatePlan(ctx context.Context, result 
 		return fmt.Errorf("plan not created: %w", err)
 	}
 
+	return nil
+}
+
+func (s *ScenarioExecutionScenario) stageWaitForDrafted(ctx context.Context, result *Result) error {
+	slug, ok := s.planSlug(result)
+	if !ok {
+		return fmt.Errorf("plan_slug not set by create-plan stage")
+	}
+
+	if _, err := s.http.WaitForPlanGoal(ctx, slug); err != nil {
+		return fmt.Errorf("wait for plan goal: %w", err)
+	}
 	return nil
 }
 

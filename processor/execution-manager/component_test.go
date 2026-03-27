@@ -395,7 +395,7 @@ func TestHandleTrigger_ValidTrigger_RegistersExecution(t *testing.T) {
 	c.handleTrigger(testCtx(t), makeTriggerMsg(t, payload))
 
 	entityID := testEntityID("my-plan", "task-abc")
-	if _, ok := c.activeExecutions.Load(entityID); !ok {
+	if _, ok := c.activeExecs.Get(entityID); !ok {
 		t.Errorf("expected active execution to be registered for entity %q", entityID)
 	}
 }
@@ -421,7 +421,7 @@ func TestHandleTrigger_DuplicateTrigger_IsIdempotent(t *testing.T) {
 
 	// The execution must still be registered (not doubled or removed).
 	entityID := testEntityID("my-plan", "task-dup")
-	if _, ok := c.activeExecutions.Load(entityID); !ok {
+	if _, ok := c.activeExecs.Get(entityID); !ok {
 		t.Error("execution should remain registered after duplicate trigger")
 	}
 }
@@ -475,7 +475,7 @@ func TestMarkApprovedLocked_IncrementsCounters(t *testing.T) {
 	c := newTestComponent(t)
 	exec := newTestExec("plan", "task-1")
 
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 	exec.mu.Lock()
 	c.markApprovedLocked(testCtx(t), exec)
@@ -488,7 +488,7 @@ func TestMarkApprovedLocked_IncrementsCounters(t *testing.T) {
 		t.Errorf("executionsCompleted: want 1, got %d", c.executionsCompleted.Load())
 	}
 	// Execution must be removed from the active map.
-	if _, ok := c.activeExecutions.Load(exec.EntityID); ok {
+	if _, ok := c.activeExecs.Get(exec.EntityID); ok {
 		t.Error("execution should be removed from activeExecutions after approval")
 	}
 }
@@ -497,7 +497,7 @@ func TestMarkEscalatedLocked_IncrementsCounters(t *testing.T) {
 	c := newTestComponent(t)
 	exec := newTestExec("plan", "task-2")
 
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 	exec.mu.Lock()
 	c.markEscalatedLocked(testCtx(t), exec, "test escalation reason")
@@ -509,7 +509,7 @@ func TestMarkEscalatedLocked_IncrementsCounters(t *testing.T) {
 	if c.executionsCompleted.Load() != 1 {
 		t.Errorf("executionsCompleted: want 1, got %d", c.executionsCompleted.Load())
 	}
-	if _, ok := c.activeExecutions.Load(exec.EntityID); ok {
+	if _, ok := c.activeExecs.Get(exec.EntityID); ok {
 		t.Error("execution should be removed from activeExecutions after escalation")
 	}
 }
@@ -518,7 +518,7 @@ func TestMarkErrorLocked_IncrementsErrorCounter(t *testing.T) {
 	c := newTestComponent(t)
 	exec := newTestExec("plan", "task-3")
 
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 	exec.mu.Lock()
 	before := c.errors.Load()
@@ -543,8 +543,8 @@ func TestStartDeveloperRetryLocked_IncrementsIteration(t *testing.T) {
 	exec.Iteration = 0
 	exec.MaxIterations = 3
 
-	c.activeExecutions.Store(exec.EntityID, exec)
-	c.taskIDIndex.Store(exec.DeveloperTaskID, exec.EntityID)
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.taskRouting.Set(exec.DeveloperTaskID, exec.EntityID)
 
 	exec.mu.Lock()
 	c.startDeveloperRetryLocked(testCtx(t), exec, "reviewer said no")
@@ -569,7 +569,7 @@ func TestStartDeveloperRetryLocked_ClearsPreviousOutputs(t *testing.T) {
 	exec.Iteration = 0
 	exec.MaxIterations = 3
 
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 	exec.mu.Lock()
 	c.startDeveloperRetryLocked(testCtx(t), exec, "some feedback")
@@ -603,21 +603,21 @@ func TestCleanupExecutionLocked_RemovesIndexEntries(t *testing.T) {
 	exec.ValidatorTaskID = "val-222"
 	exec.ReviewerTaskID = "rev-333"
 
-	c.activeExecutions.Store(exec.EntityID, exec)
-	c.taskIDIndex.Store(exec.DeveloperTaskID, exec.EntityID)
-	c.taskIDIndex.Store(exec.ValidatorTaskID, exec.EntityID)
-	c.taskIDIndex.Store(exec.ReviewerTaskID, exec.EntityID)
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.taskRouting.Set(exec.DeveloperTaskID, exec.EntityID)
+	c.taskRouting.Set(exec.ValidatorTaskID, exec.EntityID)
+	c.taskRouting.Set(exec.ReviewerTaskID, exec.EntityID)
 
 	exec.mu.Lock()
 	c.cleanupExecutionLocked(exec)
 	exec.mu.Unlock()
 
 	for _, id := range []string{"dev-111", "val-222", "rev-333"} {
-		if _, ok := c.taskIDIndex.Load(id); ok {
+		if _, ok := c.taskRouting.Get(id); ok {
 			t.Errorf("taskIDIndex should not contain %q after cleanup", id)
 		}
 	}
-	if _, ok := c.activeExecutions.Load(exec.EntityID); ok {
+	if _, ok := c.activeExecs.Get(exec.EntityID); ok {
 		t.Error("activeExecutions should not contain entity after cleanup")
 	}
 }

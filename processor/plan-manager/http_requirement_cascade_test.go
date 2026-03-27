@@ -3,6 +3,7 @@
 package planmanager
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -66,7 +67,7 @@ func setupCascadeFixture(t *testing.T, slug string) *Component {
 		Requirements: reqs,
 		Scenarios:    scenarios,
 	}
-	c.plans.put(plan)
+	_ = c.plans.save(context.Background(), plan)
 	return c
 }
 

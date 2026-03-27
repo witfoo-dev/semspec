@@ -174,7 +174,7 @@ func TestTeamMode_RedTeamCompleteTransitionsToReviewer(t *testing.T) {
 	exec.RedTeamTaskID = "red-task-123"
 
 	// Index the task ID so the component can route the event.
-	c.taskIDIndex.Store("red-task-123", exec.EntityID)
+	c.taskRouting.Set("red-task-123", exec.EntityID)
 
 	challenge := payloads.RedTeamChallengeResult{
 		Issues: []payloads.RedTeamIssue{

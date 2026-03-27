@@ -623,7 +623,7 @@ func TestDAGGating_DiamondDependency(t *testing.T) {
 		makeScenario("sc-c-1", "req-c", workflow.ScenarioStatusPending),
 		makeScenario("sc-d-1", "req-d", workflow.ScenarioStatusPending),
 	}
-	saveScenariosHelper(t, ctx, m, scenarios, planSlug)
+	saveScenariosHelper(t, ctx, scenarios, planSlug)
 
 	received := make(chan []byte, 20)
 	sub := subscribeExecLoop(t, tc, received)
@@ -645,7 +645,7 @@ func TestDAGGating_DiamondDependency(t *testing.T) {
 
 	// --- Step 2: mark A passing — B and C should both dispatch. ---
 	scenarios[0].Status = workflow.ScenarioStatusPassing
-	saveScenariosHelper(t, ctx, m, scenarios, planSlug)
+	saveScenariosHelper(t, ctx, scenarios, planSlug)
 
 	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, OrchestratorTrigger{
 		PlanSlug: planSlug,
@@ -670,7 +670,7 @@ func TestDAGGating_DiamondDependency(t *testing.T) {
 	// --- Step 3: mark B passing only — D still blocked because C is pending.
 	// C should be re-dispatched (still pending, deps satisfied).
 	scenarios[1].Status = workflow.ScenarioStatusPassing
-	saveScenariosHelper(t, ctx, m, scenarios, planSlug)
+	saveScenariosHelper(t, ctx, scenarios, planSlug)
 
 	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, OrchestratorTrigger{
 		PlanSlug: planSlug,
@@ -691,7 +691,7 @@ func TestDAGGating_DiamondDependency(t *testing.T) {
 
 	// --- Step 4: mark C passing — D should now dispatch. ---
 	scenarios[2].Status = workflow.ScenarioStatusPassing
-	saveScenariosHelper(t, ctx, m, scenarios, planSlug)
+	saveScenariosHelper(t, ctx, scenarios, planSlug)
 
 	publishTrigger(t, tc, ctx, "scenario.orchestrate."+planSlug, OrchestratorTrigger{
 		PlanSlug: planSlug,
@@ -790,7 +790,7 @@ func drainChannel(ch <-chan []byte) {
 }
 
 // saveScenariosHelper calls SaveScenarios and fails the test on error.
-func saveScenariosHelper(t *testing.T, ctx context.Context, kv *natsclient.KVStore, scenarios []workflow.Scenario, slug string) {
+func saveScenariosHelper(t *testing.T, ctx context.Context, scenarios []workflow.Scenario, slug string) {
 	t.Helper()
 	if err := workflow.SaveScenarios(ctx, nil, scenarios, slug); err != nil {
 		t.Fatalf("SaveScenarios() error: %v", err)

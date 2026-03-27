@@ -35,6 +35,9 @@ type executionStore struct {
 }
 
 // newExecutionStore creates an execution store backed by TTL in-memory caches.
+// Cache is a performance optimization — KV is the durable read source.
+// Executions that outlive the TTL are served via KV fallback on cache miss
+// (see getTask/getReq). This is the reference pattern.
 // kvStore may be nil — store operates in cache+graph-only mode when absent.
 func newExecutionStore(ctx context.Context, kvStore *natsclient.KVStore, tw *graphutil.TripleWriter, logger *slog.Logger) (*executionStore, error) {
 	tc, err := sscache.NewTTL[*workflow.TaskExecution](ctx, 30*time.Minute, 5*time.Minute)
@@ -383,15 +386,14 @@ func (s *executionStore) writeTaskTriples(ctx context.Context, exec *workflow.Ta
 	if exec.EscalationReason != "" {
 		_ = tw.WriteTriple(ctx, entityID, wf.EscalationReason, exec.EscalationReason)
 	}
-	// Agent/model metadata (string literals, no vocabulary constant)
 	if exec.AgentID != "" {
-		_ = tw.WriteTriple(ctx, entityID, "workflow.execution.agent_id", exec.AgentID)
+		_ = tw.WriteTriple(ctx, entityID, wf.AgentID, exec.AgentID)
 	}
 	if exec.BlueTeamID != "" {
-		_ = tw.WriteTriple(ctx, entityID, "workflow.execution.blue_team_id", exec.BlueTeamID)
+		_ = tw.WriteTriple(ctx, entityID, wf.BlueTeamID, exec.BlueTeamID)
 	}
 	if exec.Model != "" {
-		_ = tw.WriteTriple(ctx, entityID, "workflow.execution.model", exec.Model)
+		_ = tw.WriteTriple(ctx, entityID, wf.Model, exec.Model)
 	}
 
 	return nil
@@ -442,9 +444,9 @@ func taskFromTripleMap(triples map[string]string) *workflow.TaskExecution {
 		Title:          triples[wf.Title],
 		ProjectID:      triples[wf.ProjectID],
 		TraceID:        triples[wf.TraceID],
-		Model:          triples["workflow.execution.model"],
-		AgentID:        triples["workflow.execution.agent_id"],
-		BlueTeamID:     triples["workflow.execution.blue_team_id"],
+		Model:          triples[wf.Model],
+		AgentID:        triples[wf.AgentID],
+		BlueTeamID:     triples[wf.BlueTeamID],
 		WorktreePath:   triples[wf.WorktreePath],
 		WorktreeBranch: triples[wf.WorktreeBranch],
 	}

@@ -897,10 +897,6 @@ func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 
 // handleUpdatePlan handles PATCH /plans/{slug}.
 func (c *Component) handleUpdatePlan(w http.ResponseWriter, r *http.Request, slug string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
 	// Limit request body size
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
@@ -910,26 +906,34 @@ func (c *Component) handleUpdatePlan(w http.ResponseWriter, r *http.Request, slu
 		return
 	}
 
-	// Convert to UpdatePlanRequest
-	updateReq := workflow.UpdatePlanRequest{
-		Title:   req.Title,
-		Goal:    req.Goal,
-		Context: req.Context,
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(slug)
+	if !ok {
+		http.Error(w, "Plan not found", http.StatusNotFound)
+		return
 	}
 
-	plan, err := workflow.UpdatePlan(r.Context(), tw, slug, updateReq)
-	if err == nil {
-		c.plans.put(plan)
+	// State guard: cannot update if status is implementing, complete, or archived.
+	effectiveStatus := plan.EffectiveStatus()
+	if effectiveStatus == workflow.StatusImplementing || effectiveStatus == workflow.StatusComplete || effectiveStatus == workflow.StatusArchived {
+		http.Error(w, fmt.Sprintf("cannot update plan with status %s", effectiveStatus), http.StatusConflict)
+		return
 	}
-	if err != nil {
-		if errors.Is(err, workflow.ErrPlanNotFound) {
-			http.Error(w, "Plan not found", http.StatusNotFound)
-			return
-		}
-		if errors.Is(err, workflow.ErrPlanNotUpdatable) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
+
+	if req.Title != nil {
+		plan.Title = *req.Title
+	}
+	if req.Goal != nil {
+		plan.Goal = *req.Goal
+	}
+	if req.Context != nil {
+		plan.Context = *req.Context
+	}
+
+	if err := ps.save(r.Context(), plan); err != nil {
 		c.logger.Error("Failed to update plan", "slug", slug, "error", err)
 		http.Error(w, "Failed to update plan", http.StatusInternalServerError)
 		return
@@ -937,63 +941,57 @@ func (c *Component) handleUpdatePlan(w http.ResponseWriter, r *http.Request, slu
 
 	c.logger.Info("Plan updated via REST API", "slug", slug)
 
-	resp := &PlanWithStatus{
-		Plan:  plan,
-		Stage: c.determinePlanStage(plan),
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+	if err := json.NewEncoder(w).Encode(&PlanWithStatus{
+		Plan:  plan,
+		Stage: c.determinePlanStage(plan),
+	}); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
 	}
 }
 
 // handleDeletePlan handles DELETE /plans/{slug}.
 // Supports ?archive=true for soft delete (sets status to archived).
-// Without archive param or archive=false: hard delete (removes files).
+// Without archive param or archive=false: hard delete (tombstone).
 func (c *Component) handleDeletePlan(w http.ResponseWriter, r *http.Request, slug string) {
 	c.mu.RLock()
-	tw := c.tripleWriter
+	ps := c.plans
 	c.mu.RUnlock()
 
-	// Check for archive query parameter
 	archive := r.URL.Query().Get("archive") == "true"
 
-	var err error
 	if archive {
-		// Soft delete - set status to archived
-		err = workflow.ArchivePlan(r.Context(), tw, slug)
-		if err == nil {
-			// Update cache — reload from graph to get the archived status.
-			if archivedPlan, loadErr := workflow.LoadPlan(r.Context(), tw, slug); loadErr == nil {
-				c.plans.put(archivedPlan)
-			} else {
-				c.plans.remove(slug) // Can't reload; evict stale entry.
-			}
-			c.logger.Info("Plan archived via REST API", "slug", slug)
-		}
-	} else {
-		// Hard delete - remove files
-		err = workflow.DeletePlan(r.Context(), tw, slug)
-		if err == nil {
-			c.plans.remove(slug)
-			c.logger.Info("Plan deleted via REST API", "slug", slug)
-		}
-	}
-
-	if err != nil {
-		if errors.Is(err, workflow.ErrPlanNotFound) {
+		// Soft delete — transition to archived status via 3-layer save.
+		plan, ok := ps.get(slug)
+		if !ok {
 			http.Error(w, "Plan not found", http.StatusNotFound)
 			return
 		}
-		if errors.Is(err, workflow.ErrPlanNotDeletable) {
-			http.Error(w, err.Error(), http.StatusConflict)
+		effectiveStatus := plan.EffectiveStatus()
+		if effectiveStatus == workflow.StatusImplementing || effectiveStatus == workflow.StatusComplete || effectiveStatus == workflow.StatusArchived {
+			http.Error(w, fmt.Sprintf("cannot archive plan with status %s", effectiveStatus), http.StatusConflict)
 			return
 		}
-		c.logger.Error("Failed to delete/archive plan", "slug", slug, "archive", archive, "error", err)
-		http.Error(w, "Failed to delete plan", http.StatusInternalServerError)
-		return
+		plan.Status = workflow.StatusArchived
+		if err := ps.save(r.Context(), plan); err != nil {
+			c.logger.Error("Failed to archive plan", "slug", slug, "error", err)
+			http.Error(w, "Failed to archive plan", http.StatusInternalServerError)
+			return
+		}
+		c.logger.Info("Plan archived via REST API", "slug", slug)
+	} else {
+		// Hard delete — graph tombstone + cache/KV eviction.
+		if err := ps.delete(r.Context(), slug); err != nil {
+			if errors.Is(err, workflow.ErrPlanNotFound) {
+				http.Error(w, "Plan not found", http.StatusNotFound)
+				return
+			}
+			c.logger.Error("Failed to delete plan", "slug", slug, "error", err)
+			http.Error(w, "Failed to delete plan", http.StatusInternalServerError)
+			return
+		}
+		c.logger.Info("Plan deleted via REST API", "slug", slug)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -1003,25 +1001,27 @@ func (c *Component) handleDeletePlan(w http.ResponseWriter, r *http.Request, slu
 // Restores an archived plan to complete status.
 func (c *Component) handleUnarchivePlan(w http.ResponseWriter, r *http.Request, slug string) {
 	c.mu.RLock()
-	tw := c.tripleWriter
+	ps := c.plans
 	c.mu.RUnlock()
 
-	if err := workflow.UnarchivePlan(r.Context(), tw, slug); err != nil {
-		if errors.Is(err, workflow.ErrPlanNotFound) {
-			http.Error(w, "Plan not found", http.StatusNotFound)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusConflict)
+	plan, ok := ps.get(slug)
+	if !ok {
+		http.Error(w, "Plan not found", http.StatusNotFound)
+		return
+	}
+	if plan.EffectiveStatus() != workflow.StatusArchived {
+		http.Error(w, fmt.Sprintf("plan %q is not archived (status: %s)", slug, plan.EffectiveStatus()), http.StatusConflict)
+		return
+	}
+
+	plan.Status = workflow.StatusComplete
+	if err := ps.save(r.Context(), plan); err != nil {
+		c.logger.Error("Failed to unarchive plan", "slug", slug, "error", err)
+		http.Error(w, "Failed to unarchive plan", http.StatusInternalServerError)
 		return
 	}
 
 	c.logger.Info("Plan unarchived", "slug", slug)
-
-	plan, err := c.loadPlanCached(r.Context(), slug)
-	if err != nil {
-		http.Error(w, "Plan unarchived but failed to reload", http.StatusInternalServerError)
-		return
-	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
