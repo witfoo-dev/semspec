@@ -18,6 +18,7 @@ const (
 	mutationApproved              = "plan.mutation.approved"
 	mutationRequirementsGenerated = "plan.mutation.requirements.generated"
 	mutationScenariosGenerated    = "plan.mutation.scenarios.generated"
+	mutationScenariosReviewed     = "plan.mutation.scenarios.reviewed"
 	mutationReadyForExecution     = "plan.mutation.ready_for_execution"
 	mutationGenerationFailed      = "plan.mutation.generation.failed"
 	mutationClaim                 = "plan.mutation.claim"
@@ -34,10 +35,10 @@ type RequirementsMutationRequest struct {
 
 // ScenariosMutationRequest is sent by the scenario-generator for a single requirement.
 type ScenariosMutationRequest struct {
-	Slug          string             `json:"slug"`
-	RequirementID string             `json:"requirement_id"`
+	Slug          string              `json:"slug"`
+	RequirementID string              `json:"requirement_id"`
 	Scenarios     []workflow.Scenario `json:"scenarios"`
-	TraceID       string             `json:"trace_id,omitempty"`
+	TraceID       string              `json:"trace_id,omitempty"`
 }
 
 // DraftedMutationRequest is sent by the planner after focus/synthesis.
@@ -108,6 +109,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationApproved, c.handleApprovedMutation},
 		{mutationRequirementsGenerated, c.handleRequirementsMutation},
 		{mutationScenariosGenerated, c.handleScenariosMutation},
+		{mutationScenariosReviewed, c.handleScenariosReviewedMutation},
 		{mutationReadyForExecution, c.handleReadyForExecutionMutation},
 		{mutationGenerationFailed, c.handleGenerationFailedMutation},
 		{mutationClaim, c.handleClaimMutation},
@@ -410,6 +412,33 @@ func (c *Component) handleClaimMutation(ctx context.Context, data []byte) Mutati
 }
 
 // handleReadyForExecutionMutation advances plan to ready_for_execution (from round 2 review).
+// handleScenariosReviewedMutation sets the plan to scenarios_reviewed.
+// Used when auto_approve=false after round-2 review — the plan waits for
+// human approval before advancing to ready_for_execution.
+func (c *Component) handleScenariosReviewedMutation(ctx context.Context, data []byte) MutationResponse {
+	var req struct {
+		Slug    string `json:"slug"`
+		Summary string `json:"summary,omitempty"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" {
+		return MutationResponse{Success: false, Error: "slug required"}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	if err := ps.setStatus(ctx, req.Slug, workflow.StatusScenariosReviewed); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("status transition: %v", err)}
+	}
+
+	c.logger.Info("Plan scenarios reviewed via mutation (awaiting human approval)", "slug", req.Slug)
+	return MutationResponse{Success: true}
+}
+
 func (c *Component) handleReadyForExecutionMutation(ctx context.Context, data []byte) MutationResponse {
 	var req struct {
 		Slug    string `json:"slug"`

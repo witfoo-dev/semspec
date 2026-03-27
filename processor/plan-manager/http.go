@@ -876,6 +876,8 @@ func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 		return "requirements_generated"
 	case workflow.StatusScenariosGenerated:
 		return "scenarios_generated"
+	case workflow.StatusScenariosReviewed:
+		return "scenarios_reviewed"
 	case workflow.StatusReadyForExecution:
 		return "ready_for_execution"
 	case workflow.StatusImplementing:

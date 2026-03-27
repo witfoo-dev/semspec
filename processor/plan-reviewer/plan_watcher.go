@@ -193,12 +193,21 @@ func (c *Component) sendApprovalMutations(ctx context.Context, slug string, summ
 		}
 
 	case roundScenariosReview:
-		// Advance directly to ready_for_execution — execution pipeline picks up from here.
-		readyReq, _ := json.Marshal(map[string]string{"slug": slug})
-		if _, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.ready_for_execution", readyReq, timeout, retryConfig); err != nil {
-			return fmt.Errorf("send ready_for_execution mutation: %w", err)
+		if c.config.IsAutoApprove() {
+			// Auto-approve: advance directly to ready_for_execution.
+			readyReq, _ := json.Marshal(map[string]string{"slug": slug})
+			if _, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.ready_for_execution", readyReq, timeout, retryConfig); err != nil {
+				return fmt.Errorf("send ready_for_execution mutation: %w", err)
+			}
+			c.logger.Info("KV review round 2: sent ready_for_execution mutation", "slug", slug)
+		} else {
+			// Human-in-the-loop: park at scenarios_reviewed, wait for /promote.
+			reviewedReq, _ := json.Marshal(map[string]string{"slug": slug, "summary": summary})
+			if _, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.scenarios.reviewed", reviewedReq, timeout, retryConfig); err != nil {
+				return fmt.Errorf("send scenarios_reviewed mutation: %w", err)
+			}
+			c.logger.Info("KV review round 2: sent scenarios_reviewed mutation (auto_approve=false, awaiting human approval)", "slug", slug)
 		}
-		c.logger.Info("KV review round 2: sent ready_for_execution mutation", "slug", slug)
 	}
 
 	return nil

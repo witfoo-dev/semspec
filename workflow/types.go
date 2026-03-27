@@ -37,6 +37,9 @@ const (
 	StatusRequirementsGenerated Status = "requirements_generated"
 	// StatusScenariosGenerated indicates scenarios have been generated for all requirements.
 	StatusScenariosGenerated Status = "scenarios_generated"
+	// StatusScenariosReviewed indicates scenarios have passed review but await human approval.
+	// Set when auto_approve=false; the human clicks "Approve & Continue" to advance to ready_for_execution.
+	StatusScenariosReviewed Status = "scenarios_reviewed"
 	// StatusReadyForExecution indicates the plan has scenarios and is ready for the scenario
 	// orchestrator to pick up and decompose into tasks at runtime (reactive execution mode).
 	// This status is set by task-generator when reactive_mode=true, bypassing task generation.
@@ -78,7 +81,7 @@ func (s Status) String() string {
 func (s Status) IsValid() bool {
 	switch s {
 	case StatusCreated, StatusDrafted, StatusReviewed, StatusApproved,
-		StatusRequirementsGenerated, StatusScenariosGenerated,
+		StatusRequirementsGenerated, StatusScenariosGenerated, StatusScenariosReviewed,
 		StatusReadyForExecution,
 		StatusImplementing, StatusReviewingRollup, StatusComplete, StatusArchived, StatusRejected,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
@@ -134,12 +137,16 @@ func (s Status) CanTransitionTo(target Status) bool {
 		return target == StatusScenariosGenerated || target == StatusRejected
 	case StatusScenariosGenerated:
 		// scenarios_generated → reviewing_scenarios (plan-reviewer R2 claims)
+		// scenarios_generated → scenarios_reviewed (R2 done, auto_approve=false)
 		// scenarios_generated → reviewed (review happens after scenario generation)
 		// scenarios_generated → ready_for_execution (reactive mode — task-generator reactive_mode=true, review skipped)
 		// scenarios_generated → rejected (validation failure)
-		return target == StatusReviewingScenarios || target == StatusReviewed || target == StatusReadyForExecution || target == StatusRejected
+		return target == StatusReviewingScenarios || target == StatusScenariosReviewed || target == StatusReviewed || target == StatusReadyForExecution || target == StatusRejected
 	case StatusReviewingScenarios:
-		return target == StatusReviewed || target == StatusReadyForExecution || target == StatusRejected
+		return target == StatusScenariosReviewed || target == StatusReviewed || target == StatusReadyForExecution || target == StatusRejected
+	case StatusScenariosReviewed:
+		// scenarios_reviewed → ready_for_execution (human clicks "Approve & Continue")
+		return target == StatusReadyForExecution || target == StatusRejected
 	case StatusReadyForExecution:
 		// ready_for_execution → implementing (scenario orchestrator picks up the plan)
 		// ready_for_execution → rejected (orchestration failure)
