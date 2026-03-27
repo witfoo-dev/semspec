@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/c360studio/semstreams/agentic"
 )
@@ -100,6 +101,13 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 		}, nil
 	}
 
+	if looksLikeQuestion(summary) {
+		return agentic.ToolResult{
+			CallID: call.ID,
+			Error:  "Your submission looks like a question, not completed work. Use ask_question instead of submit_work when you need clarification.",
+		}, nil
+	}
+
 	result := map[string]any{
 		"type":    "work_product",
 		"summary": summary,
@@ -169,4 +177,48 @@ func (e *Executor) submitReview(call agentic.ToolCall) (agentic.ToolResult, erro
 		Content:  string(data),
 		StopLoop: true,
 	}, nil
+}
+
+// looksLikeQuestion detects when an agent submits a question instead of work.
+// Borrowed from semdragon's anti-pattern guard — prevents wasted review cycles
+// when agents misuse submit_work for clarification requests.
+func looksLikeQuestion(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+
+	// Check for common question phrases at the start.
+	questionPrefixes := []string{
+		"could you", "can you", "should i", "how do i", "how should",
+		"what should", "where should", "i need clarification",
+		"i'm not sure", "i have a question", "please clarify",
+	}
+	for _, prefix := range questionPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+
+	// Short single-line text ending with question mark is likely a question.
+	if len(lower) < 200 && !strings.Contains(lower, "\n") && strings.HasSuffix(lower, "?") {
+		return true
+	}
+
+	// High ratio of question-mark lines (>50%) in multi-line text.
+	lines := strings.Split(text, "\n")
+	questionLines := 0
+	nonEmpty := 0
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		nonEmpty++
+		if strings.HasSuffix(trimmed, "?") {
+			questionLines++
+		}
+	}
+	if nonEmpty > 1 && float64(questionLines)/float64(nonEmpty) > 0.5 {
+		return true
+	}
+
+	return false
 }

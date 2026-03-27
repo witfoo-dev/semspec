@@ -1677,6 +1677,7 @@ func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecutio
 		Prompt:       exec.Prompt,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageTest,
+		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleTester, asmCtx.AvailableTools),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
@@ -1723,6 +1724,7 @@ func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecuti
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageBuild,
 		Prompt:       userPrompt,
+		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleBuilder, asmCtx.AvailableTools),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
@@ -1767,6 +1769,7 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageDevelop,
 		Prompt:       userPrompt,
+		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleDeveloper, asmCtx.AvailableTools),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
@@ -2002,6 +2005,7 @@ func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecuti
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageRedTeam,
 		Prompt:       exec.Prompt,
+		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleReviewer, asmCtx.AvailableTools),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
@@ -2097,6 +2101,7 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageReview,
 		Prompt:       exec.Prompt,
+		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleReviewer, asmCtx.AvailableTools),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},

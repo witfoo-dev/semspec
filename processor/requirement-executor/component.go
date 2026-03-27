@@ -626,6 +626,7 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageDecompose,
 		Prompt:       c.buildDecomposerPrompt(exec),
+		ToolChoice:   &agentic.ToolChoice{Mode: "function", FunctionName: "decompose_task"},
 		Metadata: map[string]any{
 			"requirement_id": exec.RequirementID,
 			"plan_slug":      exec.Slug,
@@ -792,6 +793,7 @@ func (c *Component) dispatchRequirementRedTeamLocked(ctx context.Context, exec *
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageRequirementRedTeam,
 		Prompt:       c.buildDecomposerPrompt(exec),
+		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleScenarioReviewer, asmCtx.AvailableTools),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
@@ -864,6 +866,7 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageRequirementReview,
 		Prompt:       c.buildDecomposerPrompt(exec),
+		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleScenarioReviewer, asmCtx.AvailableTools),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},

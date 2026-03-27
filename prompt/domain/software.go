@@ -1189,7 +1189,13 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.HasTool("graph_search") || ctx.HasTool("graph_summary")
 			},
-			Content: `DISCOVERY BEFORE ACTION: Do NOT interleave discovery and implementation. Investigate the codebase thoroughly FIRST (graph_search, bash cat), form a complete understanding, THEN act. Switching between reading and writing wastes iterations.`,
+			Content: `DISCOVERY BEFORE ACTION:
+1. Call graph_summary ONCE to see what data sources are indexed
+2. Use graph_search for project-specific lookups (patterns, conventions, existing implementations)
+3. Use bash cat/ls to examine relevant files identified by the graph
+4. Only AFTER you understand the codebase should you start writing code
+Do NOT interleave discovery and implementation — investigate thoroughly, then act. Switching between reading and writing wastes iterations.
+If graph results are empty or unhelpful, fall back to bash exploration — do not retry the same graph query.`,
 		},
 
 		// =====================================================================
@@ -1240,6 +1246,53 @@ Other agents may be working on the same codebase simultaneously.
 - Prefer additive changes (new files, new functions) over rewrites of shared code
 - When modifying shared code, make minimal backward-compatible changes
 - The knowledge graph reflects the current state — use it`,
+		},
+
+		// =====================================================================
+		// Capability boundaries — explicit "what you CANNOT do" per role
+		// Prevents hallucination of impossible actions (learned from semdragon).
+		// =====================================================================
+		{
+			ID:       "software.builder.capability-bounds",
+			Category: prompt.CategoryBehavioralGate,
+			Priority: 11,
+			Roles:    []prompt.Role{prompt.RoleBuilder},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil
+			},
+			Content: `RESTRICTIONS — What you CANNOT do:
+- Do NOT create or modify test files — testing is another agent's job
+- Do NOT modify files outside the declared scope
+- Do NOT deploy, publish, or push code
+- Do NOT modify CI/CD configuration or build scripts unless explicitly in scope`,
+		},
+		{
+			ID:       "software.tester.capability-bounds",
+			Category: prompt.CategoryBehavioralGate,
+			Priority: 11,
+			Roles:    []prompt.Role{prompt.RoleTester},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil
+			},
+			Content: `RESTRICTIONS — What you CANNOT do:
+- Do NOT write implementation code — your ONLY job is tests
+- Do NOT modify production source files
+- Do NOT deploy, publish, or push code
+- Do NOT modify CI/CD configuration or build scripts`,
+		},
+		{
+			ID:       "software.reviewer.capability-bounds",
+			Category: prompt.CategoryBehavioralGate,
+			Priority: 11,
+			Roles:    []prompt.Role{prompt.RoleReviewer, prompt.RoleScenarioReviewer, prompt.RolePlanRollupReviewer},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil || ctx.ScenarioReviewContext != nil || ctx.RollupReviewContext != nil
+			},
+			Content: `RESTRICTIONS — What you CANNOT do:
+- Do NOT modify any source files — you review only
+- Do NOT create new files or write code
+- Do NOT deploy, publish, or push code
+- You can use bash for READ-ONLY operations (cat, ls, grep) to verify claims`,
 		},
 
 		// =====================================================================

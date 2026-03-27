@@ -1,42 +1,32 @@
 package prompt
 
-// ToolChoice represents the tool selection mode for LLM requests.
-// This mirrors semstreams' agentic.ToolChoice but is defined here
-// to avoid a hard dependency on the semstreams version that adds it.
-// When semstreams is upgraded to include agentic.ToolChoice, this
-// type can be replaced with a type alias.
-type ToolChoice struct {
-	// Mode is "auto", "required", "none", or "function".
-	Mode string `json:"mode"`
+import "github.com/c360studio/semstreams/agentic"
 
-	// FunctionName is required when Mode is "function".
-	FunctionName string `json:"function_name,omitempty"`
-}
-
-// ResolveToolChoice determines the appropriate ToolChoice for a given role and tool set.
+// ResolveToolChoice determines the appropriate agentic.ToolChoice for a given
+// role and tool set. The result is set directly on agentic.TaskMessage.ToolChoice.
 //
 // Logic:
 //   - No tools → nil (auto, model decides)
-//   - Single tool → force that specific function
-//   - Developer with tools → required (must use a tool each iteration)
+//   - Execution roles (builder, tester, developer, validator) → required (must use a tool)
+//   - Single tool for execution roles → force that specific function
 //   - Reviewers → nil (they produce JSON, no tools needed)
 //   - Planners with tools → nil (auto — tools optional for context gathering)
-func ResolveToolChoice(role Role, toolNames []string) *ToolChoice {
+func ResolveToolChoice(role Role, toolNames []string) *agentic.ToolChoice {
 	if len(toolNames) == 0 {
 		return nil
 	}
 
 	// Check role first: reviewers and planners never force tool use.
 	switch role {
-	case RoleDeveloper:
-		// Developer agents MUST call a tool each iteration (bash, submit_work, etc)
+	case RoleDeveloper, RoleBuilder, RoleTester, RoleValidator:
+		// Execution agents MUST call a tool each iteration (bash, submit_work, etc)
 		if len(toolNames) == 1 {
-			return &ToolChoice{
+			return &agentic.ToolChoice{
 				Mode:         "function",
 				FunctionName: toolNames[0],
 			}
 		}
-		return &ToolChoice{Mode: "required"}
+		return &agentic.ToolChoice{Mode: "required"}
 
 	case RoleReviewer, RolePlanReviewer, RoleTaskReviewer, RoleScenarioReviewer, RolePlanRollupReviewer:
 		// Reviewers produce structured JSON output, no tool calls needed
@@ -49,7 +39,7 @@ func ResolveToolChoice(role Role, toolNames []string) *ToolChoice {
 	default:
 		// Single tool for any other role: force it
 		if len(toolNames) == 1 {
-			return &ToolChoice{
+			return &agentic.ToolChoice{
 				Mode:         "function",
 				FunctionName: toolNames[0],
 			}

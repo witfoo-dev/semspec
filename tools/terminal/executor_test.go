@@ -3,6 +3,7 @@ package terminal
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/c360studio/semstreams/agentic"
@@ -61,6 +62,80 @@ func TestSubmitWork_RequiresSummary(t *testing.T) {
 
 // ask_question is no longer a terminal tool — it moved to tools/question/executor.go
 // and does NOT set StopLoop=true.
+
+func TestSubmitWork_RejectsQuestions(t *testing.T) {
+	e := NewExecutor()
+	questions := []string{
+		"How should I implement the auth middleware?",
+		"Could you clarify the requirements for this task?",
+		"I need clarification on the API contract",
+		"Should I use JWT or session tokens?",
+	}
+	for _, q := range questions {
+		result, _ := e.Execute(context.Background(), agentic.ToolCall{
+			ID:   "call-q",
+			Name: "submit_work",
+			Arguments: map[string]any{
+				"summary": q,
+			},
+		})
+		if result.StopLoop {
+			t.Errorf("should not stop loop for question: %s", q)
+		}
+		if result.Error == "" {
+			t.Errorf("expected error for question submission: %s", q)
+		}
+	}
+}
+
+func TestSubmitWork_AcceptsLegitWork(t *testing.T) {
+	e := NewExecutor()
+	legit := []string{
+		"Implemented auth middleware with JWT validation and rate limiting",
+		"Added unit tests for the user service covering create, read, update, delete operations",
+		"Refactored database connection pool to use context-aware timeouts. Updated 3 files.",
+	}
+	for _, s := range legit {
+		result, _ := e.Execute(context.Background(), agentic.ToolCall{
+			ID:   "call-l",
+			Name: "submit_work",
+			Arguments: map[string]any{
+				"summary": s,
+			},
+		})
+		if result.Error != "" {
+			t.Errorf("unexpected error for legit work %q: %s", s, result.Error)
+		}
+		if !result.StopLoop {
+			t.Errorf("expected StopLoop for legit work: %s", s)
+		}
+	}
+}
+
+func TestLooksLikeQuestion(t *testing.T) {
+	tests := []struct {
+		text string
+		want bool
+	}{
+		{"How should I implement this?", true},
+		{"Could you explain the API?", true},
+		{"I need clarification on the scope", true},
+		{"Implemented auth middleware with JWT validation", false},
+		{"Added tests for user service", false},
+		// Long text with question mark is OK (could be a summary mentioning a question)
+		{strings.Repeat("x", 250) + "?", false},
+		// Majority question-mark lines
+		{"What about X?\nWhat about Y?\nWhat about Z?", true},
+		// Mixed lines — minority questions
+		{"Did X.\nDid Y.\nDid Z.\nWhat about W?", false},
+	}
+	for _, tt := range tests {
+		got := looksLikeQuestion(tt.text)
+		if got != tt.want {
+			t.Errorf("looksLikeQuestion(%q) = %v, want %v", tt.text[:min(len(tt.text), 50)], got, tt.want)
+		}
+	}
+}
 
 func TestUnknownTool(t *testing.T) {
 	e := NewExecutor()
