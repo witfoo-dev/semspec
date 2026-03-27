@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -101,12 +102,28 @@ func (c *Component) handlePlanStream(w http.ResponseWriter, r *http.Request, slu
 				return
 			}
 
-			// Emit plan_updated with the full plan state.
+			// Wrap raw Plan in PlanWithStatus so the SSE payload includes
+			// the computed "stage" field that the UI needs for state-driven rendering.
 			eventID++
-			if err := writeSSEEventWithID(w, flusher, eventID, sseEventPlanUpdated, json.RawMessage(entry.Value())); err != nil {
+			payload := c.enrichPlanSSEPayload(entry.Value())
+			if err := writeSSEEventWithID(w, flusher, eventID, sseEventPlanUpdated, payload); err != nil {
 				return
 			}
 		}
+	}
+}
+
+// enrichPlanSSEPayload unmarshals a raw Plan KV value and wraps it in
+// PlanWithStatus so the SSE payload includes the computed "stage" field.
+// Falls back to the raw bytes if unmarshaling fails.
+func (c *Component) enrichPlanSSEPayload(raw []byte) any {
+	var plan workflow.Plan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		return json.RawMessage(raw)
+	}
+	return &PlanWithStatus{
+		Plan:  &plan,
+		Stage: c.determinePlanStage(&plan),
 	}
 }
 
