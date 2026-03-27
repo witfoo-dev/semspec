@@ -12,13 +12,13 @@ import (
 // Mutation subjects — execution-manager is the single writer to EXECUTION_STATES.
 // requirement-executor and other components send mutations via request/reply.
 const (
-	execMutationTaskCreate    = "execution.mutation.task.create"
-	execMutationTaskPhase     = "execution.mutation.task.phase"
-	execMutationTaskComplete  = "execution.mutation.task.complete"
-	execMutationReqCreate     = "execution.mutation.req.create"
-	execMutationReqPhase      = "execution.mutation.req.phase"
-	execMutationReqNode       = "execution.mutation.req.node"
-	execMutationClaim         = "execution.mutation.claim"
+	execMutationTaskCreate   = "execution.mutation.task.create"
+	execMutationTaskPhase    = "execution.mutation.task.phase"
+	execMutationTaskComplete = "execution.mutation.task.complete"
+	execMutationReqCreate    = "execution.mutation.req.create"
+	execMutationReqPhase     = "execution.mutation.req.phase"
+	execMutationReqNode      = "execution.mutation.req.node"
+	execMutationClaim        = "execution.mutation.claim"
 )
 
 // ---------------------------------------------------------------------------
@@ -27,24 +27,24 @@ const (
 
 // TaskCreateRequest creates a new task execution entry.
 type TaskCreateRequest struct {
-	Slug          string          `json:"slug"`
-	TaskID        string          `json:"task_id"`
-	Title         string          `json:"title"`
-	Description   string          `json:"description,omitempty"`
-	ProjectID     string          `json:"project_id,omitempty"`
-	Prompt        string          `json:"prompt,omitempty"`
-	Model         string          `json:"model,omitempty"`
-	TraceID       string          `json:"trace_id,omitempty"`
-	LoopID        string          `json:"loop_id,omitempty"`
-	RequestID     string          `json:"request_id,omitempty"`
-	TaskType      workflow.TaskType `json:"task_type,omitempty"`
-	MaxIterations int             `json:"max_iterations,omitempty"`
-	AgentID       string          `json:"agent_id,omitempty"`
-	BlueTeamID    string          `json:"blue_team_id,omitempty"`
-	RedTeamID     string          `json:"red_team_id,omitempty"`
-	WorktreePath  string          `json:"worktree_path,omitempty"`
-	WorktreeBranch string         `json:"worktree_branch,omitempty"`
-	ScenarioBranch string         `json:"scenario_branch,omitempty"`
+	Slug           string            `json:"slug"`
+	TaskID         string            `json:"task_id"`
+	Title          string            `json:"title"`
+	Description    string            `json:"description,omitempty"`
+	ProjectID      string            `json:"project_id,omitempty"`
+	Prompt         string            `json:"prompt,omitempty"`
+	Model          string            `json:"model,omitempty"`
+	TraceID        string            `json:"trace_id,omitempty"`
+	LoopID         string            `json:"loop_id,omitempty"`
+	RequestID      string            `json:"request_id,omitempty"`
+	TaskType       workflow.TaskType `json:"task_type,omitempty"`
+	MaxIterations  int               `json:"max_iterations,omitempty"`
+	AgentID        string            `json:"agent_id,omitempty"`
+	BlueTeamID     string            `json:"blue_team_id,omitempty"`
+	RedTeamID      string            `json:"red_team_id,omitempty"`
+	WorktreePath   string            `json:"worktree_path,omitempty"`
+	WorktreeBranch string            `json:"worktree_branch,omitempty"`
+	ScenarioBranch string            `json:"scenario_branch,omitempty"`
 }
 
 // TaskPhaseRequest transitions a task execution to a new phase.
@@ -82,18 +82,18 @@ type TaskCompleteRequest struct {
 
 // ReqCreateRequest creates a new requirement execution entry.
 type ReqCreateRequest struct {
-	Slug          string             `json:"slug"`
-	RequirementID string            `json:"requirement_id"`
-	Title         string            `json:"title"`
-	Description   string            `json:"description,omitempty"`
-	ProjectID     string            `json:"project_id,omitempty"`
-	TraceID       string            `json:"trace_id,omitempty"`
-	LoopID        string            `json:"loop_id,omitempty"`
-	RequestID     string            `json:"request_id,omitempty"`
-	Model         string            `json:"model,omitempty"`
+	Slug          string              `json:"slug"`
+	RequirementID string              `json:"requirement_id"`
+	Title         string              `json:"title"`
+	Description   string              `json:"description,omitempty"`
+	ProjectID     string              `json:"project_id,omitempty"`
+	TraceID       string              `json:"trace_id,omitempty"`
+	LoopID        string              `json:"loop_id,omitempty"`
+	RequestID     string              `json:"request_id,omitempty"`
+	Model         string              `json:"model,omitempty"`
 	Scenarios     []workflow.Scenario `json:"scenarios,omitempty"`
-	BlueTeamID    string            `json:"blue_team_id,omitempty"`
-	RedTeamID     string            `json:"red_team_id,omitempty"`
+	BlueTeamID    string              `json:"blue_team_id,omitempty"`
+	RedTeamID     string              `json:"red_team_id,omitempty"`
 }
 
 // ReqPhaseRequest transitions a requirement execution to a new phase.
@@ -116,8 +116,8 @@ type ReqPhaseRequest struct {
 
 // ReqNodeRequest updates DAG node state within a requirement execution.
 type ReqNodeRequest struct {
-	Key            string              `json:"key"`
-	CurrentNodeIdx *int                `json:"current_node_idx,omitempty"`
+	Key            string               `json:"key"`
+	CurrentNodeIdx *int                 `json:"current_node_idx,omitempty"`
 	NodeResult     *workflow.NodeResult `json:"node_result,omitempty"`
 	// Routing for current node
 	CurrentNodeTaskID string `json:"current_node_task_id,omitempty"`
@@ -125,8 +125,8 @@ type ReqNodeRequest struct {
 
 // ExecClaimRequest claims an execution for processing (intermediate status).
 type ExecClaimRequest struct {
-	Key    string `json:"key"`    // KV key
-	Stage  string `json:"stage"`  // target in-progress stage
+	Key   string `json:"key"`   // KV key
+	Stage string `json:"stage"` // target in-progress stage
 }
 
 // ExecMutationResponse is the reply to all execution mutation requests.

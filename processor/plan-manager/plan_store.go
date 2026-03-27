@@ -224,7 +224,6 @@ func (s *planStore) save(ctx context.Context, plan *workflow.Plan) error {
 	return nil
 }
 
-
 // approve transitions a plan to approved status and writes through all layers.
 func (s *planStore) approve(ctx context.Context, plan *workflow.Plan) error {
 	if plan.Approved {
@@ -258,7 +257,6 @@ func (s *planStore) delete(ctx context.Context, slug string) error {
 	}
 	return nil
 }
-
 
 // writeTriples writes all plan fields as individual triples to ENTITY_STATES.
 // This is the durable write-through to the global graph. Unchanged from the
@@ -369,4 +367,3 @@ func (s *planStore) writeChildTriples(ctx context.Context, tw *graphutil.TripleW
 		}
 	}
 }
-

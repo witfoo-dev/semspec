@@ -74,8 +74,8 @@ func (c *Component) sendReqPhase(ctx context.Context, key, stage string, fields 
 // sendReqNode sends a DAG node update mutation to execution-manager.
 func (c *Component) sendReqNode(ctx context.Context, key string, nodeIdx int, nodeTaskID string, result *workflow.NodeResult) error {
 	req := map[string]any{
-		"key":               key,
-		"current_node_idx":  nodeIdx,
+		"key":                  key,
+		"current_node_idx":     nodeIdx,
 		"current_node_task_id": nodeTaskID,
 	}
 	if result != nil {

@@ -126,11 +126,11 @@ type RequirementExecution struct {
 	RedTeamID  string `json:"red_team_id,omitempty"`
 
 	// DAG decomposition
-	NodeCount      int              `json:"node_count,omitempty"`
-	CurrentNodeIdx int              `json:"current_node_idx"` // -1 before execution starts
-	DAGRaw         json.RawMessage  `json:"dag,omitempty"`    // serialized TaskDAG
-	SortedNodeIDs  []string         `json:"sorted_node_ids,omitempty"`
-	NodeResults    []NodeResult     `json:"node_results,omitempty"`
+	NodeCount      int             `json:"node_count,omitempty"`
+	CurrentNodeIdx int             `json:"current_node_idx"` // -1 before execution starts
+	DAGRaw         json.RawMessage `json:"dag,omitempty"`    // serialized TaskDAG
+	SortedNodeIDs  []string        `json:"sorted_node_ids,omitempty"`
+	NodeResults    []NodeResult    `json:"node_results,omitempty"`
 
 	// Routing
 	DecomposerTaskID  string `json:"decomposer_task_id,omitempty"`
