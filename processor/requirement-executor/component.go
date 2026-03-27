@@ -957,7 +957,7 @@ func resolveProvider(modelStr string) prompt.Provider {
 // availableToolNames returns the full tool list the component knows about.
 func availableToolNames() []string {
 	return []string{
-		"bash", "submit_work", "ask_question",
+		"bash", "submit_work", "submit_review", "ask_question",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
 		"review_scenario",

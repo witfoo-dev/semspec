@@ -59,23 +59,23 @@ func TestFilterTools_Tester(t *testing.T) {
 
 func TestFilterTools_Reviewer(t *testing.T) {
 	allTools := []string{
-		"bash", "submit_work", "ask_question",
+		"bash", "submit_work", "submit_review", "ask_question",
 		"graph_search", "graph_query",
 		"review_scenario", "decompose_task",
 	}
 
 	tools := FilterTools(allTools, RoleReviewer)
 
-	// Reviewer gets: bash, submit_work, graph_search, graph_query
-	want := []string{"bash", "submit_work", "graph_search", "graph_query"}
+	// Reviewer gets: bash, submit_review, graph_search, graph_query
+	want := []string{"bash", "submit_review", "graph_search", "graph_query"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
 			t.Errorf("reviewer should have %q", w)
 		}
 	}
 
-	// Reviewer does NOT get: ask_question, review_scenario, decompose_task
-	deny := []string{"ask_question", "review_scenario", "decompose_task"}
+	// Reviewer does NOT get: submit_work, ask_question, review_scenario, decompose_task
+	deny := []string{"submit_work", "ask_question", "review_scenario", "decompose_task"}
 	for _, d := range deny {
 		if slices.Contains(tools, d) {
 			t.Errorf("reviewer should NOT have %q", d)

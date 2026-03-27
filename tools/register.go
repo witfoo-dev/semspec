@@ -55,9 +55,10 @@ func RegisterAgenticTools(deps AgenticToolDeps) {
 	bashExec := bash.NewExecutor(repoRoot, os.Getenv("SANDBOX_URL"))
 	_ = agentictools.RegisterTool("bash", bashExec)
 
-	// submit_work — terminal tool (StopLoop=true).
+	// Terminal tools (StopLoop=true).
 	termExec := terminal.NewExecutor()
 	_ = agentictools.RegisterTool("submit_work", termExec)
+	_ = agentictools.RegisterTool("submit_review", termExec)
 
 	// decompose_task — validates LLM-provided TaskDAG.
 	decomposeExec := decompose.NewExecutor()

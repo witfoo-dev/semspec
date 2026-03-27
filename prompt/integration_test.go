@@ -15,7 +15,7 @@ import (
 
 // allSemspecTools simulates the full tool list from agentictools.ListRegisteredTools().
 var allSemspecTools = []string{
-	"bash", "submit_work", "ask_question",
+	"bash", "submit_work", "submit_review", "ask_question",
 	"graph_search", "graph_query", "graph_summary",
 	"web_search", "http_request",
 	"review_scenario",

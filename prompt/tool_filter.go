@@ -29,7 +29,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"bash", "submit_work", "ask_question"},
 		},
 		RoleReviewer: {
-			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
+			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query"},
 		},
 
 		// --- Planning roles ---
@@ -65,13 +65,13 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// --- Scenario-level review ---
 
 		RoleScenarioReviewer: {
-			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
+			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query"},
 		},
 
 		// --- Plan-level rollup reviewer (read-only) ---
 
 		RolePlanRollupReviewer: {
-			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
+			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query"},
 		},
 
 		// --- Deprecated: developer gets bash + agentic tools for backward compat ---
