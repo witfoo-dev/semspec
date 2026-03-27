@@ -1,4 +1,5 @@
 import { browser } from '$app/environment';
+import { untrack } from 'svelte';
 import type {
 	FeedEvent,
 	PlanSSEPayload,
@@ -38,32 +39,38 @@ class FeedStore {
 	connectPlan(slug: string): void {
 		if (!browser) return;
 
-		// Disconnect previous if different plan
-		if (this.currentSlug && this.currentSlug !== slug) {
-			this.disconnectPlan();
-		}
-		if (this.currentSlug === slug && this.planSSE) return; // already connected
+		// untrack prevents callers' $effect from tracking our internal $state reads.
+		// Without this, reading this.currentSlug creates a dependency cycle:
+		// effect reads state → connect writes state → effect re-runs → cleanup writes state → loop.
+		untrack(() => {
+			if (this.currentSlug && this.currentSlug !== slug) {
+				this.disconnectPlan();
+			}
+			if (this.currentSlug === slug && this.planSSE) return;
 
-		this.currentSlug = slug;
-		this.lastPlanStage = null;
-		this.seenQuestionIds.clear();
+			this.currentSlug = slug;
+			this.lastPlanStage = null;
+			this.seenQuestionIds.clear();
 
-		// Only connect plan SSE initially. Execution SSE connects lazily
-		// when the plan reaches execution stage — avoids consuming browser
-		// connections (HTTP/1.1 limit of 6 per origin) during planning phase.
-		this.connectPlanSSE(slug);
-		this.connected = true;
+			// Only connect plan SSE initially. Execution SSE connects lazily
+			// when the plan reaches execution stage — avoids consuming browser
+			// connections (HTTP/1.1 limit of 6 per origin) during planning phase.
+			this.connectPlanSSE(slug);
+			this.connected = true;
+		});
 	}
 
 	disconnectPlan(): void {
-		this.planSSE?.close();
-		this.planSSE = null;
-		this.execSSE?.close();
-		this.execSSE = null;
-		this.connected = false;
-		this.currentSlug = null;
-		this.lastPlanStage = null;
-		this.seenQuestionIds.clear();
+		untrack(() => {
+			this.planSSE?.close();
+			this.planSSE = null;
+			this.execSSE?.close();
+			this.execSSE = null;
+			this.connected = false;
+			this.currentSlug = null;
+			this.lastPlanStage = null;
+			this.seenQuestionIds.clear();
+		});
 	}
 
 	/** Inject a question event (called from outside when questionsStore updates) */

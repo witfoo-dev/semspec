@@ -12,6 +12,9 @@ import { startExecutionButton, planListItem } from './helpers/selectors';
  *   Round 2: scenarios_generated → scenarios_reviewed (pause) → human clicks "Approve & Continue" → ready_for_execution
  *
  * Then: Start Execution → implementing → complete → Done filter
+ *
+ * Pattern: each test does page.goto() for fresh SSR. Button clicks use
+ * waitForResponse to confirm the API call completed before asserting UI state.
  */
 test.describe('@t1 @happy-path plan-journey', () => {
 	const mockLLM = new MockLLMClient();
@@ -42,11 +45,15 @@ test.describe('@t1 @happy-path plan-journey', () => {
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
-		await page.getByRole('button', { name: /Create Requirements/i }).first().click();
+		// Click "Create Requirements" and wait for the promote API response
+		const createReqBtn = page.getByRole('button', { name: /Create Requirements/i }).first();
+		await Promise.all([
+			page.waitForResponse((r) => r.url().includes('/promote') && r.status() === 200),
+			createReqBtn.click()
+		]);
 
-		// Cascade: approved → requirements_generated → scenarios_generated → scenarios_reviewed
-		// With mock LLM the cascade can complete before the SSE connection is established,
-		// so we poll the API and reload if the stage advances before the UI catches up.
+		// Cascade runs (mock LLM is fast). Wait for UI to show "Approve & Continue",
+		// or poll API and reload if SSE missed the events.
 		const start = Date.now();
 		while (Date.now() - start < 60000) {
 			const approveBtn = page.getByRole('button', { name: /Approve & Continue/i });
@@ -71,6 +78,7 @@ test.describe('@t1 @happy-path plan-journey', () => {
 	});
 
 	test('requirements panel shows active requirements', async ({ page }) => {
+		// Fresh SSR navigation — load function fetches current data
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
@@ -85,8 +93,17 @@ test.describe('@t1 @happy-path plan-journey', () => {
 
 		const approveBtn = page.getByRole('button', { name: /Approve & Continue/i });
 		await expect(approveBtn).toBeVisible();
-		await approveBtn.click();
 
+		// Click and wait for the promote API response to confirm it succeeded
+		const [response] = await Promise.all([
+			page.waitForResponse((r) => r.url().includes('/promote') && r.status() === 200),
+			approveBtn.click()
+		]);
+		const body = await response.json();
+		console.log(`[journey] Promote response: ${response.status()} stage=${body.stage}`);
+
+		// After promote completes, invalidation re-runs the load function.
+		// Wait for the "Start Execution" button to appear.
 		await expect(startExecutionButton(page)).toBeVisible({ timeout: 15000 });
 
 		const plan = await getPlan(slug);
@@ -98,8 +115,14 @@ test.describe('@t1 @happy-path plan-journey', () => {
 		await waitForHydration(page);
 
 		await expect(startExecutionButton(page)).toBeVisible();
-		await startExecutionButton(page).click();
 
+		// Click and wait for the execute API response
+		await Promise.all([
+			page.waitForResponse((r) => r.url().includes('/execute') && r.status() === 202),
+			startExecutionButton(page).click()
+		]);
+
+		// Poll for stage advancement
 		const start = Date.now();
 		let plan = await getPlan(slug);
 		while (plan.stage === 'ready_for_execution' && Date.now() - start < 30000) {
