@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/c360studio/semspec/pkg/paths"
 	"github.com/c360studio/semspec/workflow"
@@ -781,10 +782,6 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 
 // handleExecutePlan handles POST /plan-api/plans/{slug}/execute.
 func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, slug string) {
-	c.mu.RLock()
-	c.mu.RUnlock()
-
-	// Create trace context early for consistent usage
 	tc := natsclient.NewTraceContext()
 	ctx := natsclient.ContextWithTrace(r.Context(), tc)
 
@@ -799,24 +796,18 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 		return
 	}
 
-	// Plan must be in ready_for_execution to start execution.
-	// The full pipeline is: approved → requirements_generated → scenarios_generated → ready_for_execution → implementing
 	effectiveStatus := plan.EffectiveStatus()
 	if effectiveStatus != workflow.StatusReadyForExecution {
 		http.Error(w, fmt.Sprintf("Plan must be in ready_for_execution status to execute (current: %s)", effectiveStatus), http.StatusBadRequest)
 		return
 	}
 
-	// Transition plan status to implementing before triggering execution.
-	// This must happen before the publish so that subsequent GET requests
-	// see the correct stage (determinePlanStage derives from Status).
 	if err := c.setPlanStatusCached(ctx, plan, workflow.StatusImplementing); err != nil {
 		c.logger.Error("Failed to set plan status to implementing", "slug", slug, "error", err)
 		http.Error(w, "Failed to update plan status", http.StatusInternalServerError)
 		return
 	}
 
-	// Trigger scenario orchestration for execution.
 	requestID := uuid.New().String()
 	subject := fmt.Sprintf("scenario.orchestrate.%s", plan.Slug)
 
@@ -834,8 +825,15 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 		return
 	}
 
-	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
-		c.logger.Error("Failed to trigger execution", "error", err)
+	// Detach from request cancellation — the JetStream ack round-trip must
+	// complete even if the browser drops the connection. WithoutCancel
+	// preserves trace values but won't cancel when the client disconnects.
+	pubCtx, pubCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer pubCancel()
+
+	if err := c.natsClient.PublishToStream(pubCtx, subject, data); err != nil {
+		c.logger.Error("Failed to trigger execution, rolling back status", "slug", slug, "error", err)
+		_ = c.setPlanStatusCached(pubCtx, plan, workflow.StatusReadyForExecution)
 		http.Error(w, "Failed to start execution", http.StatusInternalServerError)
 		return
 	}

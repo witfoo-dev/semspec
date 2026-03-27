@@ -1,6 +1,7 @@
 package planmanager
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -478,6 +479,7 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 	c.logger.Info("Change proposal accepted via REST API", "slug", slug, "proposal_id", proposalID)
 
 	// Publish cascade request to JetStream for async processing by change-proposal-handler.
+	// Detach from request cancellation — the ack round-trip must complete.
 	if c.natsClient != nil {
 		cascadeReq := &payloads.ChangeProposalCascadeRequest{
 			ProposalID: proposalID,
@@ -487,10 +489,14 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 		cascadeData, err := json.Marshal(baseMsg)
 		if err != nil {
 			c.logger.Error("Failed to marshal cascade request", "proposal_id", proposalID, "error", err)
-		} else if err := c.natsClient.PublishToStream(r.Context(), "workflow.trigger.change-proposal-cascade", cascadeData); err != nil {
-			c.logger.Error("Failed to publish cascade request", "proposal_id", proposalID, "error", err)
 		} else {
-			c.logger.Info("Published cascade request", "slug", slug, "proposal_id", proposalID)
+			pubCtx, pubCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+			defer pubCancel()
+			if err := c.natsClient.PublishToStream(pubCtx, "workflow.trigger.change-proposal-cascade", cascadeData); err != nil {
+				c.logger.Error("Failed to publish cascade request", "proposal_id", proposalID, "error", err)
+			} else {
+				c.logger.Info("Published cascade request", "slug", slug, "proposal_id", proposalID)
+			}
 		}
 	}
 
