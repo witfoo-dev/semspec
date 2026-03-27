@@ -18,7 +18,6 @@
 	import { derivePlanPipeline, getStageLabel } from '$lib/types/plan';
 	import { graphStore } from '$lib/stores/graphStore.svelte';
 	import type { GraphStoreAdapter } from '$lib/stores/graphStore.svelte';
-	import { activityStore } from '$lib/stores/activity.svelte';
 	import { graphApi } from '$lib/services/graphApi';
 	import { transformPathSearchResult, transformGlobalSearchResult } from '$lib/services/graphTransform';
 	import type { ClassificationMeta } from '$lib/api/graph-types';
@@ -211,29 +210,21 @@
 		await invalidate('app:plans');
 	}
 
-	// SSE-triggered invalidation: when a loop event fires for this plan, re-run the load function.
+	// Plan SSE: subscribe to plan-specific state changes.
+	// GET /plan-manager/plans/{slug}/stream emits plan_updated events with full PlanWithStatus
+	// (including stage). This covers cascade transitions that the activity SSE doesn't.
 	$effect(() => {
 		const currentSlug = slug;
-		const unsubscribe = activityStore.onEvent((event) => {
-			if (event.type !== 'loop_updated' && event.type !== 'loop_completed') return;
-			if (!event.data || !currentSlug) return;
-			try {
-				const loopData = JSON.parse(event.data);
-				if (loopData.workflow_slug === currentSlug) {
-					invalidate('app:plans');
-				}
-			} catch {
-				// event.data wasn't JSON — ignore
-			}
-		});
-		return unsubscribe;
-	});
+		if (!currentSlug || typeof window === 'undefined') return;
 
-	// TODO: Cascade processors (requirement-generator, scenario-generator) run as NATS
-	// consumers, not agentic loops — they don't fire SSE events on the activity stream.
-	// The UI has no real-time signal when the plan advances through cascade stages
-	// (approved → requirements_generated → scenarios_generated → scenarios_reviewed).
-	// Blocked on: backend plan status SSE (see http_sse.go in plan-manager).
+		const sse = new EventSource(`/plan-manager/plans/${currentSlug}/stream`);
+
+		sse.addEventListener('plan_updated', () => {
+			invalidate('app:plans');
+		});
+
+		return () => sse.close();
+	});
 </script>
 
 <svelte:head>

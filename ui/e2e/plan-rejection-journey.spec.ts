@@ -33,7 +33,7 @@ test.describe('@t1 @rejection plan-rejection-journey', () => {
 		if (slug) await deletePlan(slug).catch(() => {});
 	});
 
-	test('approve triggers rejection then recovery to scenarios_generated', async ({ page }) => {
+	test('approve triggers rejection then recovery to scenarios_reviewed', async ({ page }) => {
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
@@ -46,7 +46,7 @@ test.describe('@t1 @rejection plan-rejection-journey', () => {
 
 		const plan = await getPlan(slug);
 		expect(plan.approved).toBe(true);
-		expect(plan.stage).toBe('scenarios_generated');
+		expect(plan.stage).toBe('scenarios_reviewed');
 	});
 
 	test('second promote reaches ready_for_execution', async () => {
