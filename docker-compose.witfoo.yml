@@ -20,6 +20,10 @@ services:
     ports:
       - "${LISTEN_IP:-0.0.0.0}:${SEMSPEC_SANDBOX_PORT:-8890}:8090"
 
+  semspec:
+    volumes:
+      - ${SEMSPEC_REPO:-../../}:/workspace:ro
+
   ui:
     build:
       context: ./ui
