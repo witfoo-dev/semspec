@@ -156,4 +156,27 @@ test.describe('@t1 @happy-path plan-journey', () => {
 		await page.getByRole('radio', { name: 'Done' }).click();
 		await expect(planListItem(page, slug)).toBeVisible();
 	});
+
+	test('trajectories exist with steps after execution', async ({ page }) => {
+		// Loops should exist from the execution phase (tester, builder, reviewer, decomposer)
+		const loopsRes = await fetch('http://localhost:3000/agentic-dispatch/loops');
+		const loops = await loopsRes.json();
+		expect(loops.length).toBeGreaterThan(0);
+		console.log(`[journey] ${loops.length} loops after execution`);
+
+		// Each loop should have trajectory data with steps
+		const loopId = loops[0].loop_id;
+		const trajRes = await fetch(`http://localhost:3000/agentic-loop/trajectories/${loopId}`);
+		const traj = await trajRes.json();
+		expect(traj.steps?.length).toBeGreaterThan(0);
+		console.log(`[journey] Loop ${loopId.slice(0, 8)} has ${traj.steps.length} steps`);
+
+		// Verify trajectory detail page renders
+		await page.goto(`/trajectories/${loopId}`);
+		await waitForHydration(page);
+
+		await expect(page.getByTestId('trajectory-detail-page')).toBeVisible();
+		await expect(page.getByTestId('trajectory-id')).toContainText(loopId);
+		await expect(page.getByText('Steps', { exact: true })).toBeVisible();
+	});
 });
