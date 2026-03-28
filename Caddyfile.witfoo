@@ -1,0 +1,76 @@
+# WitFoo Caddyfile override — fixes upstream port mismatches
+# Gateway routes: graph-gateway on semspec:8080 (not 8082), UI on ui:8080 (not 3000)
+
+:8080 {
+    # Plan Manager
+    handle /plan-manager/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Execution Manager
+    handle /execution-manager/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Agentic dispatch
+    handle /agentic-dispatch/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Agentic Loop
+    handle /agentic-loop/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Context builder
+    handle /context-builder/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Project Manager
+    handle /project-manager/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Message logger
+    handle /message-logger/* {
+        reverse_proxy semspec:8080
+    }
+
+    # GraphQL (graph-gateway runs on 8080 with standalone_server=false)
+    handle /graphql {
+        reverse_proxy semspec:8080
+    }
+
+    # Graph gateway REST endpoints
+    handle /graph-gateway/* {
+        reverse_proxy semspec:8080
+    }
+
+    # MCP endpoint
+    handle /mcp {
+        reverse_proxy semspec:8080
+    }
+
+    handle /health {
+        reverse_proxy semspec:8080
+    }
+
+    handle /readyz {
+        reverse_proxy semspec:8080
+    }
+
+    handle /metrics {
+        reverse_proxy semspec:8080
+    }
+
+    # Components API
+    handle /components/* {
+        reverse_proxy semspec:8080
+    }
+
+    # All other routes to UI SvelteKit SSR server (Node on ui:3000)
+    handle {
+        reverse_proxy ui:3000
+    }
+}

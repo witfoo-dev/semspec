@@ -20,6 +20,13 @@ services:
     ports:
       - "${LISTEN_IP:-0.0.0.0}:${SEMSPEC_SANDBOX_PORT:-8890}:8090"
 
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile.witfoo
+
   gateway:
     ports: !override
       - "${LISTEN_IP:-0.0.0.0}:${SEMSPEC_GATEWAY_PORT:-8880}:8080"
+    volumes:
+      - ./Caddyfile.witfoo:/etc/caddy/Caddyfile:ro
