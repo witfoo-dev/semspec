@@ -75,9 +75,16 @@
 				{@const loopCount = (plan.active_loops ?? []).length}
 				<a href="/plans/{plan.slug}" class="plan-item" class:draft={!plan.approved}>
 					<div class="item-top">
-						<span class="slug">{plan.slug}</span>
+						<span class="plan-title">
+							{plan.goal
+								? plan.goal
+								: plan.title.length > 60
+									? plan.title.slice(0, 60) + '…'
+									: plan.title}
+						</span>
 						<span class="stage" data-stage={plan.stage}>{getStageLabel(plan.stage)}</span>
 					</div>
+					<div class="plan-slug">{plan.slug}</div>
 					{#if plan.approved}
 						<PipelineIndicator
 							plan={pipeline.plan}
@@ -191,13 +198,20 @@
 		margin-bottom: 2px;
 	}
 
-	.slug {
+	.plan-title {
 		font-size: var(--font-size-sm);
 		font-weight: var(--font-weight-medium);
 		color: var(--color-text-primary);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.plan-slug {
+		font-size: 10px;
+		color: var(--color-text-muted);
+		font-family: var(--font-mono, monospace);
+		margin-top: 1px;
 	}
 
 	.stage {
