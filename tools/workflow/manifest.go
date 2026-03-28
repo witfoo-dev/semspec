@@ -256,50 +256,86 @@ func isExcludedPredicate(predicate string) bool {
 	return false
 }
 
-// FormatFederatedSummary produces a compacted multi-source knowledge summary
-// for injection into agent system prompts. Each source gets one line showing
-// domain breakdowns. This is the "tier 1" of the 3-tier knowledge access
-// pattern — agents see what's available without any tool calls.
+// FormatFederatedSummary produces a rich multi-source knowledge summary for
+// injection into agent system prompts. Shows entity ID format, per-domain type
+// breakdowns, and query guidance with prefix examples so agents can construct
+// effective graph queries.
 func FormatFederatedSummary(summaries []graph.SourceSummary) string {
 	if len(summaries) == 0 {
 		return ""
 	}
 
 	var sb strings.Builder
-	wrote := false
+	totalEntities := int64(0)
+	activeSources := 0
 
+	for _, s := range summaries {
+		if s.TotalEntities > 0 {
+			totalEntities += s.TotalEntities
+			activeSources++
+		}
+	}
+	if activeSources == 0 {
+		return ""
+	}
+
+	sb.WriteString("--- Knowledge Graph ---\n")
+	sb.WriteString(fmt.Sprintf("%d entities indexed from %d source", totalEntities, activeSources))
+	if activeSources != 1 {
+		sb.WriteByte('s')
+	}
+	sb.WriteString(".\n\n")
+	sb.WriteString("Entity IDs use 6-part dotted notation: org.platform.domain.system.type.instance\n\n")
+
+	// Per-source section with domain/type breakdown.
+	var firstPrefix string
 	for _, s := range summaries {
 		if s.TotalEntities == 0 {
 			continue
 		}
-		if !wrote {
-			sb.WriteString("--- Knowledge Sources ---\n")
-			wrote = true
-		}
-		// Format: [source] N entities (domain: count, domain: count)
-		var domains []string
-		for _, d := range s.Domains {
-			if d.EntityCount > 0 {
-				domains = append(domains, fmt.Sprintf("%s: %d", d.Domain, d.EntityCount))
-			}
-		}
-		sort.Strings(domains)
 
 		name := s.Source
 		if name == "" {
 			name = "unknown"
 		}
-		sb.WriteString(fmt.Sprintf("  [%s] %d entities (%s)\n", name, s.TotalEntities, strings.Join(domains, ", ")))
+
+		// Show entity ID format as prefix if available.
+		if s.EntityIDFormat != "" {
+			sb.WriteString(fmt.Sprintf("%s (prefix: %s):\n", name, s.EntityIDFormat))
+			if firstPrefix == "" {
+				firstPrefix = s.EntityIDFormat
+			}
+		} else {
+			sb.WriteString(fmt.Sprintf("%s:\n", name))
+		}
+
+		// Domain breakdown with entity types.
+		for _, d := range s.Domains {
+			if d.EntityCount == 0 {
+				continue
+			}
+			if len(d.Types) > 0 {
+				var typeParts []string
+				for _, t := range d.Types {
+					typeParts = append(typeParts, fmt.Sprintf("%s (%d)", t.Type, t.Count))
+				}
+				sb.WriteString(fmt.Sprintf("  %s: %s\n", d.Domain, strings.Join(typeParts, ", ")))
+			} else {
+				sb.WriteString(fmt.Sprintf("  %s: %d entities\n", d.Domain, d.EntityCount))
+			}
+		}
+		sb.WriteByte('\n')
 	}
 
-	if !wrote {
-		return ""
+	// Query guidance with prefix example.
+	prefixExample := firstPrefix
+	if prefixExample == "" {
+		prefixExample = "org.platform.domain"
 	}
-
-	sb.WriteString("\nThe graph indexes project code, tests, and documentation. Use it to:\n")
-	sb.WriteString("- Find existing implementations before writing new code (graph_search)\n")
-	sb.WriteString("- Discover coding patterns, conventions, and dependencies\n")
-	sb.WriteString("- Check if similar functionality already exists\n")
+	sb.WriteString("Query with graph_search:\n")
+	sb.WriteString(fmt.Sprintf("  - Use \"prefix\" to scope by source (e.g. %q)\n", prefixExample))
+	sb.WriteString("  - Use \"predicate\" for targeted property lookups (e.g. \"source.doc.content\")\n")
+	sb.WriteString("  - Use \"search\" for natural language questions about the codebase\n")
 	sb.WriteString("If graph results are empty or unhelpful, fall back to bash — do not retry the same query.\n")
 
 	return sb.String()
