@@ -76,11 +76,7 @@
 				<a href="/plans/{plan.slug}" class="plan-item" class:draft={!plan.approved}>
 					<div class="item-top">
 						<span class="plan-title">
-							{plan.goal
-								? plan.goal
-								: plan.title.length > 60
-									? plan.title.slice(0, 60) + '…'
-									: plan.title}
+							{plan.title.length > 60 ? plan.title.slice(0, 60) + '…' : plan.title}
 						</span>
 						<span class="stage" data-stage={plan.stage}>{getStageLabel(plan.stage)}</span>
 					</div>
