@@ -20,8 +20,8 @@ type TaskNode struct {
 	Prompt      string   `json:"prompt"`
 	Role        string   `json:"role"`
 	DependsOn   []string `json:"depends_on"`
-	FileScope   []string `json:"file_scope"`              // Files or globs this task may touch
-	ScenarioIDs []string `json:"scenario_ids,omitempty"`   // Scenarios this node addresses (for retry routing)
+	FileScope   []string `json:"file_scope"`             // Files or globs this task may touch
+	ScenarioIDs []string `json:"scenario_ids,omitempty"` // Scenarios this node addresses (for retry routing)
 }
 
 // Validate checks the DAG for structural correctness.

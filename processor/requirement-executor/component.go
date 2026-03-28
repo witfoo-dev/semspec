@@ -1167,11 +1167,11 @@ func (c *Component) buildRequirementReviewContext(exec *requirementExecution) *p
 	}
 
 	return &prompt.AssemblyContext{
-		Role:                 prompt.RoleScenarioReviewer,
-		Provider:             resolveProvider(exec.Model),
-		Domain:               "software",
-		AvailableTools:       prompt.FilterTools(availableToolNames(), prompt.RoleScenarioReviewer),
-		SupportsTools:        true,
+		Role:                  prompt.RoleScenarioReviewer,
+		Provider:              resolveProvider(exec.Model),
+		Domain:                "software",
+		AvailableTools:        prompt.FilterTools(availableToolNames(), prompt.RoleScenarioReviewer),
+		SupportsTools:         true,
 		ScenarioReviewContext: rc,
 	}
 }
