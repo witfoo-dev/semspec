@@ -122,16 +122,17 @@ The files_modified array MUST reflect actual files you wrote via bash.`,
 				sb.WriteString(`BEFORE writing code, you MUST use bash (cat, ls) to understand the existing codebase. Do not write code based on assumptions alone — read the relevant files first.
 
 `)
-				// Structural checklist — use project-specific checks when available.
-				if cl := formatChecklist(ctx.TaskContext.Checklist); cl != "" {
-					sb.WriteString("STRUCTURAL CHECKLIST — These checks will run automatically after you submit:\n")
-					sb.WriteString(cl)
-				} else {
-					sb.WriteString(`STRUCTURAL CHECKLIST — You will be auto-rejected if ANY item fails:
+				// Behavioral rules (always apply regardless of project checklist).
+				sb.WriteString(`CODE QUALITY RULES — You will be auto-rejected if ANY item fails:
 - All code changes must include corresponding tests. No untested code.
 - No hardcoded API keys, passwords, or secrets in source code.
 - All errors must be handled or explicitly propagated. No silently swallowed errors.
-- No debug prints, TODO hacks, or commented-out code left in the submission.`)
+- No debug prints, TODO hacks, or commented-out code left in the submission.
+`)
+				// Project-specific quality gates (additive — these commands run after submit).
+				if cl := formatChecklist(ctx.TaskContext.Checklist); cl != "" {
+					sb.WriteString("\nPROJECT QUALITY GATES — These commands run automatically after you submit:\n")
+					sb.WriteString(cl)
 				}
 
 				return sb.String()
@@ -273,17 +274,18 @@ You receive:
 3. Only then start writing implementation code via bash
 
 `)
-				// Structural checklist — use project-specific checks when available.
-				if cl := formatChecklist(ctx.TaskContext.Checklist); cl != "" {
-					sb.WriteString("STRUCTURAL CHECKLIST — These checks will run automatically after you submit:\n")
-					sb.WriteString(cl)
-					sb.WriteString("Ensure your code passes ALL required checks before calling submit_work.")
-				} else {
-					sb.WriteString(`STRUCTURAL CHECKLIST — You will be auto-rejected if ANY item fails:
+				// Behavioral rules (always apply).
+				sb.WriteString(`CODE QUALITY RULES — You will be auto-rejected if ANY item fails:
 - No hardcoded API keys, passwords, or secrets in source code
 - All errors must be handled or explicitly propagated
 - No debug prints, TODO hacks, or commented-out code in the submission
-- Do NOT modify files outside the declared file scope`)
+- Do NOT modify files outside the declared file scope
+`)
+				// Project-specific quality gates (additive).
+				if cl := formatChecklist(ctx.TaskContext.Checklist); cl != "" {
+					sb.WriteString("\nPROJECT QUALITY GATES — These commands run automatically after you submit:\n")
+					sb.WriteString(cl)
+					sb.WriteString("Ensure your code passes ALL required checks before calling submit_work.")
 				}
 
 				return sb.String()
