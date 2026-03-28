@@ -3,7 +3,7 @@
 **Severity**: High — causes unnecessary validation failures and builder retries
 **Component**: `execution-manager`, `prompt/domain/software.go`
 **Found during**: UI E2E T2 @easy with Gemini (2026-03-28)
-**Status**: OPEN
+**Status**: FIXED
 
 ## Summary
 

@@ -83,6 +83,11 @@ type TaskContext struct {
 	// IsRetry indicates this dispatch follows a previous failed attempt.
 	// When true, the workspace may contain files from the previous attempt.
 	IsRetry bool
+
+	// Checklist carries the project-specific quality gate checks from
+	// .semspec/checklist.json. When non-empty, prompt fragments inject the
+	// actual check names and commands instead of a hardcoded generic list.
+	Checklist []workflow.Check
 }
 
 // PlanContext carries data for planner prompts.

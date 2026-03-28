@@ -173,6 +173,11 @@ type Component struct {
 	// Provides O(1) completion routing from agent loop events to executions.
 	taskRouting sscache.Cache[string]
 
+	// checklist holds the project-specific quality gate checks from .semspec/checklist.json.
+	// Loaded once at startup; injected into TaskContext so builder/tester prompts show
+	// the actual checks that structural-validator will run.
+	checklist []workflow.Check
+
 	// Lifecycle
 	consumerInfos []consumerInfo
 	// shutdownCancel is cancelled in Stop() to unblock awaitIndexing goroutines.
@@ -466,6 +471,17 @@ func (c *Component) initAgentGraph() {
 	}
 
 	c.modelRegistry = model.NewDefaultRegistry()
+
+	// Load project checklist so builder/tester prompts show the actual quality gates.
+	checklistPath := filepath.Join(repoRoot, ".semspec", "checklist.json")
+	if data, err := os.ReadFile(checklistPath); err == nil {
+		var cl workflow.Checklist
+		if err := json.Unmarshal(data, &cl); err == nil && len(cl.Checks) > 0 {
+			c.checklist = cl.Checks
+			c.logger.Info("Loaded project checklist for prompt injection", "checks", len(cl.Checks))
+		}
+	}
+
 	c.logger.Info("Agent roster initialized")
 
 	c.seedTeams()
@@ -1632,6 +1648,7 @@ func (c *Component) buildAssemblyContext(role prompt.Role, exec *taskExecution) 
 			Feedback:      exec.Feedback,
 			Iteration:     exec.Iteration + 1, // 1-based for display
 			MaxIterations: exec.MaxIterations,
+			Checklist:     c.checklist,
 		}
 	}
 

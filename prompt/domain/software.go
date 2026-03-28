@@ -11,6 +11,23 @@ import (
 	"github.com/c360studio/semspec/workflow/prompts"
 )
 
+// formatChecklist renders project-specific quality gate checks for prompt injection.
+// Returns the formatted list, or empty string if no checks are available.
+func formatChecklist(checks []workflow.Check) string {
+	if len(checks) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, ch := range checks {
+		req := ""
+		if ch.Required {
+			req = " [required]"
+		}
+		fmt.Fprintf(&sb, "- %s: %s (%s)%s\n", ch.Name, ch.Command, ch.Description, req)
+	}
+	return sb.String()
+}
+
 // Software returns all prompt fragments for the software engineering domain.
 func Software() []*prompt.Fragment {
 	base := []*prompt.Fragment{
@@ -105,12 +122,17 @@ The files_modified array MUST reflect actual files you wrote via bash.`,
 				sb.WriteString(`BEFORE writing code, you MUST use bash (cat, ls) to understand the existing codebase. Do not write code based on assumptions alone — read the relevant files first.
 
 `)
-				// Structural checklist.
-				sb.WriteString(`STRUCTURAL CHECKLIST — You will be auto-rejected if ANY item fails:
+				// Structural checklist — use project-specific checks when available.
+				if cl := formatChecklist(ctx.TaskContext.Checklist); cl != "" {
+					sb.WriteString("STRUCTURAL CHECKLIST — These checks will run automatically after you submit:\n")
+					sb.WriteString(cl)
+				} else {
+					sb.WriteString(`STRUCTURAL CHECKLIST — You will be auto-rejected if ANY item fails:
 - All code changes must include corresponding tests. No untested code.
 - No hardcoded API keys, passwords, or secrets in source code.
 - All errors must be handled or explicitly propagated. No silently swallowed errors.
 - No debug prints, TODO hacks, or commented-out code left in the submission.`)
+				}
 
 				return sb.String()
 			},
@@ -250,11 +272,19 @@ You receive:
 2. Read existing files in the scope to understand current patterns
 3. Only then start writing implementation code via bash
 
-STRUCTURAL CHECKLIST — You will be auto-rejected if ANY item fails:
+`)
+				// Structural checklist — use project-specific checks when available.
+				if cl := formatChecklist(ctx.TaskContext.Checklist); cl != "" {
+					sb.WriteString("STRUCTURAL CHECKLIST — These checks will run automatically after you submit:\n")
+					sb.WriteString(cl)
+					sb.WriteString("Ensure your code passes ALL required checks before calling submit_work.")
+				} else {
+					sb.WriteString(`STRUCTURAL CHECKLIST — You will be auto-rejected if ANY item fails:
 - No hardcoded API keys, passwords, or secrets in source code
 - All errors must be handled or explicitly propagated
 - No debug prints, TODO hacks, or commented-out code in the submission
 - Do NOT modify files outside the declared file scope`)
+				}
 
 				return sb.String()
 			},
