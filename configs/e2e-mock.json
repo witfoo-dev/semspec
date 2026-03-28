@@ -491,7 +491,8 @@
         "timeout_seconds": 600,
         "model": "mock-coder",
         "decomposer_model": "mock-decomposer",
-        "sandbox_url": "http://sandbox:8090"
+        "sandbox_url": "http://sandbox:8090",
+        "max_requirement_retries": 1
       }
     },
     "question-answerer": {
