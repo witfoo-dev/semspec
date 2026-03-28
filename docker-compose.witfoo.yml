@@ -1,0 +1,25 @@
+# WitFoo Analytics port remapping overlay for semspec
+#
+# Resolves port conflicts with analytics stack:
+#   8080->8880 (gateway), 4222->4922 (NATS), 8222->8922 (NATS monitor),
+#   8090->8890 (sandbox)
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.witfoo.yml up -d
+#
+# Or via the convenience script:
+#   ../../scripts/dev/semspec-launch.sh
+
+services:
+  nats:
+    ports: !override
+      - "${LISTEN_IP:-0.0.0.0}:${SEMSPEC_NATS_PORT:-4922}:4222"
+      - "${LISTEN_IP:-0.0.0.0}:${SEMSPEC_NATS_MONITOR_PORT:-8922}:8222"
+
+  sandbox:
+    ports:
+      - "${LISTEN_IP:-0.0.0.0}:${SEMSPEC_SANDBOX_PORT:-8890}:8090"
+
+  gateway:
+    ports: !override
+      - "${LISTEN_IP:-0.0.0.0}:${SEMSPEC_GATEWAY_PORT:-8880}:8080"
