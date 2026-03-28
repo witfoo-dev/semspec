@@ -4,8 +4,6 @@ package executionmanager
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"testing"
 	"time"
@@ -116,8 +114,7 @@ func TestIntegration_TeamPipelineFullCycle(t *testing.T) {
 		return comp.triggersProcessed.Load() >= 1
 	}, "triggersProcessed should reach 1")
 
-	h1 := sha256.Sum256([]byte("team-plan-feat-001"))
-	entityID := workflow.EntityPrefix() + ".exec.task.run." + hex.EncodeToString(h1[:8])
+	entityID := workflow.TaskExecutionEntityID("team-plan", "feat-001")
 
 	// Wait for TesterTaskID to be assigned — this confirms the tester was dispatched.
 	testerTaskID := waitForExecField(t, ctx, comp, entityID, 20*time.Second, func(exec *taskExecution) string {
@@ -300,8 +297,7 @@ func TestIntegration_TeamPipeline_RedTeamFallback(t *testing.T) {
 	}
 	publishExecTrigger(t, tc, ctx, trigger)
 
-	h2 := sha256.Sum256([]byte("fallback-plan-fallback-001"))
-	entityID := workflow.EntityPrefix() + ".exec.task.run." + hex.EncodeToString(h2[:8])
+	entityID := workflow.TaskExecutionEntityID("fallback-plan", "fallback-001")
 
 	waitForExecCondition(t, ctx, 20*time.Second, func() bool {
 		return comp.triggersProcessed.Load() >= 1

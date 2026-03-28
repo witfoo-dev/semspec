@@ -20,7 +20,8 @@ import (
 // Parts are joined with a null separator to prevent collisions between
 // ("a-b", "c") and ("a", "b-c").
 //
-// Collision probability is negligible for expected volumes (~2^64 birthday bound).
+// Collision probability is negligible for expected volumes (~2^32 birthday bound
+// for 8 bytes / 16 hex chars — well above the thousands of entities we expect).
 func HashInstanceID(parts ...string) string {
 	h := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(h[:8])

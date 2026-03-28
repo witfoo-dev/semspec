@@ -215,9 +215,10 @@ func (h *Helper) RecordLoopStatus(ctx context.Context, loopID, status string) er
 	return nil
 }
 
-// GetChildren returns the loop IDs of all direct children of the given loop.
+// GetChildEntityIDs returns the entity IDs of all direct children of the given loop.
 // It reads the parent entity and scans triples for PredicateSpawned.
-func (h *Helper) GetChildren(ctx context.Context, loopID string) ([]string, error) {
+// Returns full entity IDs (not parsed instances) to avoid double-hashing.
+func (h *Helper) GetChildEntityIDs(ctx context.Context, loopID string) ([]string, error) {
 	entityID := LoopEntityID(loopID)
 
 	entry, err := h.kv.Get(ctx, entityID)
@@ -234,11 +235,10 @@ func (h *Helper) GetChildren(ctx context.Context, loopID string) ([]string, erro
 	for _, t := range entity.Triples {
 		if t.Predicate == PredicateSpawned {
 			if childEntityID, ok := t.Object.(string); ok {
-				parsed, parseErr := types.ParseEntityID(childEntityID)
-				if parseErr != nil {
-					continue
+				if _, parseErr := types.ParseEntityID(childEntityID); parseErr != nil {
+					continue // skip malformed
 				}
-				children = append(children, parsed.Instance)
+				children = append(children, childEntityID)
 			}
 		}
 	}
@@ -251,25 +251,35 @@ func (h *Helper) GetChildren(ctx context.Context, loopID string) ([]string, erro
 func (h *Helper) GetTree(ctx context.Context, rootLoopID string, maxDepth int) ([]string, error) {
 	rootEntityID := LoopEntityID(rootLoopID)
 
-	// BFS traversal
+	// BFS traversal using entity IDs directly (no double-hashing).
 	visited := map[string]bool{rootEntityID: true}
 	result := []string{rootEntityID}
-	currentLevel := []string{rootLoopID}
+	currentLevel := []string{rootEntityID}
 
 	for depth := 0; depth < maxDepth && len(currentLevel) > 0; depth++ {
 		var nextLevel []string
-		for _, lid := range currentLevel {
-			children, err := h.GetChildren(ctx, lid)
+		for _, eid := range currentLevel {
+			// Read entity directly by entity ID (already hashed).
+			entry, err := h.kv.Get(ctx, eid)
 			if err != nil {
-				// Skip nodes we can't read rather than failing the whole tree
 				continue
 			}
-			for _, childID := range children {
-				childEntityID := LoopEntityID(childID)
-				if !visited[childEntityID] {
-					visited[childEntityID] = true
-					result = append(result, childEntityID)
-					nextLevel = append(nextLevel, childID)
+			entity, err := unmarshalEntityState(entry.Value)
+			if err != nil {
+				continue
+			}
+			for _, t := range entity.Triples {
+				if t.Predicate == PredicateSpawned {
+					if childEntityID, ok := t.Object.(string); ok {
+						if _, parseErr := types.ParseEntityID(childEntityID); parseErr != nil {
+							continue
+						}
+						if !visited[childEntityID] {
+							visited[childEntityID] = true
+							result = append(result, childEntityID)
+							nextLevel = append(nextLevel, childEntityID)
+						}
+					}
 				}
 			}
 		}

@@ -322,13 +322,13 @@ func TestHelper_RecordLoopStatus(t *testing.T) {
 	}
 }
 
-func TestHelper_GetChildren(t *testing.T) {
+func TestHelper_GetChildEntityIDs(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name         string
 		loopID       string
-		setupParent  func(kv *mockKV) // pre-populate parent entity
+		setupParent  func(kv *mockKV)
 		getErr       error
 		wantChildren []string
 		wantErr      bool
@@ -345,9 +345,7 @@ func TestHelper_GetChildren(t *testing.T) {
 			wantChildren: nil,
 		},
 		{
-			// GetChildren extracts the instance segment (the 16-hex-char hash) from each
-			// spawned entity ID triple. It does NOT return the original logical ID.
-			name:   "returns loop IDs extracted from spawned triples",
+			name:   "returns full entity IDs from spawned triples",
 			loopID: "parent",
 			setupParent: func(kv *mockKV) {
 				entityID := agentgraph.LoopEntityID("parent")
@@ -363,13 +361,10 @@ func TestHelper_GetChildren(t *testing.T) {
 				data, _ := json.Marshal(entity)
 				kv.data[entityID] = data
 			},
-			// wantChildren contains the hashed instance segments parsed from the entity IDs,
-			// not the original logical IDs passed to LoopEntityID.
-			wantChildren: func() []string {
-				a, _ := agentgraph.ParseEntityID(agentgraph.LoopEntityID("child-a"))
-				b, _ := agentgraph.ParseEntityID(agentgraph.LoopEntityID("child-b"))
-				return []string{a, b}
-			}(),
+			wantChildren: []string{
+				agentgraph.LoopEntityID("child-a"),
+				agentgraph.LoopEntityID("child-b"),
+			},
 		},
 		{
 			name:    "propagates get error",
@@ -378,8 +373,6 @@ func TestHelper_GetChildren(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			// GetChildren skips triples whose Object is not a valid 6-part entity ID.
-			// For valid entity IDs it returns the hashed instance segment, not the original ID.
 			name:   "skips malformed entity IDs",
 			loopID: "parent-skip",
 			setupParent: func(kv *mockKV) {
@@ -394,11 +387,7 @@ func TestHelper_GetChildren(t *testing.T) {
 				data, _ := json.Marshal(entity)
 				kv.data[entityID] = data
 			},
-			// wantChildren is the hashed instance segment of "valid-child"'s entity ID.
-			wantChildren: func() []string {
-				inst, _ := agentgraph.ParseEntityID(agentgraph.LoopEntityID("valid-child"))
-				return []string{inst}
-			}(),
+			wantChildren: []string{agentgraph.LoopEntityID("valid-child")},
 		},
 	}
 
@@ -414,17 +403,17 @@ func TestHelper_GetChildren(t *testing.T) {
 
 			h := agentgraph.NewHelper(kv)
 
-			children, err := h.GetChildren(context.Background(), tc.loopID)
+			children, err := h.GetChildEntityIDs(context.Background(), tc.loopID)
 
 			if (err != nil) != tc.wantErr {
-				t.Fatalf("GetChildren() error = %v, wantErr %v", err, tc.wantErr)
+				t.Fatalf("GetChildEntityIDs() error = %v, wantErr %v", err, tc.wantErr)
 			}
 			if tc.wantErr {
 				return
 			}
 
 			if len(children) != len(tc.wantChildren) {
-				t.Fatalf("GetChildren() returned %d children, want %d: %v", len(children), len(tc.wantChildren), children)
+				t.Fatalf("GetChildEntityIDs() returned %d children, want %d: %v", len(children), len(tc.wantChildren), children)
 			}
 			for i, want := range tc.wantChildren {
 				if children[i] != want {
@@ -438,24 +427,9 @@ func TestHelper_GetChildren(t *testing.T) {
 func TestHelper_GetTree(t *testing.T) {
 	t.Parallel()
 
-	// GetChildren returns the hashed instance segment from each spawned entity ID
-	// triple. GetTree then passes those hash strings to LoopEntityID for the next
-	// BFS level — but the KV stores entries under LoopEntityID of the original
-	// logical ID, not of the hash. This means child lookups fail silently (the
-	// node is skipped via continue) and GetTree only ever returns the root entity
-	// ID when the KV is keyed by original logical IDs.
-	//
-	// To verify real multi-level traversal the test must store children under
-	// LoopEntityID(hash), where hash = ParseEntityID(LoopEntityID(original)).
-	root := agentgraph.LoopEntityID("root")
-
-	// Derive the entity IDs that GetTree will actually look up for the children.
-	// GetChildren returns parsed.Instance of the stored child entity ID triple.
-	// GetTree then calls LoopEntityID on that instance to form the lookup key.
-	child1Hash, _ := agentgraph.ParseEntityID(agentgraph.LoopEntityID("child-1"))
-	child2Hash, _ := agentgraph.ParseEntityID(agentgraph.LoopEntityID("child-2"))
-	child1LookupKey := agentgraph.LoopEntityID(child1Hash)
-	child2LookupKey := agentgraph.LoopEntityID(child2Hash)
+	child1EID := agentgraph.LoopEntityID("child-1")
+	child2EID := agentgraph.LoopEntityID("child-2")
+	rootEID := agentgraph.LoopEntityID("root")
 
 	tests := []struct {
 		name       string
@@ -466,32 +440,29 @@ func TestHelper_GetTree(t *testing.T) {
 		wantErr    bool
 	}{
 		{
-			// Children are stored under the double-hashed lookup keys that GetTree
-			// will construct, so the BFS traversal can actually find them.
 			name:       "returns all traversed entity IDs",
 			rootLoopID: "root",
 			maxDepth:   5,
 			setup: func(kv *mockKV) {
-				// Root references child entity IDs via their original hashed keys.
+				// Root spawns child-1 and child-2 (stored as entity IDs in triples).
 				rootEntity := &gtypes.EntityState{
-					ID: root,
+					ID: rootEID,
 					Triples: []message.Triple{
-						{Predicate: agentgraph.PredicateSpawned, Object: agentgraph.LoopEntityID("child-1")},
-						{Predicate: agentgraph.PredicateSpawned, Object: agentgraph.LoopEntityID("child-2")},
+						{Predicate: agentgraph.PredicateSpawned, Object: child1EID},
+						{Predicate: agentgraph.PredicateSpawned, Object: child2EID},
 					},
 				}
 				rootData, _ := json.Marshal(rootEntity)
-				kv.data[root] = rootData
+				kv.data[rootEID] = rootData
 
-				// Children are stored under the keys GetTree will look up after
-				// extracting the instance hash and re-applying LoopEntityID.
-				for _, lookupKey := range []string{child1LookupKey, child2LookupKey} {
-					childEntity := &gtypes.EntityState{ID: lookupKey}
+				// Children stored under their entity IDs (no double-hashing).
+				for _, eid := range []string{child1EID, child2EID} {
+					childEntity := &gtypes.EntityState{ID: eid}
 					childData, _ := json.Marshal(childEntity)
-					kv.data[lookupKey] = childData
+					kv.data[eid] = childData
 				}
 			},
-			wantIDs: []string{root, child1LookupKey, child2LookupKey},
+			wantIDs: []string{rootEID, child1EID, child2EID},
 		},
 		{
 			name:       "returns only root when no children",
